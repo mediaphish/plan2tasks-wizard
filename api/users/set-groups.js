@@ -10,7 +10,7 @@ export default async function handler(req, res) {
 
   const sb = supabaseAdmin();
 
-  // Fetch existing memberships
+  // existing memberships
   const { data: existing, error: e1 } = await sb
     .from("user_group_members")
     .select("group_id")
