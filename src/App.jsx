@@ -2,25 +2,84 @@ import React, { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Calendar, Check, ChevronLeft, ChevronRight, ClipboardCopy, Download, ListChecks, Plus, Sparkles, Wand2 } from "lucide-react";
 import { format } from "date-fns";
-
-// ====== Planner identity (edit this to your email) ======
-const PLANNER_EMAIL = "planner@yourdomain.com"; // <-- change to your email (used to filter your users)
-// ========================================================
+import { supabaseClient } from "../lib/supabase-client.js";
 
 function cn(...classes) { return classes.filter(Boolean).join(" "); }
 const THEME = { brand: "#111827", accent: "#22d3ee", accentStrong: "#06b6d4", soft: "#f3f4f6", text: "#111827", ring: "#22d3ee" };
-
 const STEPS = [
   { key: "basics", title: "Plan basics", icon: Calendar, subtitle: "Name your plan, choose dates & timezone." },
   { key: "blocks", title: "Recurring blocks", icon: ListChecks, subtitle: "Gym time, meetings, and fixed commitments." },
   { key: "tasks", title: "Add tasks", icon: Plus, subtitle: "Quickly capture what needs doing by day." },
   { key: "review", title: "Review & generate", icon: Sparkles, subtitle: "Preview, then deliver to a selected user." },
 ];
-
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
-function uid() { return Math.random().toString(36).slice(2, 10); }
+function uid(){ return Math.random().toString(36).slice(2,10); }
+function escapeICS(text){ return String(text).replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
+function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
 
-// ----- ICS generation -----
+// ---------- Auth screen (planner sign-up/sign-in) ----------
+function AuthScreen({ onSignedIn }) {
+  const [mode, setMode] = useState("signup"); // signup | signin
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState("");
+
+  async function handleSignup() {
+    setMsg("Creating account...");
+    const { data, error } = await supabaseClient.auth.signUp({ email, password: pw });
+    if (error) return setMsg("Error: " + error.message);
+    if (!data.session) { setMsg("Check your email to confirm, then sign in."); return; }
+    setMsg("Signed up!");
+    onSignedIn(data.session);
+  }
+  async function handleSignin() {
+    setMsg("Signing in...");
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
+    if (error) return setMsg("Error: " + error.message);
+    onSignedIn(data.session);
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-white to-gray-50 p-6">
+      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h1 className="text-xl font-bold mb-1">Plan2Tasks – Planner Account</h1>
+        <p className="text-sm text-gray-500 mb-4">Create your planner account, then add users and deliver tasks.</p>
+
+        <label className="block mb-2 text-sm font-medium">Email</label>
+        <input value={email} onChange={(e)=>setEmail(e.target.value)} type="email"
+          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+
+        <label className="block mb-2 text-sm font-medium">Password</label>
+        <input value={pw} onChange={(e)=>setPw(e.target.value)} type="password"
+          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+
+        {mode === "signup" ? (
+          <button onClick={handleSignup}
+            className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Create account</button>
+        ) : (
+          <button onClick={handleSignin}
+            className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Sign in</button>
+        )}
+
+        <div className="mt-3 text-xs text-gray-600">{msg}</div>
+
+        <div className="mt-4 text-xs">
+          {mode === "signup" ? (
+            <span>Already have an account?{" "}
+              <button className="text-cyan-700 underline" onClick={()=>setMode("signin")}>Sign in</button>
+            </span>
+          ) : (
+            <span>New here?{" "}
+              <button className="text-cyan-700 underline" onClick={()=>setMode("signup")}>Create an account</button>
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ICS ----------
 function toICS({ title, startDate, tasks, timezone }) {
   const dtstamp = format(new Date(), "yyyyMMdd'T'HHmmss");
   const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//Wizard//EN"];
@@ -46,8 +105,8 @@ function toICS({ title, startDate, tasks, timezone }) {
   const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
   return URL.createObjectURL(blob);
 }
-function escapeICS(text){ return String(text).replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
 
+// ---------- Small UI atoms ----------
 function Stepper({ current, onJump }) {
   return (
     <ol className="grid grid-cols-4 gap-2 mb-6">
@@ -112,7 +171,27 @@ function ActionBar({ canBack, canNext, onBack, onNext, nextLabel = "Next" }) {
   );
 }
 
+// ---------- Main ----------
 export default function Plan2TasksWizard() {
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    supabaseClient.auth.getSession().then(({ data }) => setSession(data.session || null));
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => subscription?.unsubscribe();
+  }, []);
+
+  if (!session) {
+    return <AuthScreen onSignedIn={(s)=>setSession(s)} />;
+  }
+
+  const plannerEmail = session.user?.email || "";
+
+  return <WizardApp plannerEmail={plannerEmail} onSignOut={() => supabaseClient.auth.signOut()} />;
+}
+
+// ---------- Wizard with Users-first delivery ----------
+function WizardApp({ plannerEmail, onSignOut }) {
   const [mode, setMode] = useState("wizard");
   const [step, setStep] = useState(0);
 
@@ -129,48 +208,47 @@ export default function Plan2TasksWizard() {
     { id: uid(), title: "Weekly Review", dayOffset: 4, time: "15:30", durationMins: 45, notes: "Wins, shipped, blockers." },
   ]);
 
-  // ==== NEW: Users-first state ====
   const [users, setUsers] = useState([]);                    // [{email, status, inviteLink}]
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
   const [inviteLink, setInviteLink] = useState("");
-  const [inviteStatus, setInviteStatus] = useState("");      // Working / Error / etc.
+  const [inviteStatus, setInviteStatus] = useState("");
 
-  useEffect(() => { refreshUsers(); }, []);
+  useEffect(() => { refreshUsers(); }, [plannerEmail]);
 
   async function refreshUsers() {
     try {
-      const resp = await fetch(`https://plan2tasks-wizard.vercel.app/api/users/list?plannerEmail=${encodeURIComponent(PLANNER_EMAIL)}`);
+      if (!plannerEmail) { setUsers([]); setSelectedUserEmail(""); setInviteLink(""); return; }
+      const resp = await fetch(`https://plan2tasks-wizard.vercel.app/api/users/list?plannerEmail=${encodeURIComponent(plannerEmail)}`);
       const text = await resp.text();
       let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
       if (!resp.ok) throw new Error(data.error || "Failed to load users");
       setUsers(data.users || []);
-      // Auto-select a connected user if available
       const connected = (data.users || []).find(u => u.status === "connected");
       const any = (data.users || [])[0];
-      setSelectedUserEmail(prev => prev || (connected?.email || any?.email || ""));
-      // If a selected user has an inviteLink, show it
-      const sel = (data.users || []).find(u => u.email === (connected?.email || any?.email));
+      const selEmail = connected?.email || any?.email || "";
+      setSelectedUserEmail(selEmail);
+      const sel = (data.users || []).find(u => u.email === selEmail);
       setInviteLink(sel?.inviteLink || "");
     } catch (e) {
       console.error(e);
     }
   }
 
-  // Build the Plan2Tasks block string
   function buildPlanBlock() { return renderPlanBlock({ plan, blocks, tasks }); }
 
-  // Create Invite (Add user -> invite link)
   async function createInvite() {
     try {
       setInviteStatus("Working...");
       setInviteLink("");
       const email = (newUserEmail || "").trim();
-      if (!email) throw new Error("Enter an email first.");
+      if (!plannerEmail) throw new Error("Sign in again.");
+      if (!email) throw new Error("Enter a user email first.");
+
       const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail: PLANNER_EMAIL, userEmail: email }),
+        body: JSON.stringify({ plannerEmail, userEmail: email }),
       });
       const text = await resp.text();
       let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0, 200)); }
@@ -178,6 +256,19 @@ export default function Plan2TasksWizard() {
 
       setInviteLink(data.inviteLink);
       setInviteStatus("Invite link created.");
+
+      // Try to email it (optional; if not configured, we’ll just show the link)
+      try {
+        const r2 = await fetch("https://plan2tasks-wizard.vercel.app/api/send-invite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to: email, inviteLink: data.inviteLink, plannerEmail })
+        });
+        const t2 = await r2.text(); let j2; try { j2 = JSON.parse(t2); } catch { j2 = { error: t2 }; }
+        if (r2.ok && j2.sent) setInviteStatus("Invite link created & emailed.");
+        else if (r2.ok && j2.sent === false) setInviteStatus("Invite link created. Email not configured — copy and send.");
+      } catch { /* ignore email failures */ }
+
       setSelectedUserEmail(email);
       setNewUserEmail("");
       await refreshUsers();
@@ -186,7 +277,6 @@ export default function Plan2TasksWizard() {
     }
   }
 
-  // Push plan to selected user
   async function pushToSelectedUser() {
     try {
       const outEl = document.getElementById("push-result");
@@ -243,17 +333,11 @@ export default function Plan2TasksWizard() {
         <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight" style={{ color: THEME.text }}>Plan2Tasks – Wizard</h1>
-            <p className="text-sm text-gray-500">Plan for a user, then deliver to their Google Tasks.</p>
+            <p className="text-sm text-gray-500">Sign in as a planner, add a user, then deliver tasks to their Google Tasks.</p>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm">
-              <Wand2 className="h-4 w-4 text-cyan-600" />
-              <span>Wizard mode</span>
-              <input type="checkbox" className="peer sr-only" checked={mode === "wizard"} onChange={(e) => setMode(e.target.checked ? "wizard" : "single")} />
-              <span className="ml-1 inline-flex h-5 w-9 items-center rounded-full bg-gray-200 p-0.5 peer-checked:bg-cyan-600">
-                <span className="h-4 w-4 rounded-full bg-white transition-transform peer-checked:translate-x-4" />
-              </span>
-            </label>
+          <div className="flex items-center gap-3 text-sm">
+            <span className="rounded-xl border border-gray-300 bg-white px-3 py-2">Signed in: <b>{plannerEmail}</b></span>
+            <button onClick={onSignOut} className="rounded-xl bg-gray-900 px-3 py-2 font-semibold text-white hover:bg-black">Sign out</button>
           </div>
         </header>
 
@@ -320,12 +404,12 @@ export default function Plan2TasksWizard() {
                     </div>
                   </SectionCard>
 
-                  {/* ===== Users & Delivery (NEW) ===== */}
+                  {/* ===== Users & Delivery ===== */}
                   <div className="mt-6 rounded-2xl border-2 border-cyan-300 bg-cyan-50 p-4">
                     <div className="mb-3 text-sm font-semibold text-cyan-900">Users & Delivery</div>
 
-                    {/* Select existing user */}
                     <div className="grid gap-3 md:grid-cols-2">
+                      {/* Select existing user */}
                       <div className="rounded-xl border border-cyan-200 bg-white p-3">
                         <div className="text-sm font-medium mb-2">Select a user</div>
                         <select
@@ -338,17 +422,13 @@ export default function Plan2TasksWizard() {
                           }}
                           className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
                         >
-                          <option value="">— Choose —</option>
+                          <option value="">{users.length ? "— Choose —" : "No users yet"}</option>
                           {users.map(u=>(
                             <option key={u.email} value={u.email}>
                               {u.email} {u.status === "connected" ? "✓" : "(invited)"}
                             </option>
                           ))}
                         </select>
-                        <div className="mt-2 text-xs text-gray-600">
-                          Planner: <b>{PLANNER_EMAIL}</b> (edit in code if needed)
-                        </div>
-
                         {inviteLink && (
                           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
                             <div className="text-xs font-medium text-amber-900 mb-1">Invite link (for this user)</div>
@@ -361,7 +441,7 @@ export default function Plan2TasksWizard() {
                         )}
                       </div>
 
-                      {/* Add new user + create invite */}
+                      {/* Add new user + create invite (emails them automatically if configured) */}
                       <div className="rounded-xl border border-cyan-200 bg-white p-3">
                         <div className="text-sm font-medium mb-2">Add user & create invite</div>
                         <input
@@ -405,7 +485,6 @@ export default function Plan2TasksWizard() {
             </AnimatePresence>
           </div>
         ) : (
-          // Single-page mode keeps same Users & Delivery card below
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <SectionCard title="Plan basics" description="Name, dates, timezone">
               <div className="grid grid-cols-1 gap-4">
@@ -423,7 +502,6 @@ export default function Plan2TasksWizard() {
                 </div>
               </div>
             </SectionCard>
-
             <SectionCard title="Recurring blocks" description="Gym, meetings, etc."><BlocksEditor blocks={blocks} setBlocks={setBlocks} /></SectionCard>
             <SectionCard title="Tasks" description="Add your tasks by day"><TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} /></SectionCard>
             <SectionCard title="Preview & export" description="Review your week, copy block, or export .ics">
@@ -440,70 +518,79 @@ export default function Plan2TasksWizard() {
                 </button>
               </div>
 
-              {/* Users & Delivery card in single-page */}
+              {/* Users & Delivery in single page */}
               <div className="mt-6 rounded-2xl border-2 border-cyan-300 bg-cyan-50 p-4">
                 <div className="mb-3 text-sm font-semibold text-cyan-900">Users & Delivery</div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
-                    <div className="text-sm font-medium mb-2">Select a user</div>
-                    <select
-                      value={selectedUserEmail}
-                      onChange={(e)=>{
-                        const email = e.target.value;
-                        setSelectedUserEmail(email);
-                        const u = users.find(x=>x.email===email);
-                        setInviteLink(u?.inviteLink || "");
-                      }}
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    >
-                      <option value="">— Choose —</option>
-                      {users.map(u=>(
-                        <option key={u.email} value={u.email}>
-                          {u.email} {u.status === "connected" ? "✓" : "(invited)"}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="mt-2 text-xs text-gray-600">Planner: <b>{PLANNER_EMAIL}</b></div>
-                    {inviteLink && (
-                      <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
-                        <div className="text-xs font-medium text-amber-900 mb-1">Invite link</div>
-                        <div className="break-words text-xs">{inviteLink}</div>
-                        <button className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
-                          onClick={() => { navigator.clipboard.writeText(inviteLink); alert("Invite link copied"); }}>Copy link</button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
-                    <div className="text-sm font-medium mb-2">Add user & create invite</div>
-                    <input value={newUserEmail} onChange={(e)=>setNewUserEmail(e.target.value)} type="email" placeholder="user@example.com"
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    <button onClick={createInvite} className="mt-2 inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
-                      Create Invite
-                    </button>
-                    <div className="mt-2 text-xs text-gray-600">{inviteStatus}</div>
-                    {inviteLink && !selectedUserEmail && (<div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs">{inviteLink}</div>)}
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <button onClick={pushToSelectedUser} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
-                    Push Plan to Selected User
-                  </button>
-                  <div id="push-result" className="mt-2 text-xs text-gray-600"></div>
-                </div>
+                <UsersCard {...{ users, setUsers, selectedUserEmail, setSelectedUserEmail, inviteLink, setInviteLink, newUserEmail, setNewUserEmail, inviteStatus, setInviteStatus, plannerEmail, createInvite, refreshUsers, pushToSelectedUser }} />
               </div>
             </SectionCard>
           </div>
         )}
 
-        <footer className="mt-10 text-center text-xs text-gray-500"><p>Tip: Edit your planner email at the top of <code>App.jsx</code> to filter your users.</p></footer>
+        <footer className="mt-10 text-center text-xs text-gray-500"><p>Billing (coming soon)</p></footer>
       </div>
     </div>
   );
 }
 
-// ----- Blocks Editor -----
+function UsersCard(props){
+  const { users, selectedUserEmail, setSelectedUserEmail, inviteLink, setInviteLink, newUserEmail, setNewUserEmail, inviteStatus, plannerEmail, createInvite, pushToSelectedUser } = props;
+  return (
+    <>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-cyan-200 bg-white p-3">
+          <div className="text-sm font-medium mb-2">Select a user</div>
+          <select
+            value={selectedUserEmail}
+            onChange={(e)=>{
+              const email = e.target.value;
+              setSelectedUserEmail(email);
+              const u = (users||[]).find(x=>x.email===email);
+              setInviteLink(u?.inviteLink || "");
+            }}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          >
+            <option value="">{users?.length ? "— Choose —" : "No users yet"}</option>
+            {(users||[]).map(u=>(
+              <option key={u.email} value={u.email}>
+                {u.email} {u.status === "connected" ? "✓" : "(invited)"}
+              </option>
+            ))}
+          </select>
+          {inviteLink && (
+            <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+              <div className="text-xs font-medium text-amber-900 mb-1">Invite link (for this user)</div>
+              <div className="break-words text-xs">{inviteLink}</div>
+              <button
+                className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                onClick={() => { navigator.clipboard.writeText(inviteLink); alert("Invite link copied"); }}
+              >Copy link</button>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-cyan-200 bg-white p-3">
+          <div className="text-sm font-medium mb-2">Add user & create invite</div>
+          <input value={newUserEmail} onChange={(e)=>setNewUserEmail(e.target.value)} type="email" placeholder="user@example.com"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+          <button onClick={createInvite} className="mt-2 inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
+            Create Invite
+          </button>
+          <div className="mt-2 text-xs text-gray-600">{inviteStatus}</div>
+          {inviteLink && !selectedUserEmail && (<div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs">{inviteLink}</div>)}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <button onClick={pushToSelectedUser} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+          Push Plan to Selected User
+        </button>
+        <div id="push-result" className="mt-2 text-xs text-gray-600"></div>
+      </div>
+    </>
+  );
+}
+
 function BlocksEditor({ blocks, setBlocks }) {
   const [label, setLabel] = useState(""); const [time, setTime] = useState("12:00"); const [dur, setDur] = useState(60); const [days, setDays] = useState([1,2,3,4,5]);
   const toggleDay = (d) => setDays((arr) => (arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]));
@@ -531,7 +618,6 @@ function BlocksEditor({ blocks, setBlocks }) {
 }
 function renderDays(days){ const map=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return days.map((d)=>map[d]).join(", "); }
 
-// ----- Tasks Editor -----
 function TasksEditor({ startDate, tasks, setTasks }) {
   const [title, setTitle] = useState(""); const [dayOffset, setDayOffset] = useState(0); const [time, setTime] = useState(""); const [dur, setDur] = useState(60); const [notes, setNotes] = useState("");
   const add = () => { if (!title.trim()) return; setTasks([...tasks, { id: uid(), title: title.trim(), dayOffset: Number(dayOffset) || 0, time: time || undefined, durationMins: Number(dur) || 60, notes }]); setTitle(""); setNotes(""); };
@@ -564,9 +650,7 @@ function TasksEditor({ startDate, tasks, setTasks }) {
     </div>
   );
 }
-function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
 
-// ----- Preview Week -----
 function PreviewWeek({ startDate, items }) {
   const grouped = useMemo(()=>{ const g=new Map(); for (let d=0; d<7; d++) g.set(d, []); items.forEach((it)=>{ g.get(it.dayOffset)?.push(it); }); return g; }, [items]);
   return (
@@ -589,7 +673,7 @@ function PreviewWeek({ startDate, items }) {
   );
 }
 
-// ----- Render Plan2Tasks Block -----
+// Render Plan2Tasks block
 export function renderPlanBlock({ plan, blocks, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
