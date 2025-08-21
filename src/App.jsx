@@ -1,23 +1,26 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Calendar, Check, ChevronLeft, ChevronRight, ClipboardCopy, Download, ListChecks, Plus, Sparkles, Wand2 } from "lucide-react";
 import { format } from "date-fns";
 
-function cn(...classes) { return classes.filter(Boolean).join(" "); }
+// ====== Planner identity (edit this to your email) ======
+const PLANNER_EMAIL = "planner@yourdomain.com"; // <-- change to your email (used to filter your users)
+// ========================================================
 
+function cn(...classes) { return classes.filter(Boolean).join(" "); }
 const THEME = { brand: "#111827", accent: "#22d3ee", accentStrong: "#06b6d4", soft: "#f3f4f6", text: "#111827", ring: "#22d3ee" };
 
 const STEPS = [
   { key: "basics", title: "Plan basics", icon: Calendar, subtitle: "Name your plan, choose dates & timezone." },
   { key: "blocks", title: "Recurring blocks", icon: ListChecks, subtitle: "Gym time, meetings, and fixed commitments." },
   { key: "tasks", title: "Add tasks", icon: Plus, subtitle: "Quickly capture what needs doing by day." },
-  { key: "review", title: "Review & generate", icon: Sparkles, subtitle: "Preview, copy the Plan2Tasks block, or export .ics." },
+  { key: "review", title: "Review & generate", icon: Sparkles, subtitle: "Preview, then deliver to a selected user." },
 ];
 
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
-
 function uid() { return Math.random().toString(36).slice(2, 10); }
 
+// ----- ICS generation -----
 function toICS({ title, startDate, tasks, timezone }) {
   const dtstamp = format(new Date(), "yyyyMMdd'T'HHmmss");
   const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//Wizard//EN"];
@@ -126,6 +129,87 @@ export default function Plan2TasksWizard() {
     { id: uid(), title: "Weekly Review", dayOffset: 4, time: "15:30", durationMins: 45, notes: "Wins, shipped, blockers." },
   ]);
 
+  // ==== NEW: Users-first state ====
+  const [users, setUsers] = useState([]);                    // [{email, status, inviteLink}]
+  const [selectedUserEmail, setSelectedUserEmail] = useState("");
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteStatus, setInviteStatus] = useState("");      // Working / Error / etc.
+
+  useEffect(() => { refreshUsers(); }, []);
+
+  async function refreshUsers() {
+    try {
+      const resp = await fetch(`https://plan2tasks-wizard.vercel.app/api/users/list?plannerEmail=${encodeURIComponent(PLANNER_EMAIL)}`);
+      const text = await resp.text();
+      let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
+      if (!resp.ok) throw new Error(data.error || "Failed to load users");
+      setUsers(data.users || []);
+      // Auto-select a connected user if available
+      const connected = (data.users || []).find(u => u.status === "connected");
+      const any = (data.users || [])[0];
+      setSelectedUserEmail(prev => prev || (connected?.email || any?.email || ""));
+      // If a selected user has an inviteLink, show it
+      const sel = (data.users || []).find(u => u.email === (connected?.email || any?.email));
+      setInviteLink(sel?.inviteLink || "");
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  // Build the Plan2Tasks block string
+  function buildPlanBlock() { return renderPlanBlock({ plan, blocks, tasks }); }
+
+  // Create Invite (Add user -> invite link)
+  async function createInvite() {
+    try {
+      setInviteStatus("Working...");
+      setInviteLink("");
+      const email = (newUserEmail || "").trim();
+      if (!email) throw new Error("Enter an email first.");
+      const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plannerEmail: PLANNER_EMAIL, userEmail: email }),
+      });
+      const text = await resp.text();
+      let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0, 200)); }
+      if (!resp.ok) throw new Error(data.error || "Invite failed");
+
+      setInviteLink(data.inviteLink);
+      setInviteStatus("Invite link created.");
+      setSelectedUserEmail(email);
+      setNewUserEmail("");
+      await refreshUsers();
+    } catch (e) {
+      setInviteStatus("Error: " + e.message);
+    }
+  }
+
+  // Push plan to selected user
+  async function pushToSelectedUser() {
+    try {
+      const outEl = document.getElementById("push-result");
+      if (outEl) outEl.textContent = "Pushing...";
+      if (!selectedUserEmail) throw new Error("Choose a user first.");
+      if (tasks.length === 0) throw new Error("Add at least one task.");
+
+      const planBlock = buildPlanBlock();
+      const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userEmail: selectedUserEmail, planBlock }),
+      });
+      const text = await resp.text();
+      let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
+      if (!resp.ok) throw new Error(data.error || "Push failed");
+
+      if (outEl) outEl.textContent = `Success — created ${data.created} tasks for ${selectedUserEmail}.`;
+    } catch (e) {
+      const outEl = document.getElementById("push-result"); if (outEl) outEl.textContent = "Error: " + e.message;
+    }
+  }
+
   const previewItems = useMemo(() => {
     const out = [...tasks.map((t) => ({ ...t, type: "task" }))];
     blocks.forEach((b) => { for (let d = 0; d < 7; d++) {
@@ -143,10 +227,6 @@ export default function Plan2TasksWizard() {
     return true;
   }, [step, plan, tasks, mode]);
 
-  const next = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  const back = () => setStep((s) => Math.max(s - 1, 0));
-  const jump = (idx) => setStep(idx);
-
   const copyPlanBlock = async () => {
     const block = renderPlanBlock({ plan, blocks, tasks });
     await navigator.clipboard.writeText(block);
@@ -157,52 +237,13 @@ export default function Plan2TasksWizard() {
     const a = document.createElement("a"); a.href = url; a.download = `${plan.title.replace(/\s+/g, "_")}.ics`; a.click(); URL.revokeObjectURL(url);
   };
 
-  // === Planner Tools (absolute URLs + safe JSON parsing) ===
-  async function createInvite() {
-    try {
-      const emailEl = document.getElementById("invite-email");
-      const outEl = document.getElementById("invite-result");
-      outEl.textContent = "Working...";
-      const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail: "planner@yourdomain.com", userEmail: (emailEl?.value || "").trim() }),
-      });
-      const text = await resp.text(); let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
-      if (!resp.ok) throw new Error(data.error || "Invite failed");
-      outEl.innerHTML = `Invite link created: <a href="${data.inviteLink}" target="_blank" rel="noreferrer">${data.inviteLink}</a><br/>Send this link to the user.`;
-    } catch (e) {
-      const outEl = document.getElementById("invite-result"); if (outEl) outEl.textContent = "Error: " + e.message;
-    }
-  }
-  function buildPlanBlock() { return renderPlanBlock({ plan, blocks, tasks }); }
-  async function pushCurrentPlanToUser() {
-    try {
-      const emailEl = document.getElementById("push-email");
-      const outEl = document.getElementById("push-result");
-      if (outEl) outEl.textContent = "Pushing...";
-      const planBlock = buildPlanBlock();
-      const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: (emailEl?.value || "").trim(), planBlock }),
-      });
-      const text = await resp.text(); let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
-      if (!resp.ok) throw new Error(data.error || "Push failed");
-      if (outEl) outEl.textContent = `Success — created ${data.created} tasks for ${(emailEl?.value || "").trim()}.`;
-    } catch (e) {
-      const outEl = document.getElementById("push-result"); if (outEl) outEl.textContent = "Error: " + e.message;
-    }
-  }
-  // === END Planner Tools ===
-
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-white to-gray-50 p-6">
       <div className="mx-auto max-w-5xl">
         <header className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight" style={{ color: THEME.text }}>Plan2Tasks – Wizard</h1>
-            <p className="text-sm text-gray-500">Guide users through creating a clean, shippable weekly plan.</p>
+            <p className="text-sm text-gray-500">Plan for a user, then deliver to their Google Tasks.</p>
           </div>
           <div className="flex items-center gap-3">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm">
@@ -218,7 +259,7 @@ export default function Plan2TasksWizard() {
 
         {mode === "wizard" ? (
           <div>
-            <Stepper current={step} onJump={jump} />
+            <Stepper current={step} onJump={(idx)=>setStep(idx)} />
             <AnimatePresence mode="wait">
               {step === 0 && (
                 <motion.div key="s1" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
@@ -240,7 +281,7 @@ export default function Plan2TasksWizard() {
                       </Field>
                     </div>
                   </SectionCard>
-                  <ActionBar canBack={false} canNext={canNext} onBack={back} onNext={next} />
+                  <ActionBar canBack={false} canNext={canNext} onBack={()=>{}} onNext={()=>setStep(1)} />
                 </motion.div>
               )}
 
@@ -249,7 +290,7 @@ export default function Plan2TasksWizard() {
                   <SectionCard title="Recurring blocks" description="Add fixed commitments that appear in your week automatically.">
                     <BlocksEditor blocks={blocks} setBlocks={setBlocks} />
                   </SectionCard>
-                  <ActionBar canBack canNext={canNext} onBack={back} onNext={next} />
+                  <ActionBar canBack canNext={canNext} onBack={()=>setStep(0)} onNext={()=>setStep(2)} />
                 </motion.div>
               )}
 
@@ -258,51 +299,113 @@ export default function Plan2TasksWizard() {
                   <SectionCard title="Tasks" description="Capture tasks by day. Times are optional; duration defaults to 60m.">
                     <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
                   </SectionCard>
-                  <ActionBar canBack canNext={canNext} onBack={back} onNext={next} />
+                  <ActionBar canBack canNext={canNext} onBack={()=>setStep(1)} onNext={()=>setStep(3)} />
                 </motion.div>
               )}
 
               {step === 3 && (
                 <motion.div key="s4" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
-                  <SectionCard title="Review & generate" description="Preview your week. Export to calendar or copy the Plan2Tasks block.">
+                  <SectionCard title="Plan preview & export" description="Preview your week. Export to calendar or copy the Plan2Tasks block.">
                     <PreviewWeek startDate={plan.startDate} items={previewItems} />
                     <div className="mt-4 flex flex-wrap items-center gap-3">
                       <button onClick={copyPlanBlock} className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
                         <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
                       </button>
-                      <button onClick={downloadICS} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+                      <button onClick={()=>{
+                        const url = toICS({ title: plan.title, startDate: plan.startDate, tasks: previewItems, timezone: plan.timezone });
+                        const a = document.createElement("a"); a.href = url; a.download = `${plan.title.replace(/\s+/g, "_")}.ics`; a.click(); URL.revokeObjectURL(url);
+                      }} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
                         <Download className="h-4 w-4" /> Export .ics
                       </button>
                     </div>
+                  </SectionCard>
 
-                    <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
-                      <div className="mb-2 text-sm font-semibold text-amber-900">Planner Tools</div>
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <div className="rounded-xl border border-amber-200 bg-white p-3">
-                          <div className="text-sm font-medium mb-2">Create Invite Link</div>
-                          <input id="invite-email" type="email" placeholder="User's email (the person who will receive tasks)"
-                            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                          <button onClick={createInvite}
-                            className="mt-2 inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Create Invite</button>
-                          <div id="invite-result" className="mt-2 text-xs text-gray-600 break-words"></div>
+                  {/* ===== Users & Delivery (NEW) ===== */}
+                  <div className="mt-6 rounded-2xl border-2 border-cyan-300 bg-cyan-50 p-4">
+                    <div className="mb-3 text-sm font-semibold text-cyan-900">Users & Delivery</div>
+
+                    {/* Select existing user */}
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="rounded-xl border border-cyan-200 bg-white p-3">
+                        <div className="text-sm font-medium mb-2">Select a user</div>
+                        <select
+                          value={selectedUserEmail}
+                          onChange={(e)=>{
+                            const email = e.target.value;
+                            setSelectedUserEmail(email);
+                            const u = users.find(x=>x.email===email);
+                            setInviteLink(u?.inviteLink || "");
+                          }}
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        >
+                          <option value="">— Choose —</option>
+                          {users.map(u=>(
+                            <option key={u.email} value={u.email}>
+                              {u.email} {u.status === "connected" ? "✓" : "(invited)"}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="mt-2 text-xs text-gray-600">
+                          Planner: <b>{PLANNER_EMAIL}</b> (edit in code if needed)
                         </div>
-                        <div className="rounded-xl border border-amber-200 bg-white p-3">
-                          <div className="text-sm font-medium mb-2">Push Current Plan to User</div>
-                          <input id="push-email" type="email" placeholder="Connected user's email"
-                            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                          <button onClick={pushCurrentPlanToUser}
-                            className="mt-2 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Push Plan to User</button>
-                          <div id="push-result" className="mt-2 text-xs text-gray-600"></div>
-                        </div>
+
+                        {inviteLink && (
+                          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                            <div className="text-xs font-medium text-amber-900 mb-1">Invite link (for this user)</div>
+                            <div className="break-words text-xs">{inviteLink}</div>
+                            <button
+                              className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                              onClick={() => { navigator.clipboard.writeText(inviteLink); alert("Invite link copied"); }}
+                            >Copy link</button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Add new user + create invite */}
+                      <div className="rounded-xl border border-cyan-200 bg-white p-3">
+                        <div className="text-sm font-medium mb-2">Add user & create invite</div>
+                        <input
+                          value={newUserEmail}
+                          onChange={(e)=>setNewUserEmail(e.target.value)}
+                          type="email"
+                          placeholder="user@example.com"
+                          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                        />
+                        <button
+                          onClick={createInvite}
+                          className="mt-2 inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"
+                        >
+                          Create Invite
+                        </button>
+                        <div className="mt-2 text-xs text-gray-600">{inviteStatus}</div>
+                        {inviteLink && !selectedUserEmail && (
+                          <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs">
+                            {inviteLink}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </SectionCard>
-                  <ActionBar canBack canNext={true} onBack={back} onNext={() => alert("All set!")} nextLabel="Finish" />
+
+                    {/* Push */}
+                    <div className="mt-4">
+                      <button
+                        onClick={pushToSelectedUser}
+                        className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Push Plan to Selected User
+                      </button>
+                      <div id="push-result" className="mt-2 text-xs text-gray-600"></div>
+                    </div>
+                  </div>
+                  {/* ===== End Users & Delivery ===== */}
+
+                  <ActionBar canBack canNext={true} onBack={()=>setStep(2)} onNext={() => alert("All set!")} nextLabel="Finish" />
                 </motion.div>
               )}
             </AnimatePresence>
           </div>
         ) : (
+          // Single-page mode keeps same Users & Delivery card below
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <SectionCard title="Plan basics" description="Name, dates, timezone">
               <div className="grid grid-cols-1 gap-4">
@@ -320,6 +423,7 @@ export default function Plan2TasksWizard() {
                 </div>
               </div>
             </SectionCard>
+
             <SectionCard title="Recurring blocks" description="Gym, meetings, etc."><BlocksEditor blocks={blocks} setBlocks={setBlocks} /></SectionCard>
             <SectionCard title="Tasks" description="Add your tasks by day"><TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} /></SectionCard>
             <SectionCard title="Preview & export" description="Review your week, copy block, or export .ics">
@@ -328,41 +432,78 @@ export default function Plan2TasksWizard() {
                 <button onClick={copyPlanBlock} className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
                   <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
                 </button>
-                <button onClick={downloadICS} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+                <button onClick={()=>{
+                  const url = toICS({ title: plan.title, startDate: plan.startDate, tasks: previewItems, timezone: plan.timezone });
+                  const a = document.createElement("a"); a.href = url; a.download = `${plan.title.replace(/\s+/g, "_")}.ics`; a.click(); URL.revokeObjectURL(url);
+                }} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
                   <Download className="h-4 w-4" /> Export .ics
                 </button>
               </div>
-              <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
-                <div className="mb-2 text-sm font-semibold text-amber-900">Planner Tools</div>
+
+              {/* Users & Delivery card in single-page */}
+              <div className="mt-6 rounded-2xl border-2 border-cyan-300 bg-cyan-50 p-4">
+                <div className="mb-3 text-sm font-semibold text-cyan-900">Users & Delivery</div>
                 <div className="grid gap-3 md:grid-cols-2">
-                  <div className="rounded-xl border border-amber-200 bg-white p-3">
-                    <div className="text-sm font-medium mb-2">Create Invite Link</div>
-                    <input id="invite-email" type="email" placeholder="User's email (the person who will receive tasks)"
-                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    <button onClick={createInvite}
-                      className="mt-2 inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Create Invite</button>
-                    <div id="invite-result" className="mt-2 text-xs text-gray-600 break-words"></div>
+                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
+                    <div className="text-sm font-medium mb-2">Select a user</div>
+                    <select
+                      value={selectedUserEmail}
+                      onChange={(e)=>{
+                        const email = e.target.value;
+                        setSelectedUserEmail(email);
+                        const u = users.find(x=>x.email===email);
+                        setInviteLink(u?.inviteLink || "");
+                      }}
+                      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                    >
+                      <option value="">— Choose —</option>
+                      {users.map(u=>(
+                        <option key={u.email} value={u.email}>
+                          {u.email} {u.status === "connected" ? "✓" : "(invited)"}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-2 text-xs text-gray-600">Planner: <b>{PLANNER_EMAIL}</b></div>
+                    {inviteLink && (
+                      <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                        <div className="text-xs font-medium text-amber-900 mb-1">Invite link</div>
+                        <div className="break-words text-xs">{inviteLink}</div>
+                        <button className="mt-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                          onClick={() => { navigator.clipboard.writeText(inviteLink); alert("Invite link copied"); }}>Copy link</button>
+                      </div>
+                    )}
                   </div>
-                  <div className="rounded-xl border border-amber-200 bg-white p-3">
-                    <div className="text-sm font-medium mb-2">Push Current Plan to User</div>
-                    <input id="push-email" type="email" placeholder="Connected user's email"
+
+                  <div className="rounded-xl border border-cyan-200 bg-white p-3">
+                    <div className="text-sm font-medium mb-2">Add user & create invite</div>
+                    <input value={newUserEmail} onChange={(e)=>setNewUserEmail(e.target.value)} type="email" placeholder="user@example.com"
                       className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-                    <button onClick={pushCurrentPlanToUser}
-                      className="mt-2 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Push Plan to User</button>
-                    <div id="push-result" className="mt-2 text-xs text-gray-600"></div>
+                    <button onClick={createInvite} className="mt-2 inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
+                      Create Invite
+                    </button>
+                    <div className="mt-2 text-xs text-gray-600">{inviteStatus}</div>
+                    {inviteLink && !selectedUserEmail && (<div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs">{inviteLink}</div>)}
                   </div>
+                </div>
+
+                <div className="mt-4">
+                  <button onClick={pushToSelectedUser} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+                    Push Plan to Selected User
+                  </button>
+                  <div id="push-result" className="mt-2 text-xs text-gray-600"></div>
                 </div>
               </div>
             </SectionCard>
           </div>
         )}
 
-        <footer className="mt-10 text-center text-xs text-gray-500"><p>Tip: You can theme this wizard by adjusting the <code>THEME</code> object or Tailwind classes.</p></footer>
+        <footer className="mt-10 text-center text-xs text-gray-500"><p>Tip: Edit your planner email at the top of <code>App.jsx</code> to filter your users.</p></footer>
       </div>
     </div>
   );
 }
 
+// ----- Blocks Editor -----
 function BlocksEditor({ blocks, setBlocks }) {
   const [label, setLabel] = useState(""); const [time, setTime] = useState("12:00"); const [dur, setDur] = useState(60); const [days, setDays] = useState([1,2,3,4,5]);
   const toggleDay = (d) => setDays((arr) => (arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]));
@@ -390,6 +531,7 @@ function BlocksEditor({ blocks, setBlocks }) {
 }
 function renderDays(days){ const map=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return days.map((d)=>map[d]).join(", "); }
 
+// ----- Tasks Editor -----
 function TasksEditor({ startDate, tasks, setTasks }) {
   const [title, setTitle] = useState(""); const [dayOffset, setDayOffset] = useState(0); const [time, setTime] = useState(""); const [dur, setDur] = useState(60); const [notes, setNotes] = useState("");
   const add = () => { if (!title.trim()) return; setTasks([...tasks, { id: uid(), title: title.trim(), dayOffset: Number(dayOffset) || 0, time: time || undefined, durationMins: Number(dur) || 60, notes }]); setTitle(""); setNotes(""); };
@@ -424,6 +566,7 @@ function TasksEditor({ startDate, tasks, setTasks }) {
 }
 function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
 
+// ----- Preview Week -----
 function PreviewWeek({ startDate, items }) {
   const grouped = useMemo(()=>{ const g=new Map(); for (let d=0; d<7; d++) g.set(d, []); items.forEach((it)=>{ g.get(it.dayOffset)?.push(it); }); return g; }, [items]);
   return (
@@ -446,6 +589,7 @@ function PreviewWeek({ startDate, items }) {
   );
 }
 
+// ----- Render Plan2Tasks Block -----
 export function renderPlanBlock({ plan, blocks, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
