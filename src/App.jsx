@@ -18,6 +18,7 @@ function escapeICS(text){ return String(text).replace(/\\/g,"\\\\").replace(/\n/
 function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
 
 // ---------- Auth screen (planner sign-up/sign-in) ----------
+// ---------- Auth screen (planner sign-up/sign-in) ----------
 function AuthScreen({ onSignedIn }) {
   const [mode, setMode] = useState("signup"); // signup | signin
   const [email, setEmail] = useState("");
@@ -32,11 +33,21 @@ function AuthScreen({ onSignedIn }) {
     setMsg("Signed up!");
     onSignedIn(data.session);
   }
+
   async function handleSignin() {
     setMsg("Signing in...");
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
     if (error) return setMsg("Error: " + error.message);
     onSignedIn(data.session);
+  }
+
+  async function handleGoogle() {
+    setMsg("Redirecting to Google...");
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin }
+    });
+    if (error) setMsg("Error: " + error.message);
   }
 
   return (
@@ -45,6 +56,18 @@ function AuthScreen({ onSignedIn }) {
         <h1 className="text-xl font-bold mb-1">Plan2Tasks – Planner Account</h1>
         <p className="text-sm text-gray-500 mb-4">Create your planner account, then add users and deliver tasks.</p>
 
+        {/* Google OAuth */}
+        <button
+          onClick={handleGoogle}
+          className="w-full mb-4 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+        >
+          <img alt="" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="h-4 w-4" />
+          Continue with Google
+        </button>
+
+        <div className="my-3 text-center text-xs text-gray-400">or</div>
+
+        {/* Email/password */}
         <label className="block mb-2 text-sm font-medium">Email</label>
         <input value={email} onChange={(e)=>setEmail(e.target.value)} type="email"
           className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
@@ -78,6 +101,7 @@ function AuthScreen({ onSignedIn }) {
     </div>
   );
 }
+
 
 // ---------- ICS ----------
 function toICS({ title, startDate, tasks, timezone }) {
