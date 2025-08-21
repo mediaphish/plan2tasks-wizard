@@ -35,7 +35,6 @@ const TIMEZONES = [
   "UTC",
 ];
 
-// --- Types
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -96,7 +95,6 @@ function escapeICS(text) {
     .replace(/;/g, "\\;");
 }
 
-// --- Components
 function Stepper({ current, onJump }) {
   return (
     <ol className="grid grid-cols-4 gap-2 mb-6">
@@ -198,7 +196,6 @@ function ActionBar({ canBack, canNext, onBack, onNext, nextLabel = "Next" }) {
   );
 }
 
-// --- Main component
 export default function Plan2TasksWizard() {
   const [mode, setMode] = useState("wizard"); // "wizard" | "single"
   const [step, setStep] = useState(0);
@@ -219,7 +216,6 @@ export default function Plan2TasksWizard() {
     { id: uid(), title: "Weekly Review", dayOffset: 4, time: "15:30", durationMins: 45, notes: "Wins, shipped, blockers." },
   ]);
 
-  // --- Derived preview combining tasks + recurring blocks
   const previewItems = useMemo(() => {
     const out = [...tasks.map((t) => ({ ...t, type: "task" }))];
     blocks.forEach((b) => {
@@ -247,7 +243,6 @@ export default function Plan2TasksWizard() {
   const back = () => setStep((s) => Math.max(s - 1, 0));
   const jump = (idx) => setStep(idx);
 
-  // --- Actions
   const copyPlanBlock = async () => {
     const block = renderPlanBlock({ plan, blocks, tasks });
     await navigator.clipboard.writeText(block);
@@ -263,22 +258,25 @@ export default function Plan2TasksWizard() {
     URL.revokeObjectURL(url);
   };
 
-  // === NEW: Planner Tools functions ===
+  // === Planner Tools functions (absolute URLs + safe JSON parsing) ===
   async function createInvite() {
     try {
       const emailEl = document.getElementById("invite-email");
       const outEl = document.getElementById("invite-result");
       outEl.textContent = "Working...";
 
-      const resp = await fetch("/api/invite", {
+      const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          plannerEmail: "planner@yourdomain.com", // optional: replace with yours
+          plannerEmail: "planner@yourdomain.com", // optional
           userEmail: (emailEl?.value || "").trim(),
         }),
       });
-      const data = await resp.json();
+
+      const text = await resp.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error(text.slice(0, 200)); }
       if (!resp.ok) throw new Error(data.error || "Invite failed");
 
       outEl.innerHTML = `Invite link created: <a href="${data.inviteLink}" target="_blank" rel="noreferrer">${data.inviteLink}</a><br/>Send this link to the user.`;
@@ -299,7 +297,7 @@ export default function Plan2TasksWizard() {
       if (outEl) outEl.textContent = "Pushing...";
 
       const planBlock = buildPlanBlock();
-      const resp = await fetch("/api/push", {
+      const resp = await fetch("https://plan2tasks-wizard.vercel.app/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -307,7 +305,10 @@ export default function Plan2TasksWizard() {
           planBlock,
         }),
       });
-      const data = await resp.json();
+
+      const text = await resp.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error(text.slice(0, 200)); }
       if (!resp.ok) throw new Error(data.error || "Push failed");
 
       if (outEl) outEl.textContent = `Success — created ${data.created} tasks for ${(emailEl?.value || "").trim()}.`;
@@ -316,7 +317,7 @@ export default function Plan2TasksWizard() {
       if (outEl) outEl.textContent = "Error: " + e.message;
     }
   }
-  // === END NEW ===
+  // === END Planner Tools ===
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-white to-gray-50 p-6">
@@ -410,7 +411,7 @@ export default function Plan2TasksWizard() {
                       </button>
                     </div>
 
-                    {/* === NEW: Planner Tools panel (wizard step 4) === */}
+                    {/* Planner Tools (wizard step 4) */}
                     <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
                       <div className="mb-2 text-sm font-semibold text-amber-900">Planner Tools</div>
 
@@ -452,10 +453,9 @@ export default function Plan2TasksWizard() {
                         </div>
                       </div>
                     </div>
-                    {/* === END NEW === */}
 
                   </SectionCard>
-                  <ActionBar canBack canNext={true} onBack={back} onNext={() => alert("All set! You can now paste into your Sheet Add-on or import the .ics into your calendar.")} nextLabel="Finish" />
+                  <ActionBar canBack canNext={true} onBack={back} onNext={() => alert("All set!")} nextLabel="Finish" />
                 </motion.div>
               )}
             </AnimatePresence>
@@ -501,7 +501,7 @@ export default function Plan2TasksWizard() {
                 </button>
               </div>
 
-              {/* === NEW: Planner Tools panel (single-page mode) === */}
+              {/* Planner Tools (single-page mode) */}
               <div className="mt-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
                 <div className="mb-2 text-sm font-semibold text-amber-900">Planner Tools</div>
 
@@ -543,7 +543,6 @@ export default function Plan2TasksWizard() {
                   </div>
                 </div>
               </div>
-              {/* === END NEW === */}
 
             </SectionCard>
           </div>
@@ -551,7 +550,7 @@ export default function Plan2TasksWizard() {
 
         <footer className="mt-10 text-center text-xs text-gray-500">
           <p>
-            Tip: You can theme this wizard by adjusting the <code>THEME</code> object or Tailwind classes. No logo required; neutral brand-first UI.
+            Tip: You can theme this wizard by adjusting the <code>THEME</code> object or Tailwind classes.
           </p>
         </footer>
       </div>
@@ -728,7 +727,7 @@ function PreviewWeek({ startDate, items }) {
   );
 }
 
-// --- Render Plan2Tasks Block (for the Google Sheets add-on sidebar)
+// --- Render Plan2Tasks Block (self-contained)
 export function renderPlanBlock({ plan, blocks, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
