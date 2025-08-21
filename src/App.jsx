@@ -1,17 +1,16 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Calendar, Check, ClipboardCopy, Download, ListChecks, Plus, Sparkles, Users, Trash2, Edit3, Save, LogOut, Search, Tag, FolderPlus, X, ArrowRight } from "lucide-react";
+import { Calendar, ClipboardCopy, Download, Users, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-// --- helpers ---
+/* ---------------- helpers ---------------- */
 function cn(...classes){ return classes.filter(Boolean).join(" "); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
 function escapeICS(text){ return String(text).replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
 
-// --- ICS export ---
+/* ---------------- ICS export ---------------- */
 function toICS({ title, startDate, tasks, timezone }) {
   const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//Wizard//EN"];
   tasks.forEach((t) => {
@@ -37,7 +36,7 @@ function toICS({ title, startDate, tasks, timezone }) {
   return URL.createObjectURL(blob);
 }
 
-// --- Auth screen (Google + Email/Password) ---
+/* ---------------- Auth screen ---------------- */
 function AuthScreen({ onSignedIn }) {
   const [mode, setMode] = useState("signup");
   const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
@@ -99,7 +98,7 @@ function AuthScreen({ onSignedIn }) {
   );
 }
 
-// --- App ---
+/* ---------------- App shell ---------------- */
 export default function App() {
   const [session, setSession] = useState(null);
   useEffect(() => {
@@ -151,7 +150,7 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-// --- Users Dashboard (tabs, search, filter, multi-groups, hidden Create Group) ---
+/* ---------------- Users Dashboard (multi-groups + hidden Create Group) ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -162,7 +161,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [statusMsg, setStatusMsg] = useState("");
 
   const [editing, setEditing] = useState(null); const [editVal, setEditVal] = useState("");
-  const [manageFor, setManageFor] = useState(null); // email currently editing groups
+  const [manageFor, setManageFor] = useState(null); // email being edited
   const [manageSelected, setManageSelected] = useState([]); // groupIds for that user
 
   const [showCreateGroup, setShowCreateGroup] = useState(false);
@@ -194,7 +193,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setAddEmail("");
     await loadUsers();
   }
-
   async function delUser(email) {
     if (!confirm(`Delete ${email}?`)) return;
     const resp = await fetch("/api/users/delete", { method:"POST", headers:{ "Content-Type":"application/json" },
@@ -203,7 +201,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     if (!resp.ok) return alert(data.error || "Delete failed");
     await loadUsers();
   }
-
   async function saveEdit(oldEmail) {
     const resp = await fetch("/api/users/update", { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, userEmail: oldEmail, newEmail: editVal.trim() }) });
@@ -224,7 +221,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setShowCreateGroup(false);
     await loadGroups();
   }
-
   async function deleteGroup(id) {
     if (!confirm("Delete this group? Users will remain but be unassigned from it.")) return;
     const resp = await fetch("/api/groups/delete", { method:"POST", headers:{ "Content-Type":"application/json" },
@@ -239,10 +235,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setManageFor(u.email);
     setManageSelected((u.groups || []).map(g=>g.id));
   }
-  function cancelManage() {
-    setManageFor(null);
-    setManageSelected([]);
-  }
+  function cancelManage() { setManageFor(null); setManageSelected([]); }
   async function saveManage() {
     const resp = await fetch("/api/users/set-groups", {
       method:"POST",
@@ -257,7 +250,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      {/* Header row: search, filter by group, create group button */}
+      {/* Header row: search, group filter, create group button */}
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Users Dashboard</h2>
@@ -276,7 +269,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
             {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
 
-          {/* Create Group (hidden until clicked) */}
           {!showCreateGroup ? (
             <button onClick={()=>setShowCreateGroup(true)}
               className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
@@ -338,7 +330,8 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                           <Tag className="h-3 w-3 text-gray-500" /> {g.name || "—"}
                         </span>
                       )) : <span className="text-xs text-gray-400">—</span>}
-                      <button onClick={()=>beginManageGroups(u)} className="ml-2 rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
+                      <button onClick={()=>{ setManageFor(u.email); setManageSelected((u.groups||[]).map(g=>g.id)); }}
+                        className="ml-2 rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
                     </div>
                   </td>
                   <td className="py-2">
@@ -380,12 +373,12 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                   </td>
                 </tr>
 
-                {/* Inline manage groups panel */}
+                {/* Inline multi-group manager */}
                 {manageFor === u.email && (
                   <tr className="border-b bg-gray-50">
                     <td colSpan={5} className="p-3">
                       <div className="flex flex-wrap items-center gap-3">
-                        {groups.length === 0 && <span className="text-xs text-gray-500">No groups yet. Click “Create group” above.</span>}
+                        {groups.length === 0 && <span className="text-xs text-gray-500">No groups yet. Click “Create group”.</span>}
                         {groups.map(g => {
                           const checked = manageSelected.includes(g.id);
                           return (
@@ -399,8 +392,11 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                           );
                         })}
                         <div className="ml-auto flex items-center gap-2">
-                          <button onClick={saveManage} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">Save</button>
-                          <button onClick={cancelManage} className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs">Cancel</button>
+                          <button onClick={async()=>{ await saveManage(); }} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">Save</button>
+                          <button onClick={()=>{ setManageFor(null); setManageSelected([]); }} className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs">Cancel</button>
+                          {groups.length > 0 && (
+                            <button onClick={async()=>{ setManageSelected([]); await saveManage(); }} className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs">Clear all</button>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -418,56 +414,86 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   );
 }
 
-// --- Planner wizard (same as before, supports initialSelectedUserEmail) ---
+/* ---------------- Planner Wizard (recurring + clear add-many + labels + no preload) ---------------- */
 function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
-  const [plan, setPlan] = useState({ title:"Weekly Plan", startDate: format(new Date(), "yyyy-MM-dd"), timezone: "America/Chicago" });
-  const [blocks, setBlocks] = useState([{ id: uid(), label:"Gym", days:[1,2,3,4,5], time:"12:00", durationMins:60 }]);
+  // 1) Task list basics
+  const [plan, setPlan] = useState({
+    title: "Weekly Plan",
+    startDate: format(new Date(), "yyyy-MM-dd"),
+    timezone: "America/Chicago",
+  });
+
+  // 2) Recurring tasks (optional) — empty by default
+  const [blocks, setBlocks] = useState([]);
+
+  // 3) Individual tasks — empty by default
   const [tasks, setTasks] = useState([]);
+
+  // user selection
   const [users, setUsers] = useState([]);
   const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
   const [inviteLink, setInviteLink] = useState("");
 
-  useEffect(()=>{ (async()=>{
-    const resp = await fetch(`/api/users/list?plannerEmail=${encodeURIComponent(plannerEmail)}`);
-    const data = await resp.json();
-    setUsers(data.users || []);
-    if (!initialSelectedUserEmail) {
-      const connected = (data.users || []).find(u => u.status === "connected");
-      const any = (data.users || [])[0];
-      const sel = connected?.email || any?.email || "";
-      setSelectedUserEmail(sel);
-      const row = (data.users || []).find(u => u.email === sel);
-      setInviteLink(row?.inviteLink || "");
-    } else {
-      const row = (data.users || []).find(u => u.email === initialSelectedUserEmail);
-      setInviteLink(row?.inviteLink || "");
-    }
-  })(); }, [plannerEmail, initialSelectedUserEmail]);
+  useEffect(() => {
+    (async () => {
+      const resp = await fetch(`/api/users/list?plannerEmail=${encodeURIComponent(plannerEmail)}`);
+      const data = await resp.json();
+      setUsers(data.users || []);
+      if (!initialSelectedUserEmail) {
+        const connected = (data.users || []).find(u => u.status === "connected");
+        const any = (data.users || [])[0];
+        const sel = connected?.email || any?.email || "";
+        setSelectedUserEmail(sel);
+        const row = (data.users || []).find(u => u.email === sel);
+        setInviteLink(row?.inviteLink || "");
+      } else {
+        const row = (data.users || []).find(u => u.email === initialSelectedUserEmail);
+        setInviteLink(row?.inviteLink || "");
+      }
+    })();
+  }, [plannerEmail, initialSelectedUserEmail]);
 
-  function usePreviewItems() {
-    return useMemo(() => {
-      const out = [...tasks.map((t) => ({ ...t, type:"task" }))];
-      blocks.forEach((b) => { for (let d=0; d<7; d++) {
-        const date=new Date(plan.startDate); date.setDate(date.getDate()+d);
-        const dow=date.getDay(); if (b.days.includes(dow)) out.push({ id: uid(), type:"block", title:b.label, dayOffset:d, time:b.time, durationMins:b.durationMins, notes:"Recurring block" });
-      }});
-      return out.sort((a,b)=> a.dayOffset - b.dayOffset || (a.time||"").localeCompare(b.time||""));
-    }, [blocks, tasks, plan.startDate]);
-  }
+  // Build preview items from tasks + recurring blocks
+  const previewItems = useMemo(() => {
+    const out = [...tasks.map((t) => ({ ...t, type: "task" }))];
+    blocks.forEach((b) => {
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(plan.startDate);
+        date.setDate(date.getDate() + d);
+        const dow = date.getDay(); // 0 Sun ... 6 Sat
+        if (b.days.includes(dow)) {
+          out.push({
+            id: uid(),
+            type: "block",
+            title: b.label,
+            dayOffset: d,
+            time: b.time,
+            durationMins: b.durationMins,
+            notes: "Recurring block",
+          });
+        }
+      }
+    });
+    return out.sort((a, b) => a.dayOffset - b.dayOffset || (a.time || "").localeCompare(b.time || ""));
+  }, [blocks, tasks, plan.startDate]);
+
+  const hasAnything = previewItems.length > 0;
 
   async function pushToSelectedUser() {
     const outEl = document.getElementById("push-result");
     try {
       if (outEl) outEl.textContent = "Pushing...";
       if (!selectedUserEmail) throw new Error("Choose a user first.");
-      if (tasks.length === 0) throw new Error("Add at least one task.");
+      if (tasks.length === 0 && blocks.length === 0) throw new Error("Add at least one task or recurring block.");
 
       const planBlock = renderPlanBlock({ plan, blocks, tasks });
       const resp = await fetch("/api/push", {
-        method: "POST", headers: { "Content-Type":"application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userEmail: selectedUserEmail, planBlock }),
       });
-      const text = await resp.text(); let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
+      const text = await resp.text();
+      let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
       if (!resp.ok) throw new Error(data.error || "Push failed");
       if (outEl) outEl.textContent = `Success — created ${data.created} tasks for ${selectedUserEmail}.`;
     } catch (e) { if (outEl) outEl.textContent = "Error: " + e.message; }
@@ -475,113 +501,290 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      {/* Basics */}
+      {/* Target user */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Plan</h2>
         <div className="w-72">
-          <select value={selectedUserEmail} onChange={(e)=>{ setSelectedUserEmail(e.target.value); const u=(users||[]).find(x=>x.email===e.target.value); setInviteLink(u?.inviteLink||""); }}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select
+            value={selectedUserEmail}
+            onChange={(e) => {
+              setSelectedUserEmail(e.target.value);
+              const u = (users || []).find(x => x.email === e.target.value);
+              setInviteLink(u?.inviteLink || "");
+            }}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+          >
             <option value="">— Choose user —</option>
-            {users.map(u=>(
-              <option key={u.email} value={u.email}>{u.email} {u.status==="connected"?"✓":"(invited)"}</option>
+            {users.map(u => (
+              <option key={u.email} value={u.email}>
+                {u.email} {u.status === "connected" ? "✓" : "(invited)"}
+              </option>
             ))}
           </select>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Plan title</div>
-          <input value={plan.title} onChange={(e)=>setPlan({ ...plan, title:e.target.value })}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-        </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Start date</div>
-          <input type="date" value={plan.startDate} onChange={(e)=>setPlan({ ...plan, startDate:e.target.value })}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-        </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Timezone</div>
-          <select value={plan.timezone} onChange={(e)=>setPlan({ ...plan, timezone:e.target.value })}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-            {TIMEZONES.map((tz)=>(<option key={tz} value={tz}>{tz}</option>))}
-          </select>
-        </label>
+      {/* 1) Task list basics */}
+      <div className="mb-6">
+        <div className="mb-2">
+          <div className="text-sm font-semibold">1) Task list (Google)</div>
+          <div className="text-xs text-gray-500">
+            <b>Title</b> becomes the Google Tasks <b>list name</b> for this user. Tasks you add below go inside that list.
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">Task list title</div>
+            <input
+              value={plan.title}
+              onChange={(e) => setPlan({ ...plan, title: e.target.value })}
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+              placeholder="e.g., Week of Sep 1"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">Start date (Day 0)</div>
+            <input
+              type="date"
+              value={plan.startDate}
+              onChange={(e) => setPlan({ ...plan, startDate: e.target.value })}
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">Timezone</div>
+            <select
+              value={plan.timezone}
+              onChange={(e) => setPlan({ ...plan, timezone: e.target.value })}
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              {TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz}</option>))}
+            </select>
+          </label>
+        </div>
       </div>
 
-      <hr className="my-4" />
-
-      {/* Tasks editor */}
-      <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
-
-      <hr className="my-4" />
-
-      {/* Preview + Export + Push */}
-      <div className="mb-3 text-sm font-semibold">Preview</div>
-      <PreviewWeek startDate={plan.startDate} items={usePreviewItems()} />
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button onClick={async()=>{ await navigator.clipboard.writeText(renderPlanBlock({ plan, blocks, tasks })); alert("Plan2Tasks block copied."); }}
-          className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
-          <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
-        </button>
-        <button onClick={()=>{ const url = toICS({ title: plan.title, startDate: plan.startDate, tasks: usePreviewItems(), timezone: plan.timezone }); const a=document.createElement("a"); a.href=url; a.download=`${plan.title.replace(/\s+/g,"_")}.ics`; a.click(); URL.revokeObjectURL(url); }}
-          className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
-          <Download className="h-4 w-4" /> Export .ics
-        </button>
-        <button onClick={pushToSelectedUser}
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
-          Push Plan to Selected User
-        </button>
-        <div id="push-result" className="text-xs text-gray-600"></div>
+      {/* 2) Recurring tasks (optional) */}
+      <div className="mb-6">
+        <div className="mb-2">
+          <div className="text-sm font-semibold">2) Recurring tasks (optional)</div>
+          <div className="text-xs text-gray-500">
+            Use for repeating blocks (e.g., gym Mon/Wed/Fri 12:00). These will appear in Preview and be delivered like normal tasks.
+          </div>
+        </div>
+        <BlocksEditor blocks={blocks} setBlocks={setBlocks} />
       </div>
+
+      {/* 3) Add tasks (clear add-many loop) */}
+      <div className="mb-6">
+        <div className="mb-2">
+          <div className="text-sm font-semibold">3) Add tasks</div>
+          <div className="text-xs text-gray-500">
+            Add one task, click <b>Add task</b>. The fields clear so you can add another. Repeat for as many tasks as you need.
+          </div>
+        </div>
+        <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
+      </div>
+
+      {/* 4) Preview & deliver — only after something exists */}
+      <div className="mb-3 text-sm font-semibold">4) Preview & deliver</div>
+      {previewItems.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-xs text-gray-500">
+          Nothing to preview yet — add a task or a recurring block above.
+        </div>
+      ) : (
+        <>
+          <PreviewWeek startDate={plan.startDate} items={previewItems} />
+
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <button
+              onClick={async () => {
+                await navigator.clipboard.writeText(renderPlanBlock({ plan, blocks, tasks }));
+                alert("Plan2Tasks block copied.");
+              }}
+              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black"
+            >
+              <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
+            </button>
+
+            <button
+              onClick={() => {
+                const url = toICS({
+                  title: plan.title,
+                  startDate: plan.startDate,
+                  tasks: previewItems,
+                  timezone: plan.timezone,
+                });
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${plan.title.replace(/\s+/g, "_")}.ics`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
+            >
+              <Download className="h-4 w-4" /> Export .ics
+            </button>
+
+            <button
+              onClick={pushToSelectedUser}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            >
+              Push Plan to Selected User
+            </button>
+            <div id="push-result" className="text-xs text-gray-600"></div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-// --- Simple tasks editor & preview ---
+/* ---------- Recurring blocks editor ---------- */
+function BlocksEditor({ blocks, setBlocks }) {
+  const [label, setLabel] = useState("");
+  const [time, setTime] = useState("12:00");
+  const [dur, setDur] = useState(60);
+  const [days, setDays] = useState([]); // array of ints 0..6
+
+  const toggleDay = (d) => setDays((arr) => (arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]));
+
+  const add = () => {
+    const name = label.trim();
+    if (!name || days.length === 0) return;
+    setBlocks([...blocks, { id: uid(), label: name, time, durationMins: Number(dur) || 60, days: [...days].sort() }]);
+    setLabel(""); setTime("12:00"); setDur(60); setDays([]);
+  };
+
+  const remove = (id) => setBlocks(blocks.filter((b) => b.id !== id));
+
+  return (
+    <div>
+      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Label</div>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g., Gym"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+        </label>
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Time</div>
+          <input type="time" value={time} onChange={(e) => setTime(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+        </label>
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Duration (mins)</div>
+          <input type="number" min={15} step={15} value={dur} onChange={(e) => setDur(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+        </label>
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Days of week</div>
+          <div className="flex flex-wrap gap-2">
+            {"SMTWTFS".split("").map((ch, idx) => (
+              <button key={idx} type="button" onClick={() => toggleDay(idx)}
+                className={cn("h-9 w-9 rounded-xl border text-sm font-medium",
+                  days.includes(idx) ? "border-cyan-500 bg-cyan-50 text-cyan-700" : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50")}>
+                {ch}
+              </button>
+            ))}
+          </div>
+        </label>
+      </div>
+      <div className="flex items-center justify-between">
+        <button onClick={add} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
+          <Plus className="h-4 w-4" /> Add recurring block
+        </button>
+        <div className="text-xs text-gray-500">Tip: Add multiple recurring blocks — the form clears after each Add.</div>
+      </div>
+
+      {blocks.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {blocks.map((b) => (
+            <span key={b.id} className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-1 text-xs">
+              {b.label} • {b.time} • {b.durationMins}m • days={b.days.join(",")}
+              <button className="ml-1 text-gray-400 hover:text-gray-600" onClick={() => remove(b.id)} aria-label="Remove">×</button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- Individual tasks editor ---------- */
 function TasksEditor({ startDate, tasks, setTasks }) {
-  const [title, setTitle] = useState(""); const [dayOffset, setDayOffset] = useState(0);
-  const [time, setTime] = useState(""); const [dur, setDur] = useState(60); const [notes, setNotes] = useState("");
-  const add = () => { if (!title.trim()) return; setTasks([...tasks, { id: uid(), title: title.trim(), dayOffset:Number(dayOffset)||0, time: time||undefined, durationMins:Number(dur)||60, notes }]); setTitle(""); setNotes(""); };
-  const remove = (id) => setTasks(tasks.filter((t)=>t.id!==id));
+  const [title, setTitle] = useState("");
+  const [dayOffset, setDayOffset] = useState(0);
+  const [time, setTime] = useState("");
+  const [dur, setDur] = useState(60);
+  const [notes, setNotes] = useState("");
+
+  const add = () => {
+    const name = title.trim();
+    if (!name) return;
+    setTasks([...tasks, { id: uid(), title: name, dayOffset: Number(dayOffset)||0, time: time || undefined, durationMins: Number(dur)||60, notes }]);
+    setTitle(""); setNotes(""); // keep day/time if you want faster input
+  };
+
+  const remove = (id) => setTasks(tasks.filter((t) => t.id !== id));
+
   return (
     <div>
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-5">
         <label className="block">
-          <div className="mb-1 text-sm font-medium">Title</div>
-          <input value={title} onChange={(e)=>setTitle(e.target.value)} placeholder="e.g., Write proposal" className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <div className="mb-1 text-sm font-medium">Task title</div>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Write proposal"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
         <label className="block">
-          <div className="mb-1 text-sm font-medium">Day</div>
+          <div className="mb-1 text-sm font-medium">Day (0 = start)</div>
           <select value={dayOffset} onChange={(e)=>setDayOffset(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             {[0,1,2,3,4,5,6].map((d)=>(<option key={d} value={d}>{format(addDays(startDate, d), "EEE MM/dd")}</option>))}
           </select>
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
-          <input type="time" value={time} onChange={(e)=>setTime(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <input type="time" value={time} onChange={(e)=>setTime(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Duration (mins)</div>
-          <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Notes</div>
-          <input value={notes} onChange={(e)=>setNotes(e.target.value)} placeholder="optional" className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <input value={notes} onChange={(e)=>setNotes(e.target.value)} placeholder="optional"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
       </div>
-      {tasks.length > 0 && (<div className="mt-2 space-y-2">{tasks.map((t)=>(
-        <div key={t.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3">
-          <div className="text-sm">
-            <div className="font-medium text-gray-900">{t.title}</div>
-            <div className="text-gray-500">{format(addDays(startDate, t.dayOffset), "EEE MM/dd")} • {t.time || "all-day"} • {t.durationMins}m{t.notes ? ` • ${t.notes}` : ""}</div>
-          </div>
-          <button onClick={()=>remove(t.id)} className="rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
+
+      <div className="flex items-center justify-between">
+        <button onClick={add} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
+          <Plus className="h-4 w-4" /> Add task
+        </button>
+        <div className="text-xs text-gray-500">Add another right away — the form stays here as you build the list.</div>
+      </div>
+
+      {tasks.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {tasks.map((t) => (
+            <div key={t.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3">
+              <div className="text-sm">
+                <div className="font-medium text-gray-900">{t.title}</div>
+                <div className="text-gray-500">
+                  {format(addDays(startDate, t.dayOffset), "EEE MM/dd")} • {t.time || "all-day"} • {t.durationMins}m{t.notes ? ` • ${t.notes}` : ""}
+                </div>
+              </div>
+              <button onClick={()=>remove(t.id)} className="rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
+            </div>
+          ))}
         </div>
-      ))}</div>)}
+      )}
     </div>
   );
 }
+
+/* ---------- Preview grid ---------- */
 function PreviewWeek({ startDate, items }) {
   const grouped = useMemo(()=>{ const g=new Map(); for (let d=0; d<7; d++) g.set(d, []); items.forEach((it)=>{ g.get(it.dayOffset)?.push(it); }); return g; }, [items]);
   return (
@@ -603,6 +806,8 @@ function PreviewWeek({ startDate, items }) {
     </div>
   );
 }
+
+/* ---------- Plan2Tasks export text ---------- */
 export function renderPlanBlock({ plan, blocks, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
