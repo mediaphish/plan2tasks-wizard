@@ -11,48 +11,24 @@ function absoluteBase(req) {
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "GET only" });
+  const plannerEmail = req.query.plannerEmail;
+  if (!plannerEmail) return res.status(400).json({ error: "Missing plannerEmail" });
 
-  const { plannerEmail } = req.query || {};
-  const supabase = supabaseAdmin();
-
-  let rows;
-
-  // Try selecting with planner_email; if the column doesn't exist, fall back cleanly.
-  let { data, error } = await supabase
+  const sb = supabaseAdmin();
+  const { data, error } = await sb
     .from("user_connections")
-    .select("planner_email,user_email,status,invite_code")
-    .order("user_email", { ascending: true });
+    .select("user_email,status,invite_code,updated_at")
+    .eq("planner_email", plannerEmail)
+    .order("updated_at", { ascending: false });
 
-  if (error) {
-    // Fallback: select without planner_email column
-    const resp = await supabase
-      .from("user_connections")
-      .select("user_email,status,invite_code")
-      .order("user_email", { ascending: true });
-
-    if (resp.error) {
-      return res.status(500).json({ error: resp.error.message });
-    }
-    rows = resp.data || [];
-  } else {
-    rows = data || [];
-  }
-
-  // Filter by plannerEmail only if the column exists in the result rows
-  if (plannerEmail) {
-    const hasPlanner = rows.length && Object.prototype.hasOwnProperty.call(rows[0], "planner_email");
-    if (hasPlanner) {
-      rows = rows.filter(
-        (r) => (r.planner_email || "").toLowerCase() === plannerEmail.toLowerCase()
-      );
-    }
-  }
+  if (error) return res.status(500).json({ error: error.message });
 
   const base = absoluteBase(req);
-  const users = rows.map((r) => ({
+  const users = (data || []).map((r) => ({
     email: r.user_email,
-    status: r.status || "invited",
+    status: r.status,
     inviteLink: r.invite_code ? `${base}/api/google/start?invite=${r.invite_code}` : null,
+    updatedAt: r.updated_at
   }));
 
   return res.status(200).json({ users });
