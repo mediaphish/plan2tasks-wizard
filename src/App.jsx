@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Calendar, Check, ClipboardCopy, Download, ListChecks, Plus, Sparkles, Users, Trash2, Edit3, Save, LogOut, Search, Tags, FolderPlus, FolderX, ArrowRight } from "lucide-react";
+import { Calendar, Check, ClipboardCopy, Download, ListChecks, Plus, Sparkles, Users, Trash2, Edit3, Save, LogOut, Search, Tag, FolderPlus, X, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
@@ -151,16 +151,21 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-// --- Users Dashboard with tabs, groups, search ---
+// --- Users Dashboard (tabs, search, filter, multi-groups, hidden Create Group) ---
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [tab, setTab] = useState("connected"); // "connected" | "invited"
+  const [tab, setTab] = useState("connected"); // connected | invited
   const [q, setQ] = useState("");
-  const [groupId, setGroupId] = useState(""); // "", "null" (no group), or a UUID
+  const [groupId, setGroupId] = useState(""); // "", "null", or uuid
   const [addEmail, setAddEmail] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
+
   const [editing, setEditing] = useState(null); const [editVal, setEditVal] = useState("");
+  const [manageFor, setManageFor] = useState(null); // email currently editing groups
+  const [manageSelected, setManageSelected] = useState([]); // groupIds for that user
+
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
 
   async function loadGroups() {
@@ -189,6 +194,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setAddEmail("");
     await loadUsers();
   }
+
   async function delUser(email) {
     if (!confirm(`Delete ${email}?`)) return;
     const resp = await fetch("/api/users/delete", { method:"POST", headers:{ "Content-Type":"application/json" },
@@ -197,6 +203,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     if (!resp.ok) return alert(data.error || "Delete failed");
     await loadUsers();
   }
+
   async function saveEdit(oldEmail) {
     const resp = await fetch("/api/users/update", { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, userEmail: oldEmail, newEmail: editVal.trim() }) });
@@ -205,6 +212,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setEditing(null); setEditVal("");
     await loadUsers();
   }
+
   async function createGroup() {
     const name = newGroupName.trim();
     if (!name) return;
@@ -213,10 +221,12 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     const data = await resp.json();
     if (!resp.ok) return alert(data.error || "Create group failed");
     setNewGroupName("");
+    setShowCreateGroup(false);
     await loadGroups();
   }
+
   async function deleteGroup(id) {
-    if (!confirm("Delete this group? Users will remain but be unassigned.")) return;
+    if (!confirm("Delete this group? Users will remain but be unassigned from it.")) return;
     const resp = await fetch("/api/groups/delete", { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, groupId: id }) });
     const data = await resp.json();
@@ -224,16 +234,30 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     if (groupId === id) setGroupId("");
     await loadGroups(); await loadUsers();
   }
-  async function assignGroup(email, id) {
-    const resp = await fetch("/api/users/assign-group", { method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ plannerEmail, userEmail: email, groupId: id || null }) });
+
+  function beginManageGroups(u) {
+    setManageFor(u.email);
+    setManageSelected((u.groups || []).map(g=>g.id));
+  }
+  function cancelManage() {
+    setManageFor(null);
+    setManageSelected([]);
+  }
+  async function saveManage() {
+    const resp = await fetch("/api/users/set-groups", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ plannerEmail, userEmail: manageFor, groupIds: manageSelected })
+    });
     const data = await resp.json();
-    if (!resp.ok) return alert(data.error || "Assign group failed");
+    if (!resp.ok) return alert(data.error || "Save groups failed");
+    cancelManage();
     await loadUsers();
   }
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      {/* Header row: search, filter by group, create group button */}
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Users Dashboard</h2>
@@ -245,20 +269,27 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
             <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search email"
               className="px-2 py-1 text-sm outline-none" />
           </div>
-          <div className="flex items-center gap-2">
-            <select value={groupId} onChange={(e)=>setGroupId(e.target.value)}
-              className="rounded-xl border border-gray-300 px-3 py-2 text-sm">
-              <option value="">All groups</option>
-              <option value="null">No group</option>
-              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-            <div className="flex items-center gap-1">
-              <input value={newGroupName} onChange={(e)=>setNewGroupName(e.target.value)} placeholder="New group"
+          <select value={groupId} onChange={(e)=>setGroupId(e.target.value)}
+            className="rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            <option value="">All groups</option>
+            <option value="null">No group</option>
+            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+
+          {/* Create Group (hidden until clicked) */}
+          {!showCreateGroup ? (
+            <button onClick={()=>setShowCreateGroup(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+              <FolderPlus className="h-4 w-4" /> Create group
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <input value={newGroupName} onChange={(e)=>setNewGroupName(e.target.value)} placeholder="Group name"
                 className="rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-              <button onClick={createGroup} title="Create group"
-                className="rounded-xl border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"><FolderPlus className="h-4 w-4" /></button>
+              <button onClick={createGroup} className="rounded-xl bg-cyan-600 px-3 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Create</button>
+              <button onClick={()=>{ setShowCreateGroup(false); setNewGroupName(""); }} className="rounded-xl border border-gray-300 px-3 py-2 text-sm">Cancel</button>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -289,61 +320,93 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
             <tr className="text-left text-gray-500">
               <th className="py-2">Email</th>
               <th className="py-2">Status</th>
-              <th className="py-2">Group</th>
+              <th className="py-2">Groups</th>
               <th className="py-2">Invite link</th>
               <th className="py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {(users || []).map((u) => (
-              <tr key={u.email} className="border-t">
-                <td className="py-2">{u.email}</td>
-                <td className="py-2">{u.status === "connected" ? "✓ connected" : "invited"}</td>
-                <td className="py-2">
-                  <select value={u.groupId || ""} onChange={(e)=>assignGroup(u.email, e.target.value || null)}
-                    className="rounded-lg border border-gray-300 px-2 py-1 text-xs">
-                    <option value="">—</option>
-                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
-                </td>
-                <td className="py-2">
-                  {u.inviteLink ? (
-                    <div className="flex items-center gap-2">
-                      <button onClick={()=>{ navigator.clipboard.writeText(u.inviteLink); alert("Invite link copied"); }}
-                        className="rounded-lg border border-gray-300 px-2 py-1 text-xs">Copy</button>
-                      <a href={u.inviteLink} target="_blank" rel="noreferrer" className="text-cyan-700 underline text-xs">Open</a>
+              <React.Fragment key={u.email}>
+                <tr className="border-t">
+                  <td className="py-2">{u.email}</td>
+                  <td className="py-2">{u.status === "connected" ? "✓ connected" : "invited"}</td>
+                  <td className="py-2">
+                    <div className="flex flex-wrap items-center gap-1">
+                      {(u.groups && u.groups.length > 0) ? u.groups.map(g => (
+                        <span key={g.id} className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-50 px-2 py-0.5 text-[11px]">
+                          <Tag className="h-3 w-3 text-gray-500" /> {g.name || "—"}
+                        </span>
+                      )) : <span className="text-xs text-gray-400">—</span>}
+                      <button onClick={()=>beginManageGroups(u)} className="ml-2 rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
                     </div>
-                  ) : <span className="text-xs text-gray-400">—</span>}
-                </td>
-                <td className="py-2">
-                  <div className="flex justify-end gap-2">
-                    {u.status !== "connected" ? (
-                      <>
-                        <button onClick={()=>{ setEditing(u.email); setEditVal(u.email); }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs">
-                          <Edit3 className="h-3 w-3" /> Edit
-                        </button>
-                        {editing === u.email && (
-                          <>
-                            <input value={editVal} onChange={(e)=>setEditVal(e.target.value)} className="rounded-lg border border-gray-300 px-2 py-1 text-xs" />
-                            <button onClick={()=>saveEdit(u.email)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">
-                              <Save className="h-3 w-3" /> Save
-                            </button>
-                          </>
-                        )}
-                      </>
-                    ) : null}
+                  </td>
+                  <td className="py-2">
+                    {u.inviteLink ? (
+                      <div className="flex items-center gap-2">
+                        <button onClick={()=>{ navigator.clipboard.writeText(u.inviteLink); alert("Invite link copied"); }}
+                          className="rounded-lg border border-gray-300 px-2 py-1 text-xs">Copy</button>
+                        <a href={u.inviteLink} target="_blank" rel="noreferrer" className="text-cyan-700 underline text-xs">Open</a>
+                      </div>
+                    ) : <span className="text-xs text-gray-400">—</span>}
+                  </td>
+                  <td className="py-2">
+                    <div className="flex justify-end gap-2">
+                      {u.status !== "connected" ? (
+                        <>
+                          <button onClick={()=>{ setEditing(u.email); setEditVal(u.email); }}
+                            className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs">
+                            <Edit3 className="h-3 w-3" /> Edit
+                          </button>
+                          {editing === u.email && (
+                            <>
+                              <input value={editVal} onChange={(e)=>setEditVal(e.target.value)} className="rounded-lg border border-gray-300 px-2 py-1 text-xs" />
+                              <button onClick={()=>saveEdit(u.email)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">
+                                <Save className="h-3 w-3" /> Save
+                              </button>
+                            </>
+                          )}
+                        </>
+                      ) : null}
 
-                    <button onClick={()=>onCreateTasks(u.email)}
-                      className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-xs font-semibold text-white hover:bg-black">
-                      Create tasks <ArrowRight className="h-3 w-3" />
-                    </button>
-                    <button onClick={()=>delUser(u.email)} className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs">
-                      <Trash2 className="h-3 w-3" /> Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                      <button onClick={()=>onCreateTasks(u.email)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-xs font-semibold text-white hover:bg-black">
+                        Create tasks <ArrowRight className="h-3 w-3" />
+                      </button>
+                      <button onClick={()=>delUser(u.email)} className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs">
+                        <Trash2 className="h-3 w-3" /> Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+
+                {/* Inline manage groups panel */}
+                {manageFor === u.email && (
+                  <tr className="border-b bg-gray-50">
+                    <td colSpan={5} className="p-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        {groups.length === 0 && <span className="text-xs text-gray-500">No groups yet. Click “Create group” above.</span>}
+                        {groups.map(g => {
+                          const checked = manageSelected.includes(g.id);
+                          return (
+                            <label key={g.id} className={cn("inline-flex items-center gap-2 rounded-xl border px-2 py-1 text-xs",
+                              checked ? "border-cyan-500 bg-white" : "border-gray-300 bg-white")}>
+                              <input type="checkbox" checked={checked} onChange={(e)=>{
+                                setManageSelected(prev => e.target.checked ? [...prev, g.id] : prev.filter(x=>x!==g.id));
+                              }} />
+                              {g.name}
+                            </label>
+                          );
+                        })}
+                        <div className="ml-auto flex items-center gap-2">
+                          <button onClick={saveManage} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">Save</button>
+                          <button onClick={cancelManage} className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs">Cancel</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
             {(!users || users.length === 0) && (
               <tr><td className="py-6 text-gray-500" colSpan={5}>No users found.</td></tr>
@@ -355,9 +418,8 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   );
 }
 
-// --- Planner wizard (unchanged except for initialSelectedUserEmail support) ---
+// --- Planner wizard (same as before, supports initialSelectedUserEmail) ---
 function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
-  const [step, setStep] = useState(0);
   const [plan, setPlan] = useState({ title:"Weekly Plan", startDate: format(new Date(), "yyyy-MM-dd"), timezone: "America/Chicago" });
   const [blocks, setBlocks] = useState([{ id: uid(), label:"Gym", days:[1,2,3,4,5], time:"12:00", durationMins:60 }]);
   const [tasks, setTasks] = useState([]);
@@ -412,8 +474,8 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   }
 
   return (
-    <>
-      {/* Minimal wizard UI from your current build */}
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      {/* Basics */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Plan</h2>
         <div className="w-72">
@@ -427,59 +489,56 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        {/* Basics */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">Plan title</div>
-            <input value={plan.title} onChange={(e)=>setPlan({ ...plan, title:e.target.value })}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-          </label>
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">Start date</div>
-            <input type="date" value={plan.startDate} onChange={(e)=>setPlan({ ...plan, startDate:e.target.value })}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-          </label>
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">Timezone</div>
-            <select value={plan.timezone} onChange={(e)=>setPlan({ ...plan, timezone:e.target.value })}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-              {TIMEZONES.map((tz)=>(<option key={tz} value={tz}>{tz}</option>))}
-            </select>
-          </label>
-        </div>
-
-        <hr className="my-4" />
-
-        {/* Tasks editor (simple) */}
-        <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
-
-        <hr className="my-4" />
-
-        {/* Preview + Export + Push */}
-        <div className="mb-3 text-sm font-semibold">Preview</div>
-        <PreviewWeek startDate={plan.startDate} items={usePreviewItems()} />
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button onClick={async()=>{ await navigator.clipboard.writeText(renderPlanBlock({ plan, blocks, tasks })); alert("Plan2Tasks block copied."); }}
-            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
-            <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
-          </button>
-          <button onClick={()=>{ const url = toICS({ title: plan.title, startDate: plan.startDate, tasks: usePreviewItems(), timezone: plan.timezone }); const a=document.createElement("a"); a.href=url; a.download=`${plan.title.replace(/\s+/g,"_")}.ics`; a.click(); URL.revokeObjectURL(url); }}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
-            <Download className="h-4 w-4" /> Export .ics
-          </button>
-          <button onClick={pushToSelectedUser}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
-            Push Plan to Selected User
-          </button>
-          <div id="push-result" className="text-xs text-gray-600"></div>
-        </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Plan title</div>
+          <input value={plan.title} onChange={(e)=>setPlan({ ...plan, title:e.target.value })}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Start date</div>
+          <input type="date" value={plan.startDate} onChange={(e)=>setPlan({ ...plan, startDate:e.target.value })}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Timezone</div>
+          <select value={plan.timezone} onChange={(e)=>setPlan({ ...plan, timezone:e.target.value })}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            {TIMEZONES.map((tz)=>(<option key={tz} value={tz}>{tz}</option>))}
+          </select>
+        </label>
       </div>
-    </>
+
+      <hr className="my-4" />
+
+      {/* Tasks editor */}
+      <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
+
+      <hr className="my-4" />
+
+      {/* Preview + Export + Push */}
+      <div className="mb-3 text-sm font-semibold">Preview</div>
+      <PreviewWeek startDate={plan.startDate} items={usePreviewItems()} />
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button onClick={async()=>{ await navigator.clipboard.writeText(renderPlanBlock({ plan, blocks, tasks })); alert("Plan2Tasks block copied."); }}
+          className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">
+          <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
+        </button>
+        <button onClick={()=>{ const url = toICS({ title: plan.title, startDate: plan.startDate, tasks: usePreviewItems(), timezone: plan.timezone }); const a=document.createElement("a"); a.href=url; a.download=`${plan.title.replace(/\s+/g,"_")}.ics`; a.click(); URL.revokeObjectURL(url); }}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+          <Download className="h-4 w-4" /> Export .ics
+        </button>
+        <button onClick={pushToSelectedUser}
+          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+          Push Plan to Selected User
+        </button>
+        <div id="push-result" className="text-xs text-gray-600"></div>
+      </div>
+    </div>
   );
 }
 
-// --- Simple tasks editor & preview (unchanged) ---
+// --- Simple tasks editor & preview ---
 function TasksEditor({ startDate, tasks, setTasks }) {
   const [title, setTitle] = useState(""); const [dayOffset, setDayOffset] = useState(0);
   const [time, setTime] = useState(""); const [dur, setDur] = useState(60); const [notes, setNotes] = useState("");
