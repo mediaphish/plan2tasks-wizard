@@ -15,13 +15,13 @@ export default async function handler(req, res) {
   const plannerEmail = req.query.plannerEmail;
   const status = req.query.status;    // "connected" | "invited" | undefined
   const groupId = req.query.groupId;  // uuid | "null" | ""
-  const q = req.query.q || "";        // search by email (ilike)
+  const q = req.query.q || "";        // search by email
 
   if (!plannerEmail) return res.status(400).json({ error: "Missing plannerEmail" });
 
   const sb = supabaseAdmin();
 
-  // 1) Base users
+  // 1) base users
   let usersQuery = sb.from("user_connections")
     .select("user_email,status,invite_code,updated_at")
     .eq("planner_email", plannerEmail);
@@ -34,11 +34,9 @@ export default async function handler(req, res) {
 
   const emails = (usersRaw || []).map(r => r.user_email);
   const base = absoluteBase(req);
-
-  // Early return if no users
   if (emails.length === 0) return res.status(200).json({ users: [] });
 
-  // 2) Memberships for these users
+  // 2) memberships
   let memQuery = sb.from("user_group_members")
     .select("user_email, group_id")
     .eq("planner_email", plannerEmail)
@@ -49,7 +47,7 @@ export default async function handler(req, res) {
   const { data: members, error: e2 } = await memQuery;
   if (e2) return res.status(500).json({ error: e2.message });
 
-  // If filtering for "no group"
+  // group filtering
   let emailsWithGroup = new Set((members || []).map(m => m.user_email));
   let filteredUsers = usersRaw;
   if (groupId === "null") {
@@ -58,7 +56,7 @@ export default async function handler(req, res) {
     filteredUsers = usersRaw.filter(u => emailsWithGroup.has(u.user_email));
   }
 
-  // 3) Load group names for the groups we saw
+  // 3) group names
   const groupIds = [...new Set((members || []).map(m => m.group_id).filter(Boolean))];
   let groupMap = new Map();
   if (groupIds.length > 0) {
@@ -70,7 +68,7 @@ export default async function handler(req, res) {
     groupMap = new Map((groups || []).map(g => [g.id, g.name]));
   }
 
-  // 4) Build response
+  // 4) build response
   const groupsByEmail = new Map();
   for (const m of (members || [])) {
     if (!groupsByEmail.has(m.user_email)) groupsByEmail.set(m.user_email, []);
