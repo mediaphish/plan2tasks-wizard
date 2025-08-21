@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   const from = process.env.EMAIL_FROM || "Plan2Tasks <noreply@example.com>";
 
   if (!apiKey) {
-    // No email setup? Still succeed so the UI flows; planner can copy the link.
+    // No email setup? Still succeed so planner can copy the link.
     return res.status(200).json({ sent: false, reason: "email not configured" });
   }
 
