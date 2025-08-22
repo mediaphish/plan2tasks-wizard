@@ -3,7 +3,7 @@ import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, Ar
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-/* ---------------- Error Boundary (prevents black screen) ---------------- */
+/* ---------------- Error Boundary ---------------- */
 class ErrorBoundary extends React.Component {
   constructor(props){ super(props); this.state = { error: null }; }
   static getDerivedStateFromError(error){ return { error }; }
@@ -14,13 +14,9 @@ class ErrorBoundary extends React.Component {
         <div className="min-h-screen bg-red-50 p-6">
           <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-white p-4">
             <h2 className="mb-2 text-lg font-bold text-red-700">Something went wrong in the UI</h2>
-            <p className="mb-3 text-sm text-red-700">
-              The screen would have gone black. I’ve caught the error so you can see it:
-            </p>
             <pre className="overflow-auto rounded bg-red-100 p-3 text-xs text-red-900">
 {String(this.state.error?.message || this.state.error)}
             </pre>
-            <p className="mt-3 text-xs text-gray-500">Open the browser console for details if needed.</p>
           </div>
         </div>
       );
@@ -29,29 +25,15 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-/* ---------------- helpers (defensive) ---------------- */
+/* ---------------- helpers ---------------- */
 function cn(...classes){ return classes.filter(Boolean).join(" "); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 function uid(){ return Math.random().toString(36).slice(2,10); }
+function parseISODate(s){ if (!s) return null; const d = new Date(`${s}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d; }
+function addDaysSafe(startDateStr, d){ const base = parseISODate(startDateStr) || new Date(); const dt = new Date(base); dt.setDate(dt.getDate() + (Number(d) || 0)); return dt; }
+function fmtDayLabel(startDateStr, d){ try { return format(addDaysSafe(startDateStr, d), "EEE MM/dd"); } catch { return `Day ${d}`; } }
 
-// Safely parse ISO date from <input type="date"> ("yyyy-MM-dd")
-function parseISODate(s){
-  if (!s) return null;
-  const d = new Date(`${s}T00:00:00`);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-function addDaysSafe(startDateStr, d){
-  const base = parseISODate(startDateStr) || new Date();
-  const dt = new Date(base);
-  dt.setDate(dt.getDate() + (Number(d) || 0));
-  return dt;
-}
-function fmtDayLabel(startDateStr, d){
-  try { return format(addDaysSafe(startDateStr, d), "EEE MM/dd"); }
-  catch { return `Day ${d}`; }
-}
-
-/* ---------------- Auth screen ---------------- */
+/* ---------------- Auth ---------------- */
 function AuthScreen({ onSignedIn }) {
   const [mode, setMode] = useState("signup");
   const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
@@ -135,7 +117,7 @@ function AppInner(){
   return <AppShell plannerEmail={plannerEmail} />;
 }
 
-/* ---------------- App shell ---------------- */
+/* ---------------- Shell ---------------- */
 function AppShell({ plannerEmail }) {
   const [view, setView] = useState("users");
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
@@ -174,13 +156,13 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-/* ---------------- Users Dashboard (unchanged behavior) ---------------- */
+/* ---------------- Users Dashboard (same behavior) ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [tab, setTab] = useState("connected"); // connected | invited
+  const [tab, setTab] = useState("connected");
   const [q, setQ] = useState("");
-  const [groupId, setGroupId] = useState(""); // "", "null", or uuid
+  const [groupId, setGroupId] = useState("");
   const [addEmail, setAddEmail] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
 
@@ -258,7 +240,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setManageFor(u.email);
     setManageSelected((u.groups || []).map(g=>g.id));
   }
-  function cancelManage() { setManageFor(null); setManageSelected([]); }
   async function saveManage() {
     const resp = await fetch(`/api/users?op=set-groups`, {
       method:"POST",
@@ -267,7 +248,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     });
     const data = await resp.json();
     if (!resp.ok) return alert(data.error || "Save groups failed");
-    cancelManage();
+    setManageFor(null); setManageSelected([]);
     await loadUsers();
   }
 
@@ -392,7 +373,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                   </td>
                 </tr>
 
-                {/* Inline multi-group manager */}
                 {manageFor === u.email && (
                   <tr className="border-b bg-gray-50">
                     <td colSpan={5} className="p-3">
@@ -444,6 +424,7 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
 
   const [users, setUsers] = useState([]);
   const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
+  const [replaceMode, setReplaceMode] = useState(false);
   const [resultMsg, setResultMsg] = useState("");
 
   useEffect(() => {
@@ -473,16 +454,17 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       if (!selectedUserEmail) throw new Error("Choose a user first.");
       if (tasks.length === 0) throw new Error("Add at least one task.");
 
-      const planBlock = renderPlanBlock({ plan, tasks }); // tasks only
+      const planBlock = renderPlanBlock({ plan, tasks });
       const resp = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: selectedUserEmail, planBlock }),
+        body: JSON.stringify({ userEmail: selectedUserEmail, planBlock, mode: (replaceMode ? "replace" : "append") }),
       });
       const text = await resp.text();
       let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
       if (!resp.ok) throw new Error(data.error || "Push failed");
-      setResultMsg(`Success — created ${data.created} tasks for ${selectedUserEmail}.`);
+      const deletedMsg = data.mode === "replace" ? `Removed ${data.deleted} existing tasks. ` : "";
+      setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle}".`);
     } catch (e) {
       setResultMsg("Error: " + e.message);
     }
@@ -569,8 +551,11 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       ) : (
         <>
           <PreviewWeek startDate={plan.startDate} items={previewItems} />
-
           <div className="mt-4 flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
+              Replace existing tasks in this list before pushing
+            </label>
             <button
               onClick={pushToSelectedUser}
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
@@ -670,9 +655,8 @@ function TasksEditor({ startDate, tasks, setTasks }) {
   );
 }
 
-/* ---------- Preview grid (added; fixes 'PreviewWeek is not defined') ---------- */
+/* ---------- Preview grid ---------- */
 function PreviewWeek({ startDate, items }) {
-  // Group items by dayOffset 0..6
   const grouped = useMemo(() => {
     const g = new Map();
     for (let d = 0; d < 7; d++) g.set(d, []);
@@ -681,7 +665,6 @@ function PreviewWeek({ startDate, items }) {
       if (!g.has(key)) g.set(key, []);
       g.get(key).push(it);
     });
-    // sort each day by time string
     for (const d of g.keys()) {
       g.get(d).sort((a,b) => (a.time || "").localeCompare(b.time || ""));
     }
