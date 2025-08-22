@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Calendar, ClipboardCopy, Download, Users, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight, Plus } from "lucide-react";
+import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
@@ -8,33 +8,6 @@ function cn(...classes){ return classes.filter(Boolean).join(" "); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
-function escapeICS(text){ return String(text).replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;"); }
-
-/* ---------------- ICS export ---------------- */
-function toICS({ title, startDate, tasks, timezone }) {
-  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//Wizard//EN"];
-  tasks.forEach((t) => {
-    const dt = new Date(startDate);
-    dt.setDate(dt.getDate() + t.dayOffset);
-    let DTSTART="", DTEND="";
-    if (t.time) {
-      const [h,m] = t.time.split(":").map(Number);
-      dt.setHours(h, m||0, 0, 0);
-      const end = new Date(dt.getTime() + (t.durationMins||60)*60000);
-      DTSTART = `DTSTART;TZID=${timezone}:${format(dt, "yyyyMMdd'T'HHmm")}`;
-      DTEND = `DTEND;TZID=${timezone}:${format(end, "yyyyMMdd'T'HHmm")}`;
-    } else {
-      const end = new Date(dt); end.setDate(end.getDate()+1);
-      DTSTART = `DTSTART;VALUE=DATE:${format(dt,"yyyyMMdd")}`;
-      DTEND = `DTEND;VALUE=DATE:${format(end,"yyyyMMdd")}`;
-    }
-    const uidStr=uid();
-    lines.push("BEGIN:VEVENT",`UID:${uidStr}@plan2tasks`,`DTSTAMP:${format(new Date(),"yyyyMMdd'T'HHmmss")}Z`,`SUMMARY:${escapeICS(t.title)}`,`DESCRIPTION:${escapeICS(t.notes||"")}`,DTSTART,DTEND,"END:VEVENT");
-  });
-  lines.push("END:VCALENDAR");
-  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
-  return URL.createObjectURL(blob);
-}
 
 /* ---------------- Auth screen ---------------- */
 function AuthScreen({ onSignedIn }) {
@@ -144,13 +117,13 @@ function AppShell({ plannerEmail }) {
               plannerEmail={plannerEmail}
               onCreateTasks={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
             />
-          : <Wizard plannerEmail={plannerEmail} initialSelectedUserEmail={selectedUserEmail} />}
+          : <TasksOnlyWizard plannerEmail={plannerEmail} initialSelectedUserEmail={selectedUserEmail} />}
       </div>
     </div>
   );
 }
 
-/* ---------------- Users Dashboard ---------------- */
+/* ---------------- Users Dashboard (same behavior you had) ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -161,8 +134,8 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [statusMsg, setStatusMsg] = useState("");
 
   const [editing, setEditing] = useState(null); const [editVal, setEditVal] = useState("");
-  const [manageFor, setManageFor] = useState(null); // email being edited
-  const [manageSelected, setManageSelected] = useState([]); // groupIds for that user
+  const [manageFor, setManageFor] = useState(null);
+  const [manageSelected, setManageSelected] = useState([]);
 
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
@@ -249,11 +222,10 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      {/* Header row: search, group filter, create group button */}
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Users Dashboard</h2>
-          <p className="text-sm text-gray-500">Add, group, and manage users. Create tasks for a specific user with one click.</p>
+          <p className="text-sm text-gray-500">Add, group, and manage users. Click “Create tasks” to deliver tasks to a specific user’s Google Tasks.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
@@ -284,7 +256,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="mb-4 flex gap-2">
         <button onClick={()=>setTab("connected")}
           className={cn("rounded-xl px-3 py-2 text-sm font-semibold", tab==="connected" ? "bg-emerald-600 text-white" : "bg-white border border-gray-300")}>
@@ -296,7 +267,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
         </button>
       </div>
 
-      {/* Add user */}
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
         <input value={addEmail} onChange={(e)=>setAddEmail(e.target.value)} type="email" placeholder="user@example.com"
           className="rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
@@ -304,7 +274,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
       </div>
       <div className="mb-4 text-xs text-gray-600">{statusMsg}</div>
 
-      {/* Users table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -372,7 +341,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                   </td>
                 </tr>
 
-                {/* Inline multi-group manager */}
                 {manageFor === u.email && (
                   <tr className="border-b bg-gray-50">
                     <td colSpan={5} className="p-3">
@@ -413,18 +381,18 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   );
 }
 
-/* ---------------- Planner Wizard (unchanged logic) ---------------- */
-function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
+/* ---------------- Tasks-only wizard ---------------- */
+function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
     startDate: format(new Date(), "yyyy-MM-dd"),
     timezone: "America/Chicago",
   });
-  const [blocks, setBlocks] = useState([]);
   const [tasks, setTasks] = useState([]);
 
   const [users, setUsers] = useState([]);
   const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
+  const [resultMsg, setResultMsg] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -444,36 +412,16 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   }, [plannerEmail, initialSelectedUserEmail]);
 
   const previewItems = useMemo(() => {
-    const out = [...tasks.map((t) => ({ ...t, type: "task" }))];
-    blocks.forEach((b) => {
-      for (let d = 0; d < 7; d++) {
-        const date = new Date(plan.startDate);
-        date.setDate(date.getDate() + d);
-        const dow = date.getDay();
-        if (b.days.includes(dow)) {
-          out.push({
-            id: uid(),
-            type: "block",
-            title: b.label,
-            dayOffset: d,
-            time: b.time,
-            durationMins: b.durationMins,
-            notes: "Recurring block",
-          });
-        }
-      }
-    });
-    return out.sort((a, b) => a.dayOffset - b.dayOffset || (a.time || "").localeCompare(b.time || ""));
-  }, [blocks, tasks, plan.startDate]);
+    return [...tasks].sort((a, b) => a.dayOffset - b.dayOffset || (a.time || "").localeCompare(b.time || ""));
+  }, [tasks]);
 
   async function pushToSelectedUser() {
-    const outEl = document.getElementById("push-result");
     try {
-      if (outEl) outEl.textContent = "Pushing...";
+      setResultMsg("Pushing...");
       if (!selectedUserEmail) throw new Error("Choose a user first.");
-      if (tasks.length === 0 && blocks.length === 0) throw new Error("Add at least one task or recurring block.");
+      if (tasks.length === 0) throw new Error("Add at least one task.");
 
-      const planBlock = renderPlanBlock({ plan, blocks, tasks });
+      const planBlock = renderPlanBlock({ plan, tasks }); // (no blocks)
       const resp = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -482,16 +430,16 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       const text = await resp.text();
       let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
       if (!resp.ok) throw new Error(data.error || "Push failed");
-      if (outEl) outEl.textContent = `Success — created ${data.created} tasks for ${selectedUserEmail}.`;
-    } catch (e) { if (outEl) outEl.textContent = "Error: " + e.message; }
+      setResultMsg(`Success — created ${data.created} tasks for ${selectedUserEmail}.`);
+    } catch (e) {
+      setResultMsg("Error: " + e.message);
+    }
   }
-
-  const hasAnything = previewItems.length > 0;
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Plan</h2>
+        <h2 className="text-lg font-semibold">Plan (Tasks only)</h2>
         <div className="w-72">
           <select
             value={selectedUserEmail}
@@ -508,11 +456,13 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
+      {/* 1) List title / Start date / Timezone */}
       <div className="mb-6">
         <div className="mb-2">
           <div className="text-sm font-semibold">1) Task list (Google)</div>
           <div className="text-xs text-gray-500">
-            <b>Title</b> becomes the Google Tasks <b>list name</b> for this user. Tasks you add below go inside that list.
+            <b>Title</b> becomes the Google Tasks <b>list name</b>. Tasks you add below go inside that list.
+            Google Tasks shows items on the All-day row; we include time in the title so it’s obvious.
           </div>
         </div>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -547,30 +497,22 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
+      {/* 2) Add tasks (loop) */}
       <div className="mb-6">
         <div className="mb-2">
-          <div className="text-sm font-semibold">2) Recurring tasks (optional)</div>
+          <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
-            Use for repeating blocks (e.g., gym Mon/Wed/Fri 12:00). These will appear in Preview and be delivered like normal tasks.
-          </div>
-        </div>
-        <BlocksEditor blocks={blocks} setBlocks={setBlocks} />
-      </div>
-
-      <div className="mb-6">
-        <div className="mb-2">
-          <div className="text-sm font-semibold">3) Add tasks</div>
-          <div className="text-xs text-gray-500">
-            Add one task, click <b>Add task</b>. The fields clear so you can add another. Repeat for as many tasks as you need.
+            Add a task and click <b>Add task</b>. The form stays put so you can add more. Day is an offset from the Start date (0–6).
           </div>
         </div>
         <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
       </div>
 
-      <div className="mb-3 text-sm font-semibold">4) Preview & deliver</div>
-      {!hasAnything ? (
+      {/* 3) Preview & deliver */}
+      <div className="mb-3 text-sm font-semibold">3) Preview & deliver</div>
+      {previewItems.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-xs text-gray-500">
-          Nothing to preview yet — add a task or a recurring block above.
+          Nothing to preview yet — add a task above.
         </div>
       ) : (
         <>
@@ -578,41 +520,12 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
 
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
-              onClick={async () => {
-                await navigator.clipboard.writeText(renderPlanBlock({ plan, blocks, tasks }));
-                alert("Plan2Tasks block copied.");
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black"
-            >
-              <ClipboardCopy className="h-4 w-4" /> Copy Plan2Tasks block
-            </button>
-
-            <button
-              onClick={() => {
-                const url = toICS({
-                  title: plan.title,
-                  startDate: plan.startDate,
-                  tasks: previewItems,
-                  timezone: plan.timezone,
-                });
-                const a = document.createElement("a");
-                a.href = url;
-                a.download = `${plan.title.replace(/\s+/g, "_")}.ics`;
-                a.click();
-                URL.revokeObjectURL(url);
-              }}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50"
-            >
-              <Download className="h-4 w-4" /> Export .ics
-            </button>
-
-            <button
               onClick={pushToSelectedUser}
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
             >
               Push Plan to Selected User
             </button>
-            <div id="push-result" className="text-xs text-gray-600"></div>
+            <div className="text-xs text-gray-600">{resultMsg}</div>
           </div>
         </>
       )}
@@ -620,77 +533,7 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   );
 }
 
-/* ---------- Recurring blocks editor ---------- */
-function BlocksEditor({ blocks, setBlocks }) {
-  const [label, setLabel] = useState("");
-  const [time, setTime] = useState("12:00");
-  const [dur, setDur] = useState(60);
-  const [days, setDays] = useState([]);
-
-  const toggleDay = (d) => setDays((arr) => (arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]));
-
-  const add = () => {
-    const name = label.trim();
-    if (!name || days.length === 0) return;
-    setBlocks([...blocks, { id: uid(), label: name, time, durationMins: Number(dur) || 60, days: [...days].sort() }]);
-    setLabel(""); setTime("12:00"); setDur(60); setDays([]);
-  };
-
-  const remove = (id) => setBlocks(blocks.filter((b) => b.id !== id));
-
-  return (
-    <div>
-      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Label</div>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g., Gym"
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-        </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Time</div>
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-        </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Duration (mins)</div>
-          <input type="number" min={15} step={15} value={dur} onChange={(e) => setDur(e.target.value)}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-        </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Days of week</div>
-          <div className="flex flex-wrap gap-2">
-            {"SMTWTFS".split("").map((ch, idx) => (
-              <button key={idx} type="button" onClick={() => toggleDay(idx)}
-                className={cn("h-9 w-9 rounded-xl border text-sm font-medium",
-                  days.includes(idx) ? "border-cyan-500 bg-cyan-50 text-cyan-700" : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50")}>
-                {ch}
-              </button>
-            ))}
-          </div>
-        </label>
-      </div>
-      <div className="flex items-center justify-between">
-        <button onClick={add} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
-          <Plus className="h-4 w-4" /> Add recurring block
-        </button>
-        <div className="text-xs text-gray-500">Tip: Add multiple recurring blocks — the form clears after each Add.</div>
-      </div>
-
-      {blocks.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {blocks.map((b) => (
-            <span key={b.id} className="inline-flex items-center gap-1 rounded-full border border-gray-300 bg-white px-2 py-1 text-xs">
-              {b.label} • {b.time} • {b.durationMins}m • days={b.days.join(",")}
-              <button className="ml-1 text-gray-400 hover:text-gray-600" onClick={() => remove(b.id)} aria-label="Remove">×</button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ---------- Individual tasks editor ---------- */
+/* ---------- Individual tasks editor (loop) ---------- */
 function TasksEditor({ startDate, tasks, setTasks }) {
   const [title, setTitle] = useState("");
   const [dayOffset, setDayOffset] = useState(0);
@@ -764,38 +607,14 @@ function TasksEditor({ startDate, tasks, setTasks }) {
   );
 }
 
-/* ---------- Preview grid ---------- */
-function PreviewWeek({ startDate, items }) {
-  const grouped = useMemo(()=>{ const g=new Map(); for (let d=0; d<7; d++) g.set(d, []); items.forEach((it)=>{ g.get(it.dayOffset)?.push(it); }); return g; }, [items]);
-  return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
-      {[0,1,2,3,4,5,6].map((d)=>(
-        <div key={d} className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
-          <div className="mb-2 text-sm font-semibold text-gray-800">{format(addDays(startDate, d), "EEE MMM d")}</div>
-          <div className="space-y-2">
-            {(grouped.get(d) || []).length === 0 && (<div className="text-xs text-gray-400">No items</div>)}
-            {(grouped.get(d) || []).map((it)=>(
-              <div key={it.id} className="rounded-xl border bg-white p-2 text-xs">
-                <div className="font-medium text-gray-900">{it.title}</div>
-                <div className="text-gray-500">{it.time || "all-day"} • {it.durationMins || 60}m{it.notes ? ` • ${it.notes}` : ""}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ---------- Plan2Tasks export text ---------- */
-export function renderPlanBlock({ plan, blocks, tasks }) {
+/* ---------- Plan2Tasks export text (no blocks section content) ---------- */
+export function renderPlanBlock({ plan, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
   lines.push(`Title: ${plan.title}`);
   lines.push(`Start: ${plan.startDate}`);
   lines.push(`Timezone: ${plan.timezone}`);
-  lines.push("--- Blocks ---");
-  for (const b of blocks) lines.push(`- ${b.label} | days=${b.days?.join(",") || ""} | time=${b.time || ""} | dur=${b.durationMins || 60}`);
+  lines.push("--- Blocks ---"); // intentionally empty (you said: tasks only)
   lines.push("--- Tasks ---");
   for (const t of tasks) lines.push(`- ${t.title} | day=${t.dayOffset} | time=${t.time || ""} | dur=${t.durationMins || 60} | notes=${t.notes || ""}`);
   lines.push("### END ###");
