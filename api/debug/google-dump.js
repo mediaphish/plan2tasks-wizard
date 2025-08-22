@@ -1,4 +1,6 @@
 // api/debug/google-dump.js
+export const config = { runtime: "nodejs20.x" };
+
 import { getAccessTokenForUser, listTaskLists } from "../../lib/google-tasks.js";
 
 export default async function handler(req, res) {
