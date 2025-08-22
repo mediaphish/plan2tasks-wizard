@@ -1,18 +1,15 @@
 // api/push.js
 export const config = { runtime: "nodejs" };
 
-import { format, addDays as fnsAddDays } from "date-fns";
-import { zonedTimeToUtc } from "date-fns-tz";
 import { getAccessTokenForUser, ensureTaskList, insertTask } from "../lib/google-tasks.js";
 
-/* --------- Parse the Plan2Tasks block sent by the client --------- */
+/* --------- Parse the Plan2Tasks block from the UI --------- */
 function parsePlanBlock(text) {
   const lines = String(text || "").split(/\r?\n/);
   let title = "";
   let startDate = "";
   let timezone = "America/Chicago";
   let section = "";
-  const blocks = [];
   const tasks = [];
 
   for (const raw of lines) {
@@ -21,72 +18,39 @@ function parsePlanBlock(text) {
     if (line.startsWith("Title:")) { title = line.slice(6).trim(); continue; }
     if (line.startsWith("Start:")) { startDate = line.slice(6).trim(); continue; }
     if (line.startsWith("Timezone:")) { timezone = line.slice(9).trim(); continue; }
-    if (line.startsWith("--- Blocks ---")) { section = "blocks"; continue; }
     if (line.startsWith("--- Tasks ---")) { section = "tasks"; continue; }
-
-    if (line.startsWith("- ")) {
+    if (line.startsWith("- ") && section === "tasks") {
       const parts = line.slice(2).split("|").map(s => s.trim());
-      if (section === "blocks") {
-        const obj = { label: parts[0], days: [], time: "", durationMins: 60 };
-        for (let i = 1; i < parts.length; i++) {
-          const [k, vRaw] = parts[i].split("=").map(s => s.trim());
-          const v = vRaw ?? "";
-          if (k === "days") obj.days = v ? v.split(",").map(n => parseInt(n, 10)) : [];
-          if (k === "time") obj.time = v || "";
-          if (k === "dur") obj.durationMins = parseInt(v || "60", 10);
-        }
-        blocks.push(obj);
-      } else if (section === "tasks") {
-        const obj = { title: parts[0], dayOffset: 0, time: "", durationMins: 60, notes: "" };
-        for (let i = 1; i < parts.length; i++) {
-          const [k, vRaw] = parts[i].split("=").map(s => s.trim());
-          const v = vRaw ?? "";
-          if (k === "day") obj.dayOffset = parseInt(v || "0", 10);
-          if (k === "time") obj.time = v || "";
-          if (k === "dur") obj.durationMins = parseInt(v || "60", 10);
-          if (k === "notes") obj.notes = v || "";
-        }
-        tasks.push(obj);
+      const obj = { title: parts[0], dayOffset: 0, time: "", durationMins: 60, notes: "" };
+      for (let i = 1; i < parts.length; i++) {
+        const [k, vRaw] = parts[i].split("=").map(s => s.trim());
+        const v = vRaw ?? "";
+        if (k === "day") obj.dayOffset = parseInt(v || "0", 10);
+        if (k === "time") obj.time = v || "";
+        if (k === "dur") obj.durationMins = parseInt(v || "60", 10);
+        if (k === "notes") obj.notes = v || "";
       }
+      tasks.push(obj);
     }
   }
-
-  return { title, startDate, timezone, blocks, tasks };
+  return { title, startDate, timezone, tasks };
 }
 
-/* --------- Materialize a 7-day preview of recurring blocks --------- */
-function buildItems({ startDate, blocks, tasks }) {
-  const items = [...tasks.map(t => ({ ...t }))];
-  for (let d = 0; d < 7; d++) {
-    const temp = new Date(startDate);
-    temp.setDate(temp.getDate() + d);
-    const dow = temp.getDay(); // 0..6
-    for (const b of blocks) {
-      if (b.days.includes(dow)) {
-        items.push({
-          title: b.label,
-          dayOffset: d,
-          time: b.time,
-          durationMins: b.durationMins,
-          notes: "Recurring block"
-        });
-      }
-    }
-  }
-  return items;
+/* --------- Date helpers (no external libs) --------- */
+// Returns YYYY-MM-DD by adding N days to start (interpreted as a calendar date).
+function addDaysYMD(startYMD, addDays) {
+  // Work in UTC so we don’t get local DST surprises
+  const [y, m, d] = startYMD.split("-").map(n => parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + (Number.isFinite(addDays) ? addDays : 0));
+  // Format back to YYYY-MM-DD
+  const yyyy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(dt.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }
 
-/* --------- Compute RFC3339 'due' in UTC (Google will discard time) --------- */
-function dueISOFor(item, startDate, tz) {
-  // We still compute a precise local DateTime so the DATE part is correct for the user's tz.
-  const localDay = fnsAddDays(new Date(startDate + "T00:00:00"), item.dayOffset || 0);
-  const hhmm = (item.time && /^\d{1,2}:\d{2}$/.test(item.time)) ? item.time : "09:00";
-  const localStr = `${format(localDay, "yyyy-MM-dd")}T${hhmm}:00`;
-  const utc = zonedTimeToUtc(localStr, tz);
-  return utc.toISOString();
-}
-
-/* --------- Vercel serverless handler --------- */
+/* --------- Vercel handler --------- */
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
@@ -95,26 +59,24 @@ export default async function handler(req, res) {
     if (!userEmail || !planBlock) return res.status(400).json({ error: "Missing userEmail or planBlock" });
 
     const plan = parsePlanBlock(planBlock);
-    if (!plan.title || !plan.startDate) return res.status(400).json({ error: "Invalid plan block (missing Title/Start)" });
+    if (!plan.title || !plan.startDate) {
+      return res.status(400).json({ error: "Invalid plan block (missing Title or Start)" });
+    }
 
-    // 1) OAuth access token for the connected user
+    // 1) Get OAuth token for the connected user
     const accessToken = await getAccessTokenForUser(userEmail);
 
-    // 2) Ensure the Google Tasks list (named by plan.title)
+    // 2) Ensure the Google Tasks list exists (named by plan.title)
     const list = await ensureTaskList(accessToken, plan.title);
 
-    // 3) Build concrete items and insert
-    const items = buildItems(plan);
+    // 3) Insert each task
     let created = 0;
-
-    for (const it of items) {
-      const dueISO = dueISOFor(it, plan.startDate, plan.timezone);
-
-      // Make the time visible in the Tasks UI by prefixing it in the title
+    for (const it of plan.tasks) {
+      const ymd = addDaysYMD(plan.startDate, it.dayOffset || 0);
+      // Google Tasks ignores time-of-day; we keep time visible by prefixing it in title and adding notes.
       const titlePrefix = it.time ? `${it.time} — ` : "";
       const displayTitle = `${titlePrefix}${it.title}`;
 
-      // Put structured info in notes for clarity
       const extraNotes = [];
       if (it.time) extraNotes.push(`Time: ${it.time} (${plan.timezone})`);
       if (it.durationMins) extraNotes.push(`Duration: ${it.durationMins}m`);
@@ -124,16 +86,18 @@ export default async function handler(req, res) {
       const payload = {
         title: displayTitle,
         notes,
-        due: dueISO,         // Google uses only the DATE portion; time is ignored
+        // API drops the time portion; we send a clear ISO with midnight Z for the chosen date.
+        due: `${ymd}T00:00:00.000Z`,
         status: "needsAction"
       };
 
-      await insertTask(accessToken, list.id, payload);
-      created++;
+      const resp = await insertTask(accessToken, list.id, payload);
+      if (resp && resp.id) created++;
     }
 
     return res.status(200).json({ ok: true, created, listId: list.id, listTitle: list.title });
   } catch (e) {
+    console.error("push error:", e);
     return res.status(500).json({ error: String(e.message || e) });
   }
 }
