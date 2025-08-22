@@ -2,13 +2,12 @@
 export const config = { runtime: "nodejs" };
 
 import { getAccessTokenForUser, ensureTaskList, insertTask } from "../lib/google-tasks.js";
+import { supabaseAdmin } from "../lib/supabase-admin.js";
 
-/* --------- Parse the Plan2Tasks block from the UI --------- */
+/* --------- Parse Plan2Tasks block --------- */
 function parsePlanBlock(text) {
   const lines = String(text || "").split(/\r?\n/);
-  let title = "";
-  let startDate = "";
-  let timezone = "America/Chicago";
+  let title = "", startDate = "", timezone = "America/Chicago";
   let section = "";
   const tasks = [];
 
@@ -47,10 +46,9 @@ function addDaysYMD(startYMD, addDays) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-/* --------- Clear a list (used by replace mode) --------- */
+/* --------- Clear a list (replace mode) --------- */
 async function clearList(accessToken, listId) {
-  let deleted = 0;
-  let pageToken = "";
+  let deleted = 0, pageToken = "";
   do {
     const url = `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks?maxResults=100` + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
     const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -69,12 +67,11 @@ async function clearList(accessToken, listId) {
   return deleted;
 }
 
-/* --------- Vercel handler --------- */
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
   try {
-    const { userEmail, planBlock, mode } = req.body || {};
+    const { userEmail, planBlock, mode, plannerEmail } = req.body || {};
     if (!userEmail || !planBlock) return res.status(400).json({ error: "Missing userEmail or planBlock" });
 
     const plan = parsePlanBlock(planBlock);
@@ -82,6 +79,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Invalid plan block (missing Title or Start)" });
     }
 
+    // 1) Push to Google Tasks
     const accessToken = await getAccessTokenForUser(userEmail);
     const list = await ensureTaskList(accessToken, plan.title);
 
@@ -93,25 +91,51 @@ export default async function handler(req, res) {
     let created = 0;
     for (const it of plan.tasks) {
       const ymd = addDaysYMD(plan.startDate, it.dayOffset || 0);
-
       const titlePrefix = it.time ? `${it.time} — ` : "";
       const displayTitle = `${titlePrefix}${it.title}`;
-
-      const extraNotes = [];
-      if (it.time) extraNotes.push(`Time: ${it.time} (${plan.timezone})`);
-      if (it.durationMins) extraNotes.push(`Duration: ${it.durationMins}m`);
-      if (it.notes) extraNotes.push(it.notes);
-      const notes = extraNotes.join("\n");
-
+      const notesParts = [];
+      if (it.time) notesParts.push(`Time: ${it.time} (${plan.timezone})`);
+      if (it.durationMins) notesParts.push(`Duration: ${it.durationMins}m`);
+      if (it.notes) notesParts.push(it.notes);
       const payload = {
         title: displayTitle,
-        notes,
-        due: `${ymd}T00:00:00.000Z`, // Tasks uses date only; time is ignored by API
+        notes: notesParts.join("\n"),
+        due: `${ymd}T00:00:00.000Z`,
         status: "needsAction"
       };
-
       const resp = await insertTask(accessToken, list.id, payload);
       if (resp && resp.id) created++;
+    }
+
+    // 2) Save to history (so planners can view/reuse/delete later)
+    if (plannerEmail) {
+      const { data: listRow, error: e1 } = await supabaseAdmin
+        .from("task_lists")
+        .insert({
+          planner_email: plannerEmail,
+          user_email: userEmail,
+          title: plan.title,
+          start_date: plan.startDate,
+          timezone: plan.timezone
+        })
+        .select()
+        .single();
+      if (e1) console.error("history insert list error:", e1);
+
+      if (listRow) {
+        const items = (plan.tasks || []).map(t => ({
+          list_id: listRow.id,
+          title: t.title,
+          day_offset: t.dayOffset || 0,
+          time: t.time || null,
+          duration_mins: t.durationMins || 60,
+          notes: t.notes || null
+        }));
+        if (items.length) {
+          const { error: e2 } = await supabaseAdmin.from("task_items").insert(items);
+          if (e2) console.error("history insert items error:", e2);
+        }
+      }
     }
 
     return res.status(200).json({ ok: true, mode: mode || "append", deleted, created, listId: list.id, listTitle: list.title });
