@@ -670,6 +670,44 @@ function TasksEditor({ startDate, tasks, setTasks }) {
   );
 }
 
+/* ---------- Preview grid (added; fixes 'PreviewWeek is not defined') ---------- */
+function PreviewWeek({ startDate, items }) {
+  // Group items by dayOffset 0..6
+  const grouped = useMemo(() => {
+    const g = new Map();
+    for (let d = 0; d < 7; d++) g.set(d, []);
+    (items || []).forEach(it => {
+      const key = Number(it.dayOffset) || 0;
+      if (!g.has(key)) g.set(key, []);
+      g.get(key).push(it);
+    });
+    // sort each day by time string
+    for (const d of g.keys()) {
+      g.get(d).sort((a,b) => (a.time || "").localeCompare(b.time || ""));
+    }
+    return g;
+  }, [items]);
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
+      {[0,1,2,3,4,5,6].map((d)=>(
+        <div key={d} className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+          <div className="mb-2 text-sm font-semibold text-gray-800">{fmtDayLabel(startDate, d)}</div>
+          <div className="space-y-2">
+            {(grouped.get(d) || []).length === 0 && (<div className="text-xs text-gray-400">No items</div>)}
+            {(grouped.get(d) || []).map((it, idx)=>(
+              <div key={(it.id || `${d}-${idx}`)} className="rounded-xl border bg-white p-2 text-xs">
+                <div className="font-medium text-gray-900">{it.title}</div>
+                <div className="text-gray-500">{it.time || "all-day"} • {it.durationMins || 60}m{it.notes ? ` • ${it.notes}` : ""}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ---------- Plan2Tasks export text (tasks only) ---------- */
 export function renderPlanBlock({ plan, tasks }) {
   const lines = [];
