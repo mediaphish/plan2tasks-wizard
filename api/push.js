@@ -1,4 +1,6 @@
 // api/push.js
+export const config = { runtime: "nodejs20.x" };
+
 import { format, addDays as fnsAddDays } from "date-fns";
 import { zonedTimeToUtc } from "date-fns-tz";
 import { getAccessTokenForUser, ensureTaskList, insertTask } from "../lib/google-tasks.js";
