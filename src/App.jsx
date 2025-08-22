@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight } from "lucide-react";
+import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight, Download, RotateCcw } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
@@ -32,6 +32,12 @@ function uid(){ return Math.random().toString(36).slice(2,10); }
 function parseISODate(s){ if (!s) return null; const d = new Date(`${s}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d; }
 function addDaysSafe(startDateStr, d){ const base = parseISODate(startDateStr) || new Date(); const dt = new Date(base); dt.setDate(dt.getDate() + (Number(d) || 0)); return dt; }
 function fmtDayLabel(startDateStr, d){ try { return format(addDaysSafe(startDateStr, d), "EEE MM/dd"); } catch { return `Day ${d}`; } }
+
+// 0=Sun..6=Sat
+function dayOfWeek(startDateStr, dayOffset){
+  const d = addDaysSafe(startDateStr, Number(dayOffset) || 0);
+  return d.getDay();
+}
 
 /* ---------------- Auth ---------------- */
 function AuthScreen({ onSignedIn }) {
@@ -156,7 +162,7 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-/* ---------------- Users Dashboard (same behavior) ---------------- */
+/* ---------------- Users Dashboard (as before) ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -393,9 +399,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                         <div className="ml-auto flex items-center gap-2">
                           <button onClick={async()=>{ await saveManage(); }} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700">Save</button>
                           <button onClick={()=>{ setManageFor(null); setManageSelected([]); }} className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs">Cancel</button>
-                          {groups.length > 0 && (
-                            <button onClick={async()=>{ setManageSelected([]); await saveManage(); }} className="rounded-xl border border-gray-300 px-3 py-1.5 text-xs">Clear all</button>
-                          )}
                         </div>
                       </div>
                     </td>
@@ -413,7 +416,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   );
 }
 
-/* ---------------- Tasks-only wizard ---------------- */
+/* ---------------- Tasks-only + ICS + Recurrence + History ---------------- */
 function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
@@ -426,6 +429,12 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
   const [replaceMode, setReplaceMode] = useState(false);
   const [resultMsg, setResultMsg] = useState("");
+
+  // history
+  const [histLists, setHistLists] = useState([]);           // lists for selected user
+  const [openListId, setOpenListId] = useState("");         // currently expanded list
+  const [histItems, setHistItems] = useState([]);           // items for open list
+  const [selectedHistItemIds, setSelectedHistItemIds] = useState([]); // checkbox selection
 
   useEffect(() => {
     (async () => {
@@ -444,6 +453,17 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
     })();
   }, [plannerEmail, initialSelectedUserEmail]);
 
+  useEffect(() => {
+    if (!selectedUserEmail) { setHistLists([]); return; }
+    (async () => {
+      const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
+      const r = await fetch(`/api/history?${q.toString()}`);
+      const j = await r.json();
+      setHistLists(j.lists || []);
+      setOpenListId(""); setHistItems([]); setSelectedHistItemIds([]);
+    })();
+  }, [plannerEmail, selectedUserEmail]);
+
   const previewItems = useMemo(() => {
     return [...tasks].sort((a, b) => (a.dayOffset||0) - (b.dayOffset||0) || (a.time || "").localeCompare(b.time || ""));
   }, [tasks]);
@@ -453,21 +473,41 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       setResultMsg("Pushing...");
       if (!selectedUserEmail) throw new Error("Choose a user first.");
       if (tasks.length === 0) throw new Error("Add at least one task.");
-
       const planBlock = renderPlanBlock({ plan, tasks });
       const resp = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: selectedUserEmail, planBlock, mode: (replaceMode ? "replace" : "append") }),
+        body: JSON.stringify({ userEmail: selectedUserEmail, plannerEmail, planBlock, mode: (replaceMode ? "replace" : "append") }),
       });
       const text = await resp.text();
       let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
       if (!resp.ok) throw new Error(data.error || "Push failed");
       const deletedMsg = data.mode === "replace" ? `Removed ${data.deleted} existing tasks. ` : "";
       setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle}".`);
+
+      // refresh history since we saved it
+      const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
+      const r2 = await fetch(`/api/history?${q.toString()}`);
+      const j2 = await r2.json();
+      setHistLists(j2.lists || []);
     } catch (e) {
       setResultMsg("Error: " + e.message);
     }
+  }
+
+  /* ---------- ICS export (VEVENT) ---------- */
+  function downloadICS() {
+    const ics = buildICS(plan, tasks);
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safe = plan.title.replace(/[^\w\-]+/g, "_").slice(0,40) || "plan";
+    a.download = `${safe}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    a.remove();
   }
 
   return (
@@ -531,12 +571,12 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
-      {/* 2) Add tasks (loop) */}
+      {/* 2) Add tasks (loop) with Recurrence */}
       <div className="mb-6">
         <div className="mb-2">
           <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
-            Add a task and click <b>Add task</b>. The form stays put so you can add more. Day is an offset from the Start date (0–6).
+            Add a task and click <b>Add task</b>. The form stays so you can add more. “Repeat” expands into multiple tasks.
           </div>
         </div>
         <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
@@ -562,15 +602,139 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
             >
               Push Plan to Selected User
             </button>
+            <button
+              onClick={downloadICS}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm hover:bg-gray-50"
+              title="Export a .ics calendar file of these items"
+            >
+              <Download className="h-4 w-4" /> Export .ics
+            </button>
             <div className="text-xs text-gray-600">{resultMsg}</div>
           </div>
         </>
       )}
+
+      {/* 4) History for selected user */}
+      <div className="mt-8">
+        <div className="mb-2 text-sm font-semibold">History for {selectedUserEmail || "—"}</div>
+        {!selectedUserEmail ? (
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">Choose a user to load history.</div>
+        ) : (
+          <div className="space-y-3">
+            {(histLists || []).map(l => (
+              <div key={l.id} className="rounded-xl border border-gray-200">
+                <div className="flex items-center justify-between p-3">
+                  <div className="text-sm">
+                    <div className="font-medium">{l.title}</div>
+                    <div className="text-gray-500 text-xs">{format(new Date(l.created_at), "MMM d, yyyy p")} • {l.count} items • Start {l.start_date}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button className="rounded-lg border border-gray-300 px-2 py-1 text-xs" onClick={async()=>{
+                      setOpenListId(prev => prev === l.id ? "" : l.id);
+                      if (openListId !== l.id) {
+                        const q = new URLSearchParams({ op:"items", listId: l.id });
+                        const r = await fetch(`/api/history?${q.toString()}`);
+                        const j = await r.json();
+                        setHistItems(j.items || []);
+                        setSelectedHistItemIds([]);
+                      }
+                    }}>
+                      {openListId === l.id ? "Hide" : "View items"}
+                    </button>
+                    <button className="rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs" onClick={async()=>{
+                      if (!confirm("Delete this list and all its items?")) return;
+                      const r = await fetch(`/api/history?op=delete-lists`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ listIds: [l.id] })});
+                      const j = await r.json();
+                      if (!r.ok) return alert(j.error || "Delete failed");
+                      // refresh lists
+                      const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
+                      const r2 = await fetch(`/api/history?${q.toString()}`); const j2 = await r2.json();
+                      setHistLists(j2.lists || []);
+                      if (openListId === l.id) { setOpenListId(""); setHistItems([]); }
+                    }}>
+                      Delete list
+                    </button>
+                  </div>
+                </div>
+
+                {openListId === l.id && (
+                  <div className="border-t p-3">
+                    {(histItems || []).length === 0 ? (
+                      <div className="text-xs text-gray-500">No items.</div>
+                    ) : (
+                      <>
+                        <div className="mb-2 flex items-center gap-2 text-xs">
+                          <button className="rounded-lg border border-gray-300 px-2 py-1" onClick={()=>{
+                            setSelectedHistItemIds(histItems.map(i => i.id));
+                          }}>Select all</button>
+                          <button className="rounded-lg border border-gray-300 px-2 py-1" onClick={()=>{
+                            setSelectedHistItemIds([]);
+                          }}>Clear</button>
+                          <button className="rounded-lg border border-gray-300 px-2 py-1" onClick={()=>{
+                            // add selected to composer
+                            const add = histItems.filter(i => selectedHistItemIds.includes(i.id))
+                              .map(i => ({
+                                id: uid(),
+                                title: i.title,
+                                dayOffset: i.day_offset,
+                                time: i.time || undefined,
+                                durationMins: i.duration_mins || 60,
+                                notes: i.notes || ""
+                              }));
+                            setTasks(prev => [...prev, ...add]);
+                          }}>
+                            Add selected to composer
+                          </button>
+                          {selectedHistItemIds.length > 0 && (
+                            <button className="rounded-lg border border-red-300 text-red-700 px-2 py-1" onClick={async()=>{
+                              if (!confirm(`Delete ${selectedHistItemIds.length} selected item(s)?`)) return;
+                              const r = await fetch(`/api/history?op=delete-items`, { method:"POST", headers:{ "Content-Type":"application/json" },
+                                body: JSON.stringify({ listId: l.id, itemIds: selectedHistItemIds }) });
+                              const j = await r.json();
+                              if (!r.ok) return alert(j.error || "Delete failed");
+                              // reload items
+                              const q = new URLSearchParams({ op:"items", listId: l.id });
+                              const r2 = await fetch(`/api/history?${q.toString()}`); const j2 = await r2.json();
+                              setHistItems(j2.items || []);
+                              setSelectedHistItemIds([]);
+                            }}>
+                              Delete selected
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                          {histItems.map(i => (
+                            <label key={i.id} className="flex items-start gap-2 rounded-xl border border-gray-200 bg-white p-2 text-xs">
+                              <input
+                                type="checkbox"
+                                checked={selectedHistItemIds.includes(i.id)}
+                                onChange={(e)=>{
+                                  setSelectedHistItemIds(prev => e.target.checked ? [...prev, i.id] : prev.filter(x=>x!==i.id));
+                                }}
+                              />
+                              <div>
+                                <div className="font-medium text-gray-900">{i.title}</div>
+                                <div className="text-gray-500">{fmtDayLabel(plan.startDate, i.day_offset)} • {i.time || "all-day"} • {i.duration_mins || 60}m{ i.notes ? ` • ${i.notes}` : ""}</div>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+            {histLists.length === 0 && <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">No history yet.</div>}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-/* ---------- Individual tasks editor (loop) ---------- */
+/* ---------- Recurrence-capable editor ---------- */
 function TasksEditor({ startDate, tasks, setTasks }) {
   const [title, setTitle] = useState("");
   const [dayOffset, setDayOffset] = useState(0);
@@ -578,23 +742,51 @@ function TasksEditor({ startDate, tasks, setTasks }) {
   const [dur, setDur] = useState(60);
   const [notes, setNotes] = useState("");
 
-  const add = () => {
+  // recurrence
+  const [repeat, setRepeat] = useState("none"); // none | daily | weekly
+  const [interval, setInterval] = useState(1);  // every N days/weeks
+  const [count, setCount] = useState(4);        // number of occurrences
+  const [weeklyDays, setWeeklyDays] = useState([false,false,false,false,false,false,false]); // Sun..Sat
+
+  const addSingle = (t) => setTasks(prev => [...prev, t]);
+
+  function add() {
     const name = title.trim();
     if (!name) return;
     const durNum = Number(dur);
-    setTasks([
-      ...tasks,
-      {
-        id: uid(),
-        title: name,
-        dayOffset: Number(dayOffset) || 0,
-        time: time || undefined,
-        durationMins: Number.isFinite(durNum) && durNum > 0 ? durNum : 60,
-        notes
+    const base = {
+      title: name,
+      dayOffset: Number(dayOffset) || 0,
+      time: time || undefined,
+      durationMins: Number.isFinite(durNum) && durNum > 0 ? durNum : 60,
+      notes
+    };
+
+    if (repeat === "none") {
+      addSingle({ id: uid(), ...base });
+    } else if (repeat === "daily") {
+      const n = Math.max(1, Number(count) || 1);
+      const k = Math.max(1, Number(interval) || 1);
+      for (let i = 0; i < n; i++) {
+        addSingle({ id: uid(), ...base, dayOffset: base.dayOffset + i * k });
       }
-    ]);
+    } else if (repeat === "weekly") {
+      const n = Math.max(1, Number(count) || 1);   // number of weeks
+      const k = Math.max(1, Number(interval) || 1); // every k weeks
+      const baseDow = dayOfWeek(startDate, base.dayOffset); // 0..6
+      for (let week = 0; week < n; week++) {
+        for (let dow = 0; dow < 7; dow++) {
+          if (!weeklyDays[dow]) continue;
+          const deltaToThisDow = (dow - baseDow);
+          const totalOffset = base.dayOffset + deltaToThisDow + (week * 7 * k);
+          addSingle({ id: uid(), ...base, dayOffset: totalOffset });
+        }
+      }
+    }
+
+    // reset light
     setTitle(""); setNotes("");
-  };
+  }
 
   const remove = (id) => setTasks(tasks.filter((t) => t.id !== id));
 
@@ -609,7 +801,7 @@ function TasksEditor({ startDate, tasks, setTasks }) {
         <label className="block">
           <div className="mb-1 text-sm font-medium">Day (0 = start)</div>
           <select value={dayOffset} onChange={(e)=>setDayOffset(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-            {[0,1,2,3,4,5,6].map((d)=>(<option key={d} value={d}>{fmtDayLabel(startDate, d)}</option>))}
+            {[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14].map((d)=>(<option key={d} value={d}>{fmtDayLabel(startDate, d)}</option>))}
           </select>
         </label>
         <label className="block">
@@ -629,11 +821,51 @@ function TasksEditor({ startDate, tasks, setTasks }) {
         </label>
       </div>
 
+      {/* Recurrence */}
+      <div className="mb-3 rounded-xl border border-gray-200 p-3">
+        <div className="mb-2 flex items-center gap-3">
+          <div className="text-sm font-medium">Repeat</div>
+          <select value={repeat} onChange={(e)=>setRepeat(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm">
+            <option value="none">None</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+          {repeat !== "none" && (
+            <>
+              <span className="text-sm">every</span>
+              <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+              <span className="text-sm">{repeat === "daily" ? "day(s)" : "week(s)"}</span>
+              <span className="text-sm ml-3">for</span>
+              <input type="number" min={1} value={count} onChange={(e)=>setCount(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+              <span className="text-sm">{repeat === "daily" ? "occurrence(s)" : "week(s)"}</span>
+            </>
+          )}
+        </div>
+        {repeat === "weekly" && (
+          <div className="flex flex-wrap items-center gap-2">
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
+              <label key={i} className={cn("inline-flex items-center gap-2 rounded-xl border px-2 py-1 text-xs",
+                weeklyDays[i] ? "border-cyan-500" : "border-gray-300")}>
+                <input type="checkbox" checked={weeklyDays[i]} onChange={(e)=>{
+                  setWeeklyDays(prev => { const next=[...prev]; next[i]=e.target.checked; return next; });
+                }} />
+                {lbl}
+              </label>
+            ))}
+            <div className="text-xs text-gray-500">Pick days of week starting from the week of “Day (0=start)”.</div>
+          </div>
+        )}
+      </div>
+
       <div className="flex items-center justify-between">
         <button onClick={add} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
-          <Plus className="h-4 w-4" /> Add task
+          <Plus className="h-4 w-4" /> Add task(s)
         </button>
-        <div className="text-xs text-gray-500">Add another right away — the form stays here as you build the list.</div>
+        <button onClick={()=>setTasks([])} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs hover:bg-gray-50">
+          <RotateCcw className="h-3 w-3" /> Clear composer
+        </button>
       </div>
 
       {tasks.length > 0 && (
@@ -689,6 +921,51 @@ function PreviewWeek({ startDate, items }) {
       ))}
     </div>
   );
+}
+
+/* ---------- .ics builder (VEVENTs) ---------- */
+function buildICS(plan, tasks){
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Plan2Tasks//EN"
+  ];
+  for (const t of tasks) {
+    const dt = addDaysSafe(plan.startDate, t.dayOffset || 0);
+    const y = dt.getUTCFullYear();
+    const m = String(dt.getUTCMonth()+1).padStart(2,"0");
+    const d = String(dt.getUTCDate()).padStart(2,"0");
+    // if time present, include time; else all-day
+    let dtstart, dtend;
+    if (t.time) {
+      const [hh, mm] = (t.time || "00:00").split(":").map(Number);
+      const startUTC = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), hh || 0, mm || 0));
+      const endUTC = new Date(startUTC.getTime() + (t.durationMins || 60) * 60000);
+      const fmt = (X)=> `${X.getUTCFullYear()}${String(X.getUTCMonth()+1).padStart(2,"0")}${String(X.getUTCDate()).padStart(2,"0")}T${String(X.getUTCHours()).padStart(2,"0")}${String(X.getUTCMinutes()).padStart(2,"0")}00Z`;
+      dtstart = `DTSTART:${fmt(startUTC)}`;
+      dtend   = `DTEND:${fmt(endUTC)}`;
+    } else {
+      dtstart = `DTSTART;VALUE=DATE:${y}${m}${d}`;
+      // all-day single-day event
+      dtend   = `DTEND;VALUE=DATE:${y}${m}${String(Number(d)+1).padStart(2,"0")}`;
+    }
+
+    const uid = `${uid()}@plan2tasks`;
+    lines.push(
+      "BEGIN:VEVENT",
+      `UID:${uid}`,
+      `SUMMARY:${escapeICS(t.title)}`,
+      dtstart,
+      dtend,
+      `DESCRIPTION:${escapeICS([t.notes ? t.notes : "", t.time ? `Time: ${t.time} (${plan.timezone})` : "", t.durationMins ? `Duration: ${t.durationMins}m`:""].filter(Boolean).join("\\n"))}`,
+      "END:VEVENT"
+    );
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+function escapeICS(s=""){
+  return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n");
 }
 
 /* ---------- Plan2Tasks export text (tasks only) ---------- */
