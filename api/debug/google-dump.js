@@ -1,5 +1,5 @@
 // api/debug/google-dump.js
-export const config = { runtime: "nodejs20.x" };
+export const config = { runtime: "nodejs" };
 
 import { getAccessTokenForUser, listTaskLists } from "../../lib/google-tasks.js";
 
