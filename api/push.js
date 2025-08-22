@@ -37,17 +37,36 @@ function parsePlanBlock(text) {
 }
 
 /* --------- Date helpers (no external libs) --------- */
-// Returns YYYY-MM-DD by adding N days to start (interpreted as a calendar date).
 function addDaysYMD(startYMD, addDays) {
-  // Work in UTC so we don’t get local DST surprises
   const [y, m, d] = startYMD.split("-").map(n => parseInt(n, 10));
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + (Number.isFinite(addDays) ? addDays : 0));
-  // Format back to YYYY-MM-DD
   const yyyy = dt.getUTCFullYear();
   const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(dt.getUTCDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
+}
+
+/* --------- Clear a list (used by replace mode) --------- */
+async function clearList(accessToken, listId) {
+  let deleted = 0;
+  let pageToken = "";
+  do {
+    const url = `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks?maxResults=100` + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : "");
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j?.error?.message || "List fetch failed");
+    const items = j.items || [];
+    for (const t of items) {
+      const del = await fetch(
+        `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(t.id)}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (del.status === 204) deleted++;
+    }
+    pageToken = j.nextPageToken || "";
+  } while (pageToken);
+  return deleted;
 }
 
 /* --------- Vercel handler --------- */
@@ -55,7 +74,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
   try {
-    const { userEmail, planBlock } = req.body || {};
+    const { userEmail, planBlock, mode } = req.body || {};
     if (!userEmail || !planBlock) return res.status(400).json({ error: "Missing userEmail or planBlock" });
 
     const plan = parsePlanBlock(planBlock);
@@ -63,17 +82,18 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Invalid plan block (missing Title or Start)" });
     }
 
-    // 1) Get OAuth token for the connected user
     const accessToken = await getAccessTokenForUser(userEmail);
-
-    // 2) Ensure the Google Tasks list exists (named by plan.title)
     const list = await ensureTaskList(accessToken, plan.title);
 
-    // 3) Insert each task
+    let deleted = 0;
+    if (mode === "replace") {
+      deleted = await clearList(accessToken, list.id);
+    }
+
     let created = 0;
     for (const it of plan.tasks) {
       const ymd = addDaysYMD(plan.startDate, it.dayOffset || 0);
-      // Google Tasks ignores time-of-day; we keep time visible by prefixing it in title and adding notes.
+
       const titlePrefix = it.time ? `${it.time} — ` : "";
       const displayTitle = `${titlePrefix}${it.title}`;
 
@@ -86,8 +106,7 @@ export default async function handler(req, res) {
       const payload = {
         title: displayTitle,
         notes,
-        // API drops the time portion; we send a clear ISO with midnight Z for the chosen date.
-        due: `${ymd}T00:00:00.000Z`,
+        due: `${ymd}T00:00:00.000Z`, // Tasks uses date only; time is ignored by API
         status: "needsAction"
       };
 
@@ -95,7 +114,7 @@ export default async function handler(req, res) {
       if (resp && resp.id) created++;
     }
 
-    return res.status(200).json({ ok: true, created, listId: list.id, listTitle: list.title });
+    return res.status(200).json({ ok: true, mode: mode || "append", deleted, created, listId: list.id, listTitle: list.title });
   } catch (e) {
     console.error("push error:", e);
     return res.status(500).json({ error: String(e.message || e) });
