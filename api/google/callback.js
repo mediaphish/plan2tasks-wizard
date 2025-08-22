@@ -1,70 +1,106 @@
 // api/google/callback.js
+export const config = { runtime: "nodejs" };
+
 import { supabaseAdmin } from "../../lib/supabase.js";
+
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+const USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
+
+function absoluteBase(req) {
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  return `${proto}://${host}`;
+}
 
 export default async function handler(req, res) {
   try {
-    const code = req.query.code;
-    const invite = req.query.state; // we passed the invite code in 'state'
-    if (!code || !invite) return res.status(400).send("Missing code/state");
+    const code = (req.query.code || "").toString();
+    const invite = (req.query.state || "").toString(); // we put invite code in state
+    if (!code || !invite) return res.status(400).send("Missing code or state");
 
-    // Exchange the auth code for tokens
-    const tokenResp = await fetch("https://oauth2.googleapis.com/token", {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    if (!clientId || !clientSecret) return res.status(500).send("Missing Google OAuth env");
+
+    const redirectUri =
+      process.env.GOOGLE_REDIRECT_URI ||
+      `${absoluteBase(req)}/api/google/callback`;
+
+    // Exchange the code for tokens
+    const body = new URLSearchParams({
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code"
+    });
+
+    const tokResp = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: process.env.GOOGLE_CLIENT_ID,
-        client_secret: process.env.GOOGLE_CLIENT_SECRET,
-        redirect_uri: process.env.GOOGLE_REDIRECT_URI,
-        grant_type: "authorization_code",
-      }),
+      body
     });
-
-    const tokenJson = await tokenResp.json();
-    if (tokenJson.error) {
-      return res.status(500).send("Token exchange failed: " + JSON.stringify(tokenJson));
+    const tokenJson = await tokResp.json();
+    if (!tokResp.ok) {
+      const msg = tokenJson.error_description || tokenJson.error || "Token exchange failed";
+      return res.status(400).send("Google OAuth error: " + msg);
     }
 
-    const { access_token, refresh_token, expires_in } = tokenJson;
-    if (!refresh_token) {
-      // If no refresh_token, user may have previously consented. Ask to re-consent once.
-      return res.status(400).send("No refresh token returned. Try again with prompt=consent.");
+    const accessToken = tokenJson.access_token;
+    const refreshToken = tokenJson.refresh_token || ""; // may be empty if Google didn’t return new one
+    const expiresIn = tokenJson.expires_in || 3600;
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresIn;
+
+    // Get the user’s Google email (requires userinfo.email scope)
+    let googleEmail = "";
+    const uiResp = await fetch(USERINFO_URL, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (uiResp.ok) {
+      const u = await uiResp.json();
+      googleEmail = (u && (u.email || u.sub)) || "";
     }
 
-    // Find the user's email so we know which account connected
-    const userinfoResp = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: `Bearer ${access_token}` },
-    });
-    const userinfo = await userinfoResp.json();
-    const userEmail = userinfo?.email;
-    if (!userEmail) return res.status(400).send("Could not fetch user email.");
-
-    // Save to Supabase
-    const supabase = supabaseAdmin();
-    const expiresAt = new Date(Date.now() + expires_in * 1000);
-
-    const { error } = await supabase
+    // Persist tokens to the invited row
+    const sb = supabaseAdmin();
+    const { data: row, error: rowErr } = await sb
       .from("user_connections")
-      .update({
-        user_email: userEmail,
-        google_refresh_token: refresh_token,
-        status: "connected",
-        token_expiry: expiresAt.toISOString(),
-      })
+      .select("*")
+      .eq("invite_code", invite)
+      .single();
+
+    if (rowErr || !row) {
+      return res.status(400).send("Invite not found. Ask your planner to resend.");
+    }
+
+    const update = {
+      status: "connected",
+      google_access_token: accessToken,
+      google_token_expiry: expiresAt,
+      updated_at: new Date().toISOString()
+    };
+    if (refreshToken) update.google_refresh_token = refreshToken;
+    if (googleEmail && googleEmail !== row.user_email) {
+      // Keep the display email in sync if Google returns a different one
+      update.user_email = googleEmail;
+    }
+
+    const { error: upErr } = await sb
+      .from("user_connections")
+      .update(update)
       .eq("invite_code", invite);
 
-    if (error) return res.status(500).send("DB update failed: " + error.message);
+    if (upErr) {
+      return res.status(500).send("Failed to save connection: " + upErr.message);
+    }
 
-    // Simple success page
-    res.setHeader("Content-Type", "text/html");
-    return res.status(200).send(`
-      <html><body style="font-family:system-ui;padding:24px">
-        <h2>You're connected ✅</h2>
-        <p>Google Tasks access granted for <b>${userEmail}</b>.</p>
-        <p>You can close this tab now.</p>
-      </body></html>
-    `);
+    // Success — send the user back to your app UI
+    const doneUrl =
+      process.env.APP_BASE_URL ||
+      `${absoluteBase(req)}/?connected=1`;
+    res.setHeader("Location", doneUrl);
+    return res.status(302).end();
   } catch (e) {
-    return res.status(500).send("Unexpected error: " + e.message);
+    return res.status(500).send(String(e.message || e));
   }
 }
