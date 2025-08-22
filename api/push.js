@@ -1,164 +1,123 @@
 // api/push.js
-import { supabaseAdmin } from "../lib/supabase.js";
+import { format, addDays as fnsAddDays } from "date-fns";
+import { zonedTimeToUtc } from "date-fns-tz";
+import { getAccessTokenForUser, ensureTaskList, insertTask } from "../lib/google-tasks.js";
 
-// Parse your Plan2Tasks block into a plan + tasks
+/* --------- Parse the Plan2Tasks block sent by the client --------- */
 function parsePlanBlock(text) {
-  const lines = text.split(/\r?\n/).map((l) => l.trim());
-  const plan = { title: "", start: "", timezone: "" };
+  const lines = String(text || "").split(/\r?\n/);
+  let title = "";
+  let startDate = "";
+  let timezone = "America/Chicago";
+  let section = "";
+  const blocks = [];
   const tasks = [];
-  let mode = "";
 
-  for (const line of lines) {
-    if (line.startsWith("Title:")) plan.title = line.slice(6).trim();
-    else if (line.startsWith("Start:")) plan.start = line.slice(6).trim();
-    else if (line.startsWith("Timezone:")) plan.timezone = line.slice(9).trim();
-    else if (line === "--- Blocks ---") mode = "blocks";
-    else if (line === "--- Tasks ---") mode = "tasks";
-    else if (line === "### PLAN2TASKS ###" || line === "### END ###" || line === "") continue;
-    else if (mode === "blocks") {
-      const m = line.match(/^- (.*?) \|.*time=([^|]+)?/);
-      if (m) tasks.push({ title: m[1], day: 0, time: m[2] || "", notes: "[Block]" });
-    } else if (mode === "tasks") {
-      const m = line.match(/^- (.*?) \| day=(\d+) \| time=([^|]*) \| dur=([^|]*) \| notes=(.*)$/);
-      if (m) {
-        tasks.push({
-          title: m[1],
-          day: Number(m[2]),
-          time: m[3],
-          dur: m[4],
-          notes: m[5],
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("Title:")) { title = line.slice(6).trim(); continue; }
+    if (line.startsWith("Start:")) { startDate = line.slice(6).trim(); continue; }
+    if (line.startsWith("Timezone:")) { timezone = line.slice(9).trim(); continue; }
+    if (line.startsWith("--- Blocks ---")) { section = "blocks"; continue; }
+    if (line.startsWith("--- Tasks ---")) { section = "tasks"; continue; }
+
+    if (line.startsWith("- ")) {
+      const parts = line.slice(2).split("|").map(s => s.trim());
+      if (section === "blocks") {
+        const obj = { label: parts[0], days: [], time: "", durationMins: 60 };
+        for (let i = 1; i < parts.length; i++) {
+          const [k, vRaw] = parts[i].split("=").map(s => s.trim());
+          const v = vRaw ?? "";
+          if (k === "days") obj.days = v ? v.split(",").map(n => parseInt(n, 10)) : [];
+          if (k === "time") obj.time = v || "";
+          if (k === "dur") obj.durationMins = parseInt(v || "60", 10);
+        }
+        blocks.push(obj);
+      } else if (section === "tasks") {
+        const obj = { title: parts[0], dayOffset: 0, time: "", durationMins: 60, notes: "" };
+        for (let i = 1; i < parts.length; i++) {
+          const [k, vRaw] = parts[i].split("=").map(s => s.trim());
+          const v = vRaw ?? "";
+          if (k === "day") obj.dayOffset = parseInt(v || "0", 10);
+          if (k === "time") obj.time = v || "";
+          if (k === "dur") obj.durationMins = parseInt(v || "60", 10);
+          if (k === "notes") obj.notes = v || "";
+        }
+        tasks.push(obj);
+      }
+    }
+  }
+
+  return { title, startDate, timezone, blocks, tasks };
+}
+
+/* --------- Materialize a 7-day preview of recurring blocks --------- */
+function buildItems({ startDate, blocks, tasks }) {
+  const items = [...tasks.map(t => ({ ...t }))];
+  for (let d = 0; d < 7; d++) {
+    const temp = new Date(startDate);
+    temp.setDate(temp.getDate() + d);
+    const dow = temp.getDay(); // 0..6
+    for (const b of blocks) {
+      if (b.days.includes(dow)) {
+        items.push({
+          title: b.label,
+          dayOffset: d,
+          time: b.time,
+          durationMins: b.durationMins,
+          notes: "Recurring block"
         });
       }
     }
   }
-  return { plan, tasks };
+  return items;
 }
 
-async function tokenFromRefresh(refreshToken) {
-  const resp = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }),
-  });
-  const j = await resp.json();
-  if (j.error) throw new Error(j.error_description || "refresh_token failed");
-  return j.access_token;
+/* --------- Compute RFC3339 'due' in UTC from local tz (defaults 09:00) --------- */
+function dueISOFor(item, startDate, tz) {
+  const localDay = fnsAddDays(new Date(startDate + "T00:00:00"), item.dayOffset || 0);
+  const hhmm = (item.time && /^\d{1,2}:\d{2}$/.test(item.time)) ? item.time : "09:00";
+  const localStr = `${format(localDay, "yyyy-MM-dd")}T${hhmm}:00`;
+  const utc = zonedTimeToUtc(localStr, tz);
+  return utc.toISOString();
 }
 
-// Find a task list by title (case-insensitive). Create it if not found.
-async function findOrCreateTaskList(accessToken, desiredTitle) {
-  if (!desiredTitle) return "@default";
-
-  // 1) list existing task lists (paginate just in case)
-  let pageToken = "";
-  while (true) {
-    const url = new URL("https://tasks.googleapis.com/tasks/v1/users/@me/lists");
-    url.searchParams.set("maxResults", "100");
-    if (pageToken) url.searchParams.set("pageToken", pageToken);
-
-    const resp = await fetch(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const data = await resp.json();
-    if (data?.items?.length) {
-      const match = data.items.find(
-        (l) => (l.title || "").trim().toLowerCase() === desiredTitle.trim().toLowerCase()
-      );
-      if (match) return match.id;
-    }
-    if (!data.nextPageToken) break;
-    pageToken = data.nextPageToken;
-  }
-
-  // 2) create a new list
-  const createResp = await fetch(
-    "https://tasks.googleapis.com/tasks/v1/users/@me/lists",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ title: desiredTitle }),
-    }
-  );
-  const created = await createResp.json();
-  if (!createResp.ok) {
-    throw new Error(created.error?.message || "Could not create task list");
-  }
-  return created.id;
-}
-
-function toDueDate(startStr, dayOffset) {
-  const d = new Date(startStr);
-  d.setDate(d.getDate() + (dayOffset || 0));
-  // Google Tasks really only uses the date part; ISO is fine.
-  return d.toISOString();
-}
-
+/* --------- Vercel serverless handler --------- */
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
 
-  const { userEmail, planBlock, taskListName } = req.body || {};
-  if (!userEmail || !planBlock) return res.status(400).json({ error: "Missing userEmail or planBlock" });
-
-  const supabase = supabaseAdmin();
-  const { data, error } = await supabase
-    .from("user_connections")
-    .select("*")
-    .eq("user_email", userEmail)
-    .eq("status", "connected")
-    .single();
-
-  if (error || !data) return res.status(404).json({ error: "User not connected" });
-
   try {
-    const accessToken = await tokenFromRefresh(data.google_refresh_token);
-    const { plan, tasks } = parsePlanBlock(planBlock);
+    const { userEmail, planBlock } = req.body || {};
+    if (!userEmail || !planBlock) return res.status(400).json({ error: "Missing userEmail or planBlock" });
 
-    // Prefer the task list name passed in; default to the plan title; otherwise @default.
-    const desiredTitle = taskListName?.trim() || plan.title?.trim();
-    let tasklistId = "@default";
-    try {
-      tasklistId = await findOrCreateTaskList(accessToken, desiredTitle);
-    } catch {
-      // If creation fails for any reason, fall back to default list
-      tasklistId = "@default";
-    }
+    const plan = parsePlanBlock(planBlock);
+    if (!plan.title || !plan.startDate) return res.status(400).json({ error: "Invalid plan block (missing Title/Start)" });
 
-    for (const t of tasks) {
-      const body = {
-        title: t.title,
-        notes: [
-          t.time ? `Time: ${t.time}` : "All-day",
-          t.dur ? `Duration: ${t.dur}m` : "",
-          t.notes ? `Notes: ${t.notes}` : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        due: toDueDate(plan.start, t.day),
+    // 1) OAuth access token for the connected user
+    const accessToken = await getAccessTokenForUser(userEmail);
+
+    // 2) Ensure the Google Tasks list (named by plan.title)
+    const list = await ensureTaskList(accessToken, plan.title);
+
+    // 3) Build concrete items and insert with proper 'due'
+    const items = buildItems(plan);
+    let created = 0;
+
+    for (const it of items) {
+      const dueISO = dueISOFor(it, plan.startDate, plan.timezone);
+      const payload = {
+        title: it.title,
+        notes: it.notes || "",
+        due: dueISO,           // RFC3339 UTC — required for Calendar to display
+        status: "needsAction"
       };
-
-      await fetch(
-        `https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(tasklistId)}/tasks`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        }
-      );
+      await insertTask(accessToken, list.id, payload);
+      created++;
     }
 
-    return res.status(200).json({ ok: true, created: tasks.length, tasklistId });
+    return res.status(200).json({ ok: true, created, listId: list.id, listTitle: list.title });
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: String(e.message || e) });
   }
 }
