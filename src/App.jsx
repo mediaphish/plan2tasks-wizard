@@ -150,7 +150,7 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-/* ---------------- Users Dashboard (multi-groups + hidden Create Group) ---------------- */
+/* ---------------- Users Dashboard ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -168,15 +168,16 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [newGroupName, setNewGroupName] = useState("");
 
   async function loadGroups() {
-    const resp = await fetch(`/api/groups/list?plannerEmail=${encodeURIComponent(plannerEmail)}`);
+    const params = new URLSearchParams({ op:"list", plannerEmail });
+    const resp = await fetch(`/api/groups?${params.toString()}`);
     const data = await resp.json();
     setGroups(data.groups || []);
   }
   async function loadUsers() {
-    const params = new URLSearchParams({ plannerEmail, status: tab });
+    const params = new URLSearchParams({ op:"list", plannerEmail, status: tab });
     if (q) params.set("q", q);
     if (groupId) params.set("groupId", groupId);
-    const resp = await fetch(`/api/users/list?${params.toString()}`);
+    const resp = await fetch(`/api/users?${params.toString()}`);
     const data = await resp.json();
     setUsers(data.users || []);
   }
@@ -195,14 +196,14 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   }
   async function delUser(email) {
     if (!confirm(`Delete ${email}?`)) return;
-    const resp = await fetch("/api/users/delete", { method:"POST", headers:{ "Content-Type":"application/json" },
+    const resp = await fetch(`/api/users?op=delete`, { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, userEmail: email }) });
     const data = await resp.json();
     if (!resp.ok) return alert(data.error || "Delete failed");
     await loadUsers();
   }
   async function saveEdit(oldEmail) {
-    const resp = await fetch("/api/users/update", { method:"POST", headers:{ "Content-Type":"application/json" },
+    const resp = await fetch(`/api/users?op=update`, { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, userEmail: oldEmail, newEmail: editVal.trim() }) });
     const data = await resp.json();
     if (!resp.ok) return alert(data.error || "Update failed");
@@ -211,10 +212,8 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   }
 
   async function createGroup() {
-    const name = newGroupName.trim();
-    if (!name) return;
-    const resp = await fetch("/api/groups/create", { method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ plannerEmail, name }) });
+    const resp = await fetch(`/api/groups?op=create`, { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ plannerEmail, name: newGroupName.trim() }) });
     const data = await resp.json();
     if (!resp.ok) return alert(data.error || "Create group failed");
     setNewGroupName("");
@@ -223,7 +222,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   }
   async function deleteGroup(id) {
     if (!confirm("Delete this group? Users will remain but be unassigned from it.")) return;
-    const resp = await fetch("/api/groups/delete", { method:"POST", headers:{ "Content-Type":"application/json" },
+    const resp = await fetch(`/api/groups?op=delete`, { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, groupId: id }) });
     const data = await resp.json();
     if (!resp.ok) return alert(data.error || "Delete group failed");
@@ -237,7 +236,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   }
   function cancelManage() { setManageFor(null); setManageSelected([]); }
   async function saveManage() {
-    const resp = await fetch("/api/users/set-groups", {
+    const resp = await fetch(`/api/users?op=set-groups`, {
       method:"POST",
       headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, userEmail: manageFor, groupIds: manageSelected })
@@ -414,29 +413,23 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   );
 }
 
-/* ---------------- Planner Wizard (recurring + clear add-many + labels + no preload) ---------------- */
+/* ---------------- Planner Wizard (unchanged logic) ---------------- */
 function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
-  // 1) Task list basics
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
     startDate: format(new Date(), "yyyy-MM-dd"),
     timezone: "America/Chicago",
   });
-
-  // 2) Recurring tasks (optional) — empty by default
   const [blocks, setBlocks] = useState([]);
-
-  // 3) Individual tasks — empty by default
   const [tasks, setTasks] = useState([]);
 
-  // user selection
   const [users, setUsers] = useState([]);
   const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
-  const [inviteLink, setInviteLink] = useState("");
 
   useEffect(() => {
     (async () => {
-      const resp = await fetch(`/api/users/list?plannerEmail=${encodeURIComponent(plannerEmail)}`);
+      const params = new URLSearchParams({ op:"list", plannerEmail });
+      const resp = await fetch(`/api/users?${params.toString()}`);
       const data = await resp.json();
       setUsers(data.users || []);
       if (!initialSelectedUserEmail) {
@@ -444,23 +437,19 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         const any = (data.users || [])[0];
         const sel = connected?.email || any?.email || "";
         setSelectedUserEmail(sel);
-        const row = (data.users || []).find(u => u.email === sel);
-        setInviteLink(row?.inviteLink || "");
       } else {
-        const row = (data.users || []).find(u => u.email === initialSelectedUserEmail);
-        setInviteLink(row?.inviteLink || "");
+        setSelectedUserEmail(initialSelectedUserEmail);
       }
     })();
   }, [plannerEmail, initialSelectedUserEmail]);
 
-  // Build preview items from tasks + recurring blocks
   const previewItems = useMemo(() => {
     const out = [...tasks.map((t) => ({ ...t, type: "task" }))];
     blocks.forEach((b) => {
       for (let d = 0; d < 7; d++) {
         const date = new Date(plan.startDate);
         date.setDate(date.getDate() + d);
-        const dow = date.getDay(); // 0 Sun ... 6 Sat
+        const dow = date.getDay();
         if (b.days.includes(dow)) {
           out.push({
             id: uid(),
@@ -476,8 +465,6 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
     });
     return out.sort((a, b) => a.dayOffset - b.dayOffset || (a.time || "").localeCompare(b.time || ""));
   }, [blocks, tasks, plan.startDate]);
-
-  const hasAnything = previewItems.length > 0;
 
   async function pushToSelectedUser() {
     const outEl = document.getElementById("push-result");
@@ -499,19 +486,16 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
     } catch (e) { if (outEl) outEl.textContent = "Error: " + e.message; }
   }
 
+  const hasAnything = previewItems.length > 0;
+
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      {/* Target user */}
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Plan</h2>
         <div className="w-72">
           <select
             value={selectedUserEmail}
-            onChange={(e) => {
-              setSelectedUserEmail(e.target.value);
-              const u = (users || []).find(x => x.email === e.target.value);
-              setInviteLink(u?.inviteLink || "");
-            }}
+            onChange={(e) => setSelectedUserEmail(e.target.value)}
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
           >
             <option value="">— Choose user —</option>
@@ -524,7 +508,6 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
-      {/* 1) Task list basics */}
       <div className="mb-6">
         <div className="mb-2">
           <div className="text-sm font-semibold">1) Task list (Google)</div>
@@ -564,7 +547,6 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
-      {/* 2) Recurring tasks (optional) */}
       <div className="mb-6">
         <div className="mb-2">
           <div className="text-sm font-semibold">2) Recurring tasks (optional)</div>
@@ -575,7 +557,6 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         <BlocksEditor blocks={blocks} setBlocks={setBlocks} />
       </div>
 
-      {/* 3) Add tasks (clear add-many loop) */}
       <div className="mb-6">
         <div className="mb-2">
           <div className="text-sm font-semibold">3) Add tasks</div>
@@ -586,9 +567,8 @@ function Wizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         <TasksEditor startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
       </div>
 
-      {/* 4) Preview & deliver — only after something exists */}
       <div className="mb-3 text-sm font-semibold">4) Preview & deliver</div>
-      {previewItems.length === 0 ? (
+      {!hasAnything ? (
         <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-xs text-gray-500">
           Nothing to preview yet — add a task or a recurring block above.
         </div>
@@ -645,7 +625,7 @@ function BlocksEditor({ blocks, setBlocks }) {
   const [label, setLabel] = useState("");
   const [time, setTime] = useState("12:00");
   const [dur, setDur] = useState(60);
-  const [days, setDays] = useState([]); // array of ints 0..6
+  const [days, setDays] = useState([]);
 
   const toggleDay = (d) => setDays((arr) => (arr.includes(d) ? arr.filter((x) => x !== d) : [...arr, d]));
 
@@ -722,7 +702,7 @@ function TasksEditor({ startDate, tasks, setTasks }) {
     const name = title.trim();
     if (!name) return;
     setTasks([...tasks, { id: uid(), title: name, dayOffset: Number(dayOffset)||0, time: time || undefined, durationMins: Number(dur)||60, notes }]);
-    setTitle(""); setNotes(""); // keep day/time if you want faster input
+    setTitle(""); setNotes("");
   };
 
   const remove = (id) => setTasks(tasks.filter((t) => t.id !== id));
