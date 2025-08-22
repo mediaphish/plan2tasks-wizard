@@ -76,8 +76,9 @@ function buildItems({ startDate, blocks, tasks }) {
   return items;
 }
 
-/* --------- Compute RFC3339 'due' in UTC from local tz (defaults 09:00) --------- */
+/* --------- Compute RFC3339 'due' in UTC (Google will discard time) --------- */
 function dueISOFor(item, startDate, tz) {
+  // We still compute a precise local DateTime so the DATE part is correct for the user's tz.
   const localDay = fnsAddDays(new Date(startDate + "T00:00:00"), item.dayOffset || 0);
   const hhmm = (item.time && /^\d{1,2}:\d{2}$/.test(item.time)) ? item.time : "09:00";
   const localStr = `${format(localDay, "yyyy-MM-dd")}T${hhmm}:00`;
@@ -102,18 +103,31 @@ export default async function handler(req, res) {
     // 2) Ensure the Google Tasks list (named by plan.title)
     const list = await ensureTaskList(accessToken, plan.title);
 
-    // 3) Build concrete items and insert with proper 'due'
+    // 3) Build concrete items and insert
     const items = buildItems(plan);
     let created = 0;
 
     for (const it of items) {
       const dueISO = dueISOFor(it, plan.startDate, plan.timezone);
+
+      // Make the time visible in the Tasks UI by prefixing it in the title
+      const titlePrefix = it.time ? `${it.time} — ` : "";
+      const displayTitle = `${titlePrefix}${it.title}`;
+
+      // Put structured info in notes for clarity
+      const extraNotes = [];
+      if (it.time) extraNotes.push(`Time: ${it.time} (${plan.timezone})`);
+      if (it.durationMins) extraNotes.push(`Duration: ${it.durationMins}m`);
+      if (it.notes) extraNotes.push(it.notes);
+      const notes = extraNotes.join("\n");
+
       const payload = {
-        title: it.title,
-        notes: it.notes || "",
-        due: dueISO,           // RFC3339 UTC — required for Calendar to display
+        title: displayTitle,
+        notes,
+        due: dueISO,         // Google uses only the DATE portion; time is ignored
         status: "needsAction"
       };
+
       await insertTask(accessToken, list.id, payload);
       created++;
     }
