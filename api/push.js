@@ -1,5 +1,5 @@
 // api/push.js
-export const config = { runtime: "nodejs20.x" };
+export const config = { runtime: "nodejs" };
 
 import { format, addDays as fnsAddDays } from "date-fns";
 import { zonedTimeToUtc } from "date-fns-tz";
