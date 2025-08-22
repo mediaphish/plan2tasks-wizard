@@ -3,11 +3,53 @@ import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, Ar
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-/* ---------------- helpers ---------------- */
+/* ---------------- Error Boundary (prevents black screen) ---------------- */
+class ErrorBoundary extends React.Component {
+  constructor(props){ super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error){ return { error }; }
+  componentDidCatch(error, info){ console.error("UI crash:", error, info); }
+  render(){
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen bg-red-50 p-6">
+          <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-white p-4">
+            <h2 className="mb-2 text-lg font-bold text-red-700">Something went wrong in the UI</h2>
+            <p className="mb-3 text-sm text-red-700">
+              The screen would have gone black. I’ve caught the error so you can see it:
+            </p>
+            <pre className="overflow-auto rounded bg-red-100 p-3 text-xs text-red-900">
+{String(this.state.error?.message || this.state.error)}
+            </pre>
+            <p className="mt-3 text-xs text-gray-500">Open the browser console for details if needed.</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ---------------- helpers (defensive) ---------------- */
 function cn(...classes){ return classes.filter(Boolean).join(" "); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function addDays(startDateStr, d){ const dt = new Date(startDateStr); dt.setDate(dt.getDate() + d); return dt; }
+
+// Safely parse ISO date from <input type="date"> ("yyyy-MM-dd")
+function parseISODate(s){
+  if (!s) return null;
+  const d = new Date(`${s}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function addDaysSafe(startDateStr, d){
+  const base = parseISODate(startDateStr) || new Date();
+  const dt = new Date(base);
+  dt.setDate(dt.getDate() + (Number(d) || 0));
+  return dt;
+}
+function fmtDayLabel(startDateStr, d){
+  try { return format(addDaysSafe(startDateStr, d), "EEE MM/dd"); }
+  catch { return `Day ${d}`; }
+}
 
 /* ---------------- Auth screen ---------------- */
 function AuthScreen({ onSignedIn }) {
@@ -71,8 +113,16 @@ function AuthScreen({ onSignedIn }) {
   );
 }
 
-/* ---------------- App shell ---------------- */
+/* ---------------- Root ---------------- */
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
+  );
+}
+
+function AppInner(){
   const [session, setSession] = useState(null);
   useEffect(() => {
     supabaseClient.auth.getSession().then(({ data }) => setSession(data.session || null));
@@ -85,6 +135,7 @@ export default function App() {
   return <AppShell plannerEmail={plannerEmail} />;
 }
 
+/* ---------------- App shell ---------------- */
 function AppShell({ plannerEmail }) {
   const [view, setView] = useState("users");
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
@@ -123,7 +174,7 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-/* ---------------- Users Dashboard (same behavior you had) ---------------- */
+/* ---------------- Users Dashboard (unchanged behavior) ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -341,6 +392,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                   </td>
                 </tr>
 
+                {/* Inline multi-group manager */}
                 {manageFor === u.email && (
                   <tr className="border-b bg-gray-50">
                     <td colSpan={5} className="p-3">
@@ -412,7 +464,7 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   }, [plannerEmail, initialSelectedUserEmail]);
 
   const previewItems = useMemo(() => {
-    return [...tasks].sort((a, b) => a.dayOffset - b.dayOffset || (a.time || "").localeCompare(b.time || ""));
+    return [...tasks].sort((a, b) => (a.dayOffset||0) - (b.dayOffset||0) || (a.time || "").localeCompare(b.time || ""));
   }, [tasks]);
 
   async function pushToSelectedUser() {
@@ -421,7 +473,7 @@ function TasksOnlyWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       if (!selectedUserEmail) throw new Error("Choose a user first.");
       if (tasks.length === 0) throw new Error("Add at least one task.");
 
-      const planBlock = renderPlanBlock({ plan, tasks }); // (no blocks)
+      const planBlock = renderPlanBlock({ plan, tasks }); // tasks only
       const resp = await fetch("/api/push", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -544,7 +596,18 @@ function TasksEditor({ startDate, tasks, setTasks }) {
   const add = () => {
     const name = title.trim();
     if (!name) return;
-    setTasks([...tasks, { id: uid(), title: name, dayOffset: Number(dayOffset)||0, time: time || undefined, durationMins: Number(dur)||60, notes }]);
+    const durNum = Number(dur);
+    setTasks([
+      ...tasks,
+      {
+        id: uid(),
+        title: name,
+        dayOffset: Number(dayOffset) || 0,
+        time: time || undefined,
+        durationMins: Number.isFinite(durNum) && durNum > 0 ? durNum : 60,
+        notes
+      }
+    ]);
     setTitle(""); setNotes("");
   };
 
@@ -561,7 +624,7 @@ function TasksEditor({ startDate, tasks, setTasks }) {
         <label className="block">
           <div className="mb-1 text-sm font-medium">Day (0 = start)</div>
           <select value={dayOffset} onChange={(e)=>setDayOffset(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-            {[0,1,2,3,4,5,6].map((d)=>(<option key={d} value={d}>{format(addDays(startDate, d), "EEE MM/dd")}</option>))}
+            {[0,1,2,3,4,5,6].map((d)=>(<option key={d} value={d}>{fmtDayLabel(startDate, d)}</option>))}
           </select>
         </label>
         <label className="block">
@@ -595,7 +658,7 @@ function TasksEditor({ startDate, tasks, setTasks }) {
               <div className="text-sm">
                 <div className="font-medium text-gray-900">{t.title}</div>
                 <div className="text-gray-500">
-                  {format(addDays(startDate, t.dayOffset), "EEE MM/dd")} • {t.time || "all-day"} • {t.durationMins}m{t.notes ? ` • ${t.notes}` : ""}
+                  {fmtDayLabel(startDate, t.dayOffset)} • {t.time || "all-day"} • {t.durationMins}m{t.notes ? ` • ${t.notes}` : ""}
                 </div>
               </div>
               <button onClick={()=>remove(t.id)} className="rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
@@ -607,16 +670,16 @@ function TasksEditor({ startDate, tasks, setTasks }) {
   );
 }
 
-/* ---------- Plan2Tasks export text (no blocks section content) ---------- */
+/* ---------- Plan2Tasks export text (tasks only) ---------- */
 export function renderPlanBlock({ plan, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
   lines.push(`Title: ${plan.title}`);
   lines.push(`Start: ${plan.startDate}`);
   lines.push(`Timezone: ${plan.timezone}`);
-  lines.push("--- Blocks ---"); // intentionally empty (you said: tasks only)
+  lines.push("--- Blocks ---"); // (intentionally empty)
   lines.push("--- Tasks ---");
-  for (const t of tasks) lines.push(`- ${t.title} | day=${t.dayOffset} | time=${t.time || ""} | dur=${t.durationMins || 60} | notes=${t.notes || ""}`);
+  for (const t of tasks) lines.push(`- ${t.title} | day=${t.dayOffset || 0} | time=${t.time || ""} | dur=${t.durationMins || 60} | notes=${t.notes || ""}`);
   lines.push("### END ###");
   return lines.join("\n");
 }
