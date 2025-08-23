@@ -1,5 +1,8 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from "lucide-react";
+import {
+  Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus,
+  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight
+} from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
@@ -34,21 +37,16 @@ function addDaysSafe(startDateStr, d){ const base = parseISODate(startDateStr) |
 function fmtDateYMD(d){ const y=d.getUTCFullYear(); const m=String(d.getUTCMonth()+1).padStart(2,"0"); const dd=String(d.getUTCDate()).padStart(2,"0"); return `${y}-${m}-${dd}`; }
 function fmtDayLabel(startDateStr, d){ try { return format(addDaysSafe(startDateStr, d), "EEE MM/dd"); } catch { return `Day ${d}`; } }
 function daysBetweenUTC(a,b){ const ms=24*3600*1000; const da=Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),a.getUTCDate()); const db=Date.UTC(b.getUTCFullYear(),b.getUTCMonth(),b.getUTCDate()); return Math.round((db-da)/ms); }
-function lastDayOfMonthUTC(y, m0){ return new Date(Date.UTC(y, m0+1, 0)).getUTCDate(); } // m0: 0..11
+function lastDayOfMonthUTC(y, m0){ return new Date(Date.UTC(y, m0+1, 0)).getUTCDate(); }
 function addMonthsUTC(dateUTC, months){
   const y=dateUTC.getUTCFullYear(), m=dateUTC.getUTCMonth(), d=dateUTC.getUTCDate();
-  const nm = m + months;
-  const ny = y + Math.floor(nm/12);
-  const nmo = ((nm%12)+12)%12;
-  const last = lastDayOfMonthUTC(ny, nmo);
-  const nd = Math.min(d, last);
+  const nm = m + months; const ny = y + Math.floor(nm/12); const nmo = ((nm%12)+12)%12;
+  const last = lastDayOfMonthUTC(ny, nmo); const nd = Math.min(d, last);
   return new Date(Date.UTC(ny, nmo, nd));
 }
 function firstWeekdayOfMonthUTC(y,m0,weekday){ const first = new Date(Date.UTC(y,m0,1)); const shift = (7 + weekday - first.getUTCDay()) % 7; return new Date(Date.UTC(y,m0,1+shift)); }
 function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first = firstWeekdayOfMonthUTC(y,m0,weekday); const candidate = new Date(Date.UTC(y,m0, first.getUTCDate() + 7*(nth-1))); return candidate.getUTCMonth()===m0 ? candidate : null; }
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD = lastDayOfMonthUTC(y,m0); const last = new Date(Date.UTC(y,m0,lastD)); const shift = (7 + last.getUTCDay() - weekday) % 7; return new Date(Date.UTC(y,m0,lastD - shift)); }
-
-/* precise offset from plan start to a UTC date */
 function offsetFromStart(startDateStr, cellDateUTC){
   const s = parseISODate(startDateStr);
   const sUTC = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
@@ -440,7 +438,7 @@ function UsersTable(props){
   );
 }
 
-/* ---------------- Tasks wizard with advanced recurrence ---------------- */
+/* ---------------- Tasks wizard with calendar grid + recurrence ---------------- */
 function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
@@ -455,10 +453,10 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [resultMsg, setResultMsg] = useState("");
 
   // history
-  const [histLists, setHistLists] = useState([]);           
-  const [openListId, setOpenListId] = useState("");         
-  const [histItems, setHistItems] = useState([]);           
-  const [selectedHistItemIds, setSelectedHistItemIds] = useState([]); 
+  const [histLists, setHistLists] = useState([]);
+  const [openListId, setOpenListId] = useState("");
+  const [histItems, setHistItems] = useState([]);
+  const [selectedHistItemIds, setSelectedHistItemIds] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -513,7 +511,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       const deletedMsg = data.mode === "replace" ? `Removed ${data.deleted} existing tasks. ` : "";
       setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle}".`);
 
-      // refresh history since we saved it
+      // refresh history
       const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
       const r2 = await fetch(`/api/history?${q.toString()}`);
       const j2 = await r2.json();
@@ -598,23 +596,25 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         </div>
       </div>
 
-      {/* 2) Add tasks (advanced recurrence) */}
+      {/* 2) Add tasks */}
       <div className="mb-6">
         <div className="mb-2">
           <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
-            Choose a date in the grid below (it calculates the Day offset), then set time/duration/recurrence and click <b>Add task(s)</b>.
+            Use the calendar grid to pick a date (it sets <b>Day</b>), set time/recurrence, and click <b>Add task(s)</b>.
           </div>
         </div>
 
-        {/* NEW: calendar grid for choosing the task date (sets Day offset) */}
-        <TaskDatePicker
+        <DayOffsetCalendar
           startDate={plan.startDate}
-          valueOffset={0} // the component needs a base to highlight; we’ll control via state below
-          onPickOffset={() => {}}
+          valueOffset={0}
+          onPickOffset={(off)=>{
+            const ev = new CustomEvent("p2t:setBaseOffset",{ detail: { offset: off }});
+            window.dispatchEvent(ev);
+          }}
         />
+
         <TasksEditorAdvanced startDate={plan.startDate} />
-        {/* NOTE: TasksEditorAdvanced maintains its own state and updates via custom events below */}
       </div>
 
       {/* 3) Preview & deliver */}
@@ -650,7 +650,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   );
 }
 
-/* ---------------- Calendar grid to pick a date within the plan (sets Day offset) ---------------- */
+/* ---------------- Calendar grid to pick a date ---------------- */
 function DayCell({ label, isDim, isDisabled, isSelected, onClick }) {
   return (
     <button
@@ -670,26 +670,23 @@ function DayCell({ label, isDim, isDisabled, isSelected, onClick }) {
   );
 }
 
-function TaskDatePicker({ startDate, valueOffset = 0, onPickOffset }) {
+function DayOffsetCalendar({ startDate, valueOffset = 0, onPickOffset }) {
   const start = parseISODate(startDate) || new Date();
   const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
-  const maxDays = 120; // allow planning 4 months out
+  const maxDays = 120; // 4 months window
   const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
   const endUTC = new Date(startUTC.getTime() + maxDays*24*3600*1000);
-  const selectedUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  selectedUTC.setUTCDate(selectedUTC.getUTCDate() + valueOffset);
+  const selectedUTC = new Date(startUTC.getTime() + valueOffset*24*3600*1000);
 
   function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
   function gotoMonth(delta){
-    const y = viewMonth.getUTCFullYear(), m = viewMonth.getUTCMonth();
-    const nm = new Date(Date.UTC(y, m + delta, 1));
-    setViewMonth(nm);
+    const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth();
+    setViewMonth(new Date(Date.UTC(y, m+delta, 1)));
   }
 
-  // build 6-week grid
   const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
   const firstOfMonth = new Date(Date.UTC(year, month, 1));
-  const startDow = firstOfMonth.getUTCDay(); // 0..6 Sun..Sat
+  const startDow = firstOfMonth.getUTCDay();
   const gridStart = new Date(Date.UTC(year, month, 1 - startDow));
   const weeks = Array.from({ length: 6 }).map((_, w) =>
     Array.from({ length: 7 }).map((_, d) => {
@@ -745,7 +742,7 @@ function TaskDatePicker({ startDate, valueOffset = 0, onPickOffset }) {
   );
 }
 
-/* ---------- Advanced recurrence editor (with pill buttons for Weekly) ---------- */
+/* ---------- Advanced recurrence editor (weekly = pill buttons) ---------- */
 function TasksEditorAdvanced({ startDate }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
@@ -753,28 +750,23 @@ function TasksEditorAdvanced({ startDate }) {
   const [dur, setDur] = useState(60);
   const [notes, setNotes] = useState("");
 
-  // listen for calendar picks (so the calendar can live above this editor)
   useEffect(()=>{
     function onPick(e){ setBaseOffset(Number(e.detail?.offset || 0)); }
     window.addEventListener("p2t:setBaseOffset", onPick);
     return () => window.removeEventListener("p2t:setBaseOffset", onPick);
   },[]);
 
-  // recurrence
   const [repeat, setRepeat] = useState("none"); // none | daily | weekly | monthly
-  const [interval, setInterval] = useState(1);  // every N units
+  const [interval, setInterval] = useState(1);
   const [endMode, setEndMode] = useState("count"); // count | until
-  const [count, setCount] = useState(4);        // number of occurrences
-  const [untilDate, setUntilDate] = useState(""); // yyyy-mm-dd
+  const [count, setCount] = useState(4);
+  const [untilDate, setUntilDate] = useState("");
 
-  // weekly specifics (pill buttons)
-  const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // default Mon/Wed
+  const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // Mon/Wed by default
   const WEEK_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
-  // monthly specifics
   const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
 
-  // tasks buffer stored at top-level via events
   function addTasks(newOnes){
     const ev = new CustomEvent("p2t:addTasks",{ detail: newOnes });
     window.dispatchEvent(ev);
@@ -783,7 +775,7 @@ function TasksEditorAdvanced({ startDate }) {
   function generate() {
     const name = title.trim();
     if (!name) return;
-    const base = addDaysSafe(startDate, Number(baseOffset) || 0); // UTC midnight local
+    const base = addDaysSafe(startDate, Number(baseOffset) || 0);
 
     const baseObj = {
       title: name,
@@ -793,16 +785,12 @@ function TasksEditorAdvanced({ startDate }) {
     };
 
     if (repeat === "none") {
-      const dayOffset = Number(baseOffset) || 0;
-      addTasks([{ ...baseObj, dayOffset }]);
+      addTasks([{ ...baseObj, dayOffset: Number(baseOffset) || 0 }]);
       setTitle(""); setNotes("");
       return;
     }
 
-    if (endMode === "until" && !untilDate) {
-      alert("Pick an End date or switch to 'after N occurrences'.");
-      return;
-    }
+    if (endMode === "until" && !untilDate) { alert("Pick an End date or switch to 'after N occurrences'."); return; }
 
     const added = [];
 
@@ -812,30 +800,23 @@ function TasksEditorAdvanced({ startDate }) {
         const n = Math.max(1, Number(count) || 1);
         for (let i=0;i<n;i++){
           const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step);
-          const off = daysBetweenUTC(parseISODate(startDate), d);
-          added.push({ ...baseObj, dayOffset: off });
+          added.push({ ...baseObj, dayOffset: daysBetweenUTC(parseISODate(startDate), d) });
         }
       } else {
         const until = parseISODate(untilDate);
-        let i=0;
-        while (true) {
+        let i=0; while (true) {
           const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step);
           if (d > until) break;
-          const off = daysBetweenUTC(parseISODate(startDate), d);
-          added.push({ ...baseObj, dayOffset: off });
-          i++;
-          if (i>1000) break;
+          added.push({ ...baseObj, dayOffset: daysBetweenUTC(parseISODate(startDate), d) });
+          if (++i>1000) break;
         }
       }
     }
 
     if (repeat === "weekly") {
       const stepWeeks = Math.max(1, Number(interval) || 1);
-      const checkedDays = weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null); // 0..6
-      if (checkedDays.length===0) {
-        alert("Pick at least one weekday.");
-        return;
-      }
+      const checkedDays = weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
+      if (checkedDays.length===0) { alert("Pick at least one weekday."); return; }
       const baseWeekday = base.getUTCDay();
       const baseStartOfWeek = new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate() - baseWeekday); // Sunday
 
@@ -852,18 +833,14 @@ function TasksEditorAdvanced({ startDate }) {
         const n = Math.max(1, Number(count) || 1);
         let emitted=0, week=0;
         while (emitted < n*checkedDays.length && week < 520){
-          const before = added.length;
-          emitWeek(week);
-          emitted += (added.length - before);
-          week++;
+          const before = added.length; emitWeek(week); emitted += (added.length - before); week++;
         }
         while (added.length > n) added.pop();
       } else {
         const until = parseISODate(untilDate);
         let week=0;
         while (week < 520){
-          const before = added.length;
-          emitWeek(week);
+          const before = added.length; emitWeek(week);
           if (added.length > before) {
             const last = addDaysSafe(startDate, added[added.length-1].dayOffset||0);
             if (last > until) {
@@ -909,19 +886,16 @@ function TasksEditorAdvanced({ startDate }) {
           const targetMonthDate = addMonthsUTC(base, i*stepMonths);
           const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
           const d = computeTarget(y,m0);
-          const off = daysBetweenUTC(start, d);
-          added.push({ ...baseObj, dayOffset: off });
+          added.push({ ...baseObj, dayOffset: daysBetweenUTC(start, d) });
         }
       } else {
         const until = parseISODate(untilDate);
-        let i=0;
-        while (i < 240) {
+        let i=0; while (i < 240) {
           const targetMonthDate = addMonthsUTC(base, i*stepMonths);
           const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
           const d = computeTarget(y,m0);
           if (d > until) break;
-          const off = daysBetweenUTC(start, d);
-          added.push({ ...baseObj, dayOffset: off });
+          added.push({ ...baseObj, dayOffset: daysBetweenUTC(start, d) });
           i++;
         }
       }
@@ -942,7 +916,6 @@ function TasksEditorAdvanced({ startDate }) {
 
   return (
     <div>
-      {/* base fields */}
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Task title</div>
@@ -950,10 +923,10 @@ function TasksEditorAdvanced({ startDate }) {
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
         <div className="block">
-          <div className="mb-1 text-sm font-medium">Selected date within plan</div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-            {fmtDayLabel(startDate, baseOffset)} <span className="text-gray-500">(Day {baseOffset})</span>
-          </div>
+           <div className="mb-1 text-sm font-medium">Selected date within plan</div>
+           <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+             {fmtDayLabel(startDate, baseOffset)} <span className="text-gray-500">(Day {baseOffset})</span>
+           </div>
         </div>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
@@ -967,9 +940,8 @@ function TasksEditorAdvanced({ startDate }) {
         </label>
       </div>
 
-      <div className="mb-1 text-xs text-gray-500">Tip: Click a date in the grid above (it updates “Selected date within plan”).</div>
+      <div className="mb-1 text-xs text-gray-500">Tip: click a date in the grid above (it updates “Selected date within plan”).</div>
 
-      {/* recurrence controls — Google Calendar–like (Weekly uses pill buttons) */}
       <div className="mt-3 mb-3 rounded-xl border border-gray-200 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -994,17 +966,13 @@ function TasksEditorAdvanced({ startDate }) {
 
         {repeat === "weekly" && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            {WEEK_LABELS.map((lbl, i)=>(
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
               <button
                 type="button"
                 key={i}
                 className={pillClass(weeklyDays[i])}
                 aria-pressed={weeklyDays[i] ? "true" : "false"}
-                onClick={()=> setWeeklyDays(prev => {
-                  const next = [...prev];
-                  next[i] = !next[i];
-                  return next;
-                })}
+                onClick={()=> setWeeklyDays(prev => { const next = [...prev]; next[i] = !next[i]; return next; })}
                 title={lbl}
               >
                 {lbl}
@@ -1065,91 +1033,8 @@ function TasksEditorAdvanced({ startDate }) {
   );
 }
 
-/* Small wrapper to host the calendar and wire events to composer */
-function TaskDatePicker({ startDate }) {
-  const [offset, setOffset] = useState(0);
-  return (
-    <DayOffsetCalendar
-      startDate={startDate}
-      valueOffset={offset}
-      onPickOffset={(o)=>{ setOffset(o); const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset:o }}); window.dispatchEvent(ev); }}
-    />
-  );
-}
-
-/* Calendar grid component reused above */
-function DayOffsetCalendar({ startDate, valueOffset, onPickOffset }) {
-  const start = parseISODate(startDate) || new Date();
-  const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
-  const maxDays = 120;
-  const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  const endUTC = new Date(startUTC.getTime() + maxDays*24*3600*1000);
-  const selectedUTC = new Date(startUTC.getTime() + valueOffset*24*3600*1000);
-
-  function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
-  function gotoMonth(delta){ const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth(); setViewMonth(new Date(Date.UTC(y, m+delta, 1))); }
-
-  const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
-  const firstOfMonth = new Date(Date.UTC(year, month, 1));
-  const startDow = firstOfMonth.getUTCDay();
-  const gridStart = new Date(Date.UTC(year, month, 1 - startDow));
-  const weeks = Array.from({ length: 6 }).map((_, w) =>
-    Array.from({ length: 7 }).map((_, d) => {
-      const cell = new Date(gridStart);
-      cell.setUTCDate(gridStart.getUTCDate() + (w*7 + d));
-      const isSameMonth = cell.getUTCMonth() === month;
-      const isDisabled = cell < startUTC || cell > endUTC;
-      const isSelected = fmtDateYMD(cell) === fmtDateYMD(selectedUTC);
-      return { cell, isSameMonth, isDisabled, isSelected, label: String(cell.getUTCDate()) };
-    })
-  );
-
-  return (
-    <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-sm font-medium">Pick date within plan</div>
-        <div className="flex items-center gap-1">
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-12)} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-1)} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
-          <div className="px-2 text-sm font-semibold">{monthLabel(viewMonth)}</div>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
-        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d)=>(<div key={d}>{d}</div>))}
-      </div>
-
-      <div className="grid grid-cols-7 gap-1">
-        {weeks.map((row, ri) => row.map((c, ci) => (
-          <DayCell
-            key={`${ri}-${ci}`}
-            label={c.label}
-            isDim={!c.isSameMonth}
-            isDisabled={c.isDisabled}
-            isSelected={c.isSelected}
-            onClick={()=>{
-              const off = offsetFromStart(startDate, c.cell);
-              onPickOffset?.(off);
-              const ev = new CustomEvent("p2t:setBaseOffset",{ detail: { offset: off, dateUTC: c.cell }});
-              window.dispatchEvent(ev);
-            }}
-          />
-        )))}
-      </div>
-
-      <div className="mt-2 text-xs text-gray-600">
-        Window: {format(startUTC, "MMM d")} → {format(endUTC, "MMM d")} •
-        Selected: {format(selectedUTC, "EEE MMM d")} (Day {offsetFromStart(startDate, selectedUTC)})
-      </div>
-    </div>
-  );
-}
-
-/* ---------- Preview & push section (separated for clarity) ---------- */
+/* ---------- Preview & push ---------- */
 function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplaceMode, resultMsg, setResultMsg, selectedUserEmail, plannerEmail, downloadICS }) {
-  // hook to receive tasks from editor
   useEffect(()=>{
     function onAdd(e){
       const add = (e.detail || []).map(t => ({ id: uid(), ...t }));
@@ -1227,7 +1112,7 @@ function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplace
 /* ---------- Preview list grouped by date ---------- */
 function PreviewSchedule({ startDate, items }) {
   const groups = useMemo(()=>{
-    const map = new Map(); // ymd -> items[]
+    const map = new Map();
     (items||[]).forEach(it=>{
       const dt = addDaysSafe(startDate, it.dayOffset||0);
       const ymd = fmtDateYMD(new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate())));
@@ -1376,13 +1261,9 @@ function HistoryPanel({
   );
 }
 
-/* ---------- .ics builder (VEVENTs) ---------- */
+/* ---------- .ics builder ---------- */
 function buildICS(plan, tasks){
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//Plan2Tasks//EN"
-  ];
+  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//EN"];
   for (const t of tasks) {
     const dt = addDaysSafe(plan.startDate, t.dayOffset || 0);
     const y = dt.getUTCFullYear();
@@ -1394,36 +1275,29 @@ function buildICS(plan, tasks){
       const startUTC = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), hh || 0, mm || 0));
       const endUTC = new Date(startUTC.getTime() + (t.durationMins || 60) * 60000);
       const fmt = (X)=> `${X.getUTCFullYear()}${String(X.getUTCMonth()+1).padStart(2,"0")}${String(X.getUTCDate()).padStart(2,"0")}T${String(X.getUTCHours()).padStart(2,"0")}${String(X.getUTCMinutes()).padStart(2,"0")}00Z`;
-      dtstart = `DTSTART:${fmt(startUTC)}`;
-      dtend   = `DTEND:${fmt(endUTC)}`;
+      dtstart = `DTSTART:${fmt(startUTC)}`; dtend = `DTEND:${fmt(endUTC)}`;
     } else {
       dtstart = `DTSTART;VALUE=DATE:${y}${m}${d}`;
       dtend   = `DTEND;VALUE=DATE:${y}${m}${String(Number(d)+1).padStart(2,"0")}`;
     }
     const id = `${uid()}@plan2tasks`;
-    lines.push(
-      "BEGIN:VEVENT",
-      `UID:${id}`,
-      `SUMMARY:${escapeICS(t.title)}`,
-      dtstart,
-      dtend,
+    lines.push("BEGIN:VEVENT", `UID:${id}`, `SUMMARY:${escapeICS(t.title)}`, dtstart, dtend,
       `DESCRIPTION:${escapeICS([t.notes ? t.notes : "", t.time ? `Time: ${t.time} (${plan.timezone})` : "", t.durationMins ? `Duration: ${t.durationMins}m`:""].filter(Boolean).join("\\n"))}`,
-      "END:VEVENT"
-    );
+      "END:VEVENT");
   }
   lines.push("END:VCALENDAR");
   return lines.join("\r\n");
 }
 function escapeICS(s=""){ return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n"); }
 
-/* ---------- Plan2Tasks export text (tasks only) ---------- */
+/* ---------- Plan2Tasks export text ---------- */
 export function renderPlanBlock({ plan, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
   lines.push(`Title: ${plan.title}`);
   lines.push(`Start: ${plan.startDate}`);
   lines.push(`Timezone: ${plan.timezone}`);
-  lines.push("--- Blocks ---"); // (intentionally empty)
+  lines.push("--- Blocks ---");
   lines.push("--- Tasks ---");
   for (const t of tasks) lines.push(`- ${t.title} | day=${t.dayOffset || 0} | time=${t.time || ""} | dur=${t.durationMins || 60} | notes=${t.notes || ""}`);
   lines.push("### END ###");
