@@ -184,7 +184,7 @@ function AppShell({ plannerEmail }) {
   );
 }
 
-/* ---------------- Users Dashboard (unchanged from your latest) ---------------- */
+/* ---------------- Users Dashboard ---------------- */
 function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -609,7 +609,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
           <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
             Add a task and click <b>Add task(s)</b>. The form stays so you can add more. 
-            “Repeat” supports Daily, Weekly (pick days), and Monthly (day-of-month or the Nth weekday).
+            “Repeat” supports Daily, Weekly (pill buttons), and Monthly (day-of-month or the Nth weekday).
           </div>
         </div>
         <TasksEditorAdvanced startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
@@ -666,7 +666,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   );
 }
 
-/* ---------- Advanced recurrence editor ---------- */
+/* ---------- Advanced recurrence editor (with pill buttons for Weekly) ---------- */
 function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
@@ -681,13 +681,12 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
   const [count, setCount] = useState(4);        // number of occurrences
   const [untilDate, setUntilDate] = useState(""); // yyyy-mm-dd
 
-  // weekly specifics
+  // weekly specifics (pill buttons)
   const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // default Mon/Wed
+  const WEEK_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
   // monthly specifics
   const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
-  // dom = day-of-month based on base date's DOM
-  // nth = the Nth weekday of the month based on base date (e.g., 2nd Tue)
 
   function addTasks(newOnes){
     setTasks(prev => [...prev, ...newOnes.map(t => ({ id: uid(), ...t }))]);
@@ -757,7 +756,6 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
           const d = new Date(baseStartOfWeek);
           d.setUTCDate(baseStartOfWeek.getUTCDate() + dow + weekIndex*7*stepWeeks);
           const off = daysBetweenUTC(parseISODate(startDate), d);
-          // Only add if on/after base date if endMode=count and we’re counting from base forward
           if (d >= base) added.push({ ...baseObj, dayOffset: off });
         }
       };
@@ -771,19 +769,16 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
           emitted += (added.length - before);
           week++;
         }
-        // trim to exactly n occurrences
-        while (added.length > n) added.pop();
+        while (added.length > n) added.pop(); // trim to exact N
       } else {
         const until = parseISODate(untilDate);
         let week=0;
         while (week < 520){
           const before = added.length;
           emitWeek(week);
-          // stop if last added date > until
           if (added.length > before) {
             const last = addDaysSafe(startDate, added[added.length-1].dayOffset||0);
             if (last > until) {
-              // drop any that exceeded
               while (added.length > 0) {
                 const dt = addDaysSafe(startDate, added[added.length-1].dayOffset||0);
                 if (dt <= until) break;
@@ -802,23 +797,20 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
       const baseY = base.getUTCFullYear(), baseM = base.getUTCMonth(), baseD = base.getUTCDate();
       const baseW = base.getUTCDay();
 
-      // derive ordinal for nth-weekday
       const firstSameW = firstWeekdayOfMonthUTC(baseY, baseM, baseW);
       const nth = Math.floor((base.getUTCDate() - firstSameW.getUTCDate())/7)+1;
-      // detect if base is "last" weekday of its month
       const lastSameW = lastWeekdayOfMonthUTC(baseY, baseM, baseW);
       const isLast = (base.getUTCDate() === lastSameW.getUTCDate());
 
       const computeTarget = (y,m0)=>{
         if (monthlyMode === "dom") {
-          const dom = baseD;
           const last = lastDayOfMonthUTC(y,m0);
-          const d = Math.min(dom, last);
+          const d = Math.min(baseD, last);
           return new Date(Date.UTC(y,m0,d));
         } else {
           if (isLast) return lastWeekdayOfMonthUTC(y,m0,baseW);
           const nthCand = nthWeekdayOfMonthUTC(y,m0,baseW, Math.max(1,nth));
-          return nthCand || lastWeekdayOfMonthUTC(y,m0,baseW); // fallback if e.g. 5th doesn’t exist
+          return nthCand || lastWeekdayOfMonthUTC(y,m0,baseW);
         }
       };
 
@@ -847,13 +839,18 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
       }
     }
 
-    // sort + add
     added.sort((a,b)=> (a.dayOffset||0)-(b.dayOffset||0) || (a.time||"").localeCompare(b.time||""));
     addTasks(added);
     setTitle(""); setNotes("");
   }
 
-  const remove = (id) => setTasks(tasks.filter((t) => t.id !== id));
+  const pillClass = (active) =>
+    cn(
+      "rounded-full px-3 py-1 text-xs border transition",
+      active
+        ? "bg-cyan-600 text-white border-cyan-600"
+        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+    );
 
   return (
     <div>
@@ -887,7 +884,7 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
         </label>
       </div>
 
-      {/* recurrence controls — Google Calendar–like */}
+      {/* recurrence controls — Google Calendar–like (Weekly uses pill buttons) */}
       <div className="mb-3 rounded-xl border border-gray-200 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -912,16 +909,23 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
 
         {repeat === "weekly" && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
-              <label key={i} className={cn("inline-flex items-center gap-2 rounded-xl border px-2 py-1 text-xs",
-                weeklyDays[i] ? "border-cyan-500" : "border-gray-300")}>
-                <input type="checkbox" checked={weeklyDays[i]} onChange={(e)=>{
-                  setWeeklyDays(prev => { const next=[...prev]; next[i]=e.target.checked; return next; });
-                }} />
+            {WEEK_LABELS.map((lbl, i)=>(
+              <button
+                type="button"
+                key={i}
+                className={pillClass(weeklyDays[i])}
+                aria-pressed={weeklyDays[i] ? "true" : "false"}
+                onClick={()=> setWeeklyDays(prev => {
+                  const next = [...prev];
+                  next[i] = !next[i];
+                  return next;
+                })}
+                title={lbl}
+              >
                 {lbl}
-              </label>
+              </button>
             ))}
-            <div className="text-xs text-gray-500">Pick days of week.</div>
+            <div className="text-xs text-gray-500 ml-1">Pick days of week.</div>
           </div>
         )}
 
@@ -1063,7 +1067,6 @@ function HistoryPanel({
                     const r = await fetch(`/api/history?op=delete-lists`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ listIds: [l.id] })});
                     const j = await r.json();
                     if (!r.ok) return alert(j.error || "Delete failed");
-                    // refresh lists
                     const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
                     const r2 = await fetch(`/api/history?${q.toString()}`); const j2 = await r2.json();
                     setHistLists(j2.lists || []);
@@ -1104,7 +1107,6 @@ function HistoryPanel({
                               body: JSON.stringify({ listId: l.id, itemIds: selectedHistItemIds }) });
                             const j = await r.json();
                             if (!r.ok) return alert(j.error || "Delete failed");
-                            // reload items
                             const q = new URLSearchParams({ op:"items", listId: l.id });
                             const r2 = await fetch(`/api/history?${q.toString()}`); const j2 = await r2.json();
                             setHistItems(j2.items || []);
