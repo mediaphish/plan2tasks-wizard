@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight, Download, RotateCcw } from "lucide-react";
+import { Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus, ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
@@ -44,21 +44,16 @@ function addMonthsUTC(dateUTC, months){
   const nd = Math.min(d, last);
   return new Date(Date.UTC(ny, nmo, nd));
 }
-function firstWeekdayOfMonthUTC(y,m0,weekday){ // weekday 0..6
-  const first = new Date(Date.UTC(y,m0,1));
-  const shift = (7 + weekday - first.getUTCDay()) % 7;
-  return new Date(Date.UTC(y,m0,1+shift));
-}
-function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ // nth: 1..5 typically
-  const first = firstWeekdayOfMonthUTC(y,m0,weekday);
-  const candidate = new Date(Date.UTC(y,m0, first.getUTCDate() + 7*(nth-1)));
-  return candidate.getUTCMonth()===m0 ? candidate : null;
-}
-function lastWeekdayOfMonthUTC(y,m0,weekday){
-  const lastD = lastDayOfMonthUTC(y,m0);
-  const last = new Date(Date.UTC(y,m0,lastD));
-  const shift = (7 + last.getUTCDay() - weekday) % 7;
-  return new Date(Date.UTC(y,m0,lastD - shift));
+function firstWeekdayOfMonthUTC(y,m0,weekday){ const first = new Date(Date.UTC(y,m0,1)); const shift = (7 + weekday - first.getUTCDay()) % 7; return new Date(Date.UTC(y,m0,1+shift)); }
+function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first = firstWeekdayOfMonthUTC(y,m0,weekday); const candidate = new Date(Date.UTC(y,m0, first.getUTCDate() + 7*(nth-1))); return candidate.getUTCMonth()===m0 ? candidate : null; }
+function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD = lastDayOfMonthUTC(y,m0); const last = new Date(Date.UTC(y,m0,lastD)); const shift = (7 + last.getUTCDay() - weekday) % 7; return new Date(Date.UTC(y,m0,lastD - shift)); }
+
+/* precise offset from plan start to a UTC date */
+function offsetFromStart(startDateStr, cellDateUTC){
+  const s = parseISODate(startDateStr);
+  const sUTC = Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
+  const cUTC = Date.UTC(cellDateUTC.getUTCFullYear(), cellDateUTC.getUTCMonth(), cellDateUTC.getUTCDate());
+  return Math.round((cUTC - sUTC) / (24*3600*1000));
 }
 
 /* ---------------- Auth ---------------- */
@@ -608,44 +603,33 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         <div className="mb-2">
           <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
-            Add a task and click <b>Add task(s)</b>. The form stays so you can add more. 
-            “Repeat” supports Daily, Weekly (pill buttons), and Monthly (day-of-month or the Nth weekday).
+            Choose a date in the grid below (it calculates the Day offset), then set time/duration/recurrence and click <b>Add task(s)</b>.
           </div>
         </div>
-        <TasksEditorAdvanced startDate={plan.startDate} tasks={tasks} setTasks={setTasks} />
+
+        {/* NEW: calendar grid for choosing the task date (sets Day offset) */}
+        <TaskDatePicker
+          startDate={plan.startDate}
+          valueOffset={0} // the component needs a base to highlight; we’ll control via state below
+          onPickOffset={() => {}}
+        />
+        <TasksEditorAdvanced startDate={plan.startDate} />
+        {/* NOTE: TasksEditorAdvanced maintains its own state and updates via custom events below */}
       </div>
 
       {/* 3) Preview & deliver */}
-      <div className="mb-3 text-sm font-semibold">3) Preview & deliver</div>
-      {previewItems.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-xs text-gray-500">
-          Nothing to preview yet — add a task above.
-        </div>
-      ) : (
-        <>
-          <PreviewSchedule startDate={plan.startDate} items={previewItems} />
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
-              Replace existing tasks in this list before pushing
-            </label>
-            <button
-              onClick={pushToSelectedUser}
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-            >
-              Push Plan to Selected User
-            </button>
-            <button
-              onClick={downloadICS}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm hover:bg-gray-50"
-              title="Export a .ics calendar file of these items"
-            >
-              <Download className="h-4 w-4" /> Export .ics
-            </button>
-            <div className="text-xs text-gray-600">{resultMsg}</div>
-          </div>
-        </>
-      )}
+      <TaskComposerAndPreview
+        plan={plan}
+        tasks={tasks}
+        setTasks={setTasks}
+        replaceMode={replaceMode}
+        setReplaceMode={setReplaceMode}
+        resultMsg={resultMsg}
+        setResultMsg={setResultMsg}
+        selectedUserEmail={selectedUserEmail}
+        plannerEmail={plannerEmail}
+        downloadICS={downloadICS}
+      />
 
       {/* 4) History for selected user */}
       <HistoryPanel
@@ -666,13 +650,115 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   );
 }
 
+/* ---------------- Calendar grid to pick a date within the plan (sets Day offset) ---------------- */
+function DayCell({ label, isDim, isDisabled, isSelected, onClick }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "h-8 w-8 rounded-full text-xs flex items-center justify-center transition",
+        isDisabled ? "text-gray-300 cursor-not-allowed"
+        : isSelected ? "bg-cyan-600 text-white"
+        : "hover:bg-gray-100",
+        isDim && !isDisabled && !isSelected ? "text-gray-400" : "text-gray-700"
+      )}
+      onClick={isDisabled ? undefined : onClick}
+      aria-pressed={isSelected ? "true" : "false"}
+    >
+      {label}
+    </button>
+  );
+}
+
+function TaskDatePicker({ startDate, valueOffset = 0, onPickOffset }) {
+  const start = parseISODate(startDate) || new Date();
+  const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
+  const maxDays = 120; // allow planning 4 months out
+  const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const endUTC = new Date(startUTC.getTime() + maxDays*24*3600*1000);
+  const selectedUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  selectedUTC.setUTCDate(selectedUTC.getUTCDate() + valueOffset);
+
+  function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
+  function gotoMonth(delta){
+    const y = viewMonth.getUTCFullYear(), m = viewMonth.getUTCMonth();
+    const nm = new Date(Date.UTC(y, m + delta, 1));
+    setViewMonth(nm);
+  }
+
+  // build 6-week grid
+  const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
+  const firstOfMonth = new Date(Date.UTC(year, month, 1));
+  const startDow = firstOfMonth.getUTCDay(); // 0..6 Sun..Sat
+  const gridStart = new Date(Date.UTC(year, month, 1 - startDow));
+  const weeks = Array.from({ length: 6 }).map((_, w) =>
+    Array.from({ length: 7 }).map((_, d) => {
+      const cell = new Date(gridStart);
+      cell.setUTCDate(gridStart.getUTCDate() + (w*7 + d));
+      const isSameMonth = cell.getUTCMonth() === month;
+      const isDisabled = cell < startUTC || cell > endUTC;
+      const isSelected = fmtDateYMD(cell) === fmtDateYMD(selectedUTC);
+      return { cell, isSameMonth, isDisabled, isSelected, label: String(cell.getUTCDate()) };
+    })
+  );
+
+  return (
+    <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium">Pick date within plan (sets <b>Day</b>)</div>
+        <div className="flex items-center gap-1">
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-12)} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-1)} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
+          <div className="px-2 text-sm font-semibold">{monthLabel(viewMonth)}</div>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d)=>(<div key={d}>{d}</div>))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {weeks.map((row, ri) => row.map((c, ci) => (
+          <DayCell
+            key={`${ri}-${ci}`}
+            label={c.label}
+            isDim={!c.isSameMonth}
+            isDisabled={c.isDisabled}
+            isSelected={c.isSelected}
+            onClick={()=>{
+              const off = offsetFromStart(startDate, c.cell);
+              onPickOffset?.(off);
+              const ev = new CustomEvent("p2t:setBaseOffset",{ detail: { offset: off, dateUTC: c.cell }});
+              window.dispatchEvent(ev);
+            }}
+          />
+        )))}
+      </div>
+
+      <div className="mt-2 text-xs text-gray-600">
+        Window: {format(startUTC, "MMM d")} → {format(endUTC, "MMM d")} •
+        Selected: {format(selectedUTC, "EEE MMM d")} (Day {offsetFromStart(startDate, selectedUTC)})
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Advanced recurrence editor (with pill buttons for Weekly) ---------- */
-function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
+function TasksEditorAdvanced({ startDate }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
   const [time, setTime] = useState("");
   const [dur, setDur] = useState(60);
   const [notes, setNotes] = useState("");
+
+  // listen for calendar picks (so the calendar can live above this editor)
+  useEffect(()=>{
+    function onPick(e){ setBaseOffset(Number(e.detail?.offset || 0)); }
+    window.addEventListener("p2t:setBaseOffset", onPick);
+    return () => window.removeEventListener("p2t:setBaseOffset", onPick);
+  },[]);
 
   // recurrence
   const [repeat, setRepeat] = useState("none"); // none | daily | weekly | monthly
@@ -688,8 +774,10 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
   // monthly specifics
   const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
 
+  // tasks buffer stored at top-level via events
   function addTasks(newOnes){
-    setTasks(prev => [...prev, ...newOnes.map(t => ({ id: uid(), ...t }))]);
+    const ev = new CustomEvent("p2t:addTasks",{ detail: newOnes });
+    window.dispatchEvent(ev);
   }
 
   function generate() {
@@ -736,7 +824,7 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
           const off = daysBetweenUTC(parseISODate(startDate), d);
           added.push({ ...baseObj, dayOffset: off });
           i++;
-          if (i>1000) break; // safety
+          if (i>1000) break;
         }
       }
     }
@@ -749,7 +837,7 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
         return;
       }
       const baseWeekday = base.getUTCDay();
-      const baseStartOfWeek = new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate() - baseWeekday); // Sunday of base week
+      const baseStartOfWeek = new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate() - baseWeekday); // Sunday
 
       const emitWeek = (weekIndex)=>{
         for (const dow of checkedDays){
@@ -763,13 +851,13 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
         let emitted=0, week=0;
-        while (emitted < n*checkedDays.length && week < 520){ // cap 10yrs
+        while (emitted < n*checkedDays.length && week < 520){
           const before = added.length;
           emitWeek(week);
           emitted += (added.length - before);
           week++;
         }
-        while (added.length > n) added.pop(); // trim to exact N
+        while (added.length > n) added.pop();
       } else {
         const until = parseISODate(untilDate);
         let week=0;
@@ -827,7 +915,7 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
       } else {
         const until = parseISODate(untilDate);
         let i=0;
-        while (i < 240) { // cap 20yrs
+        while (i < 240) {
           const targetMonthDate = addMonthsUTC(base, i*stepMonths);
           const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
           const d = computeTarget(y,m0);
@@ -855,18 +943,18 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
   return (
     <div>
       {/* base fields */}
-      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-5">
+      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Task title</div>
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g., Strength training"
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Day (0 = start)</div>
-          <select value={baseOffset} onChange={(e)=>setBaseOffset(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-            {Array.from({length: 31}, (_,i)=>i).map((d)=>(<option key={d} value={d}>{fmtDayLabel(startDate, d)}</option>))}
-          </select>
-        </label>
+        <div className="block">
+          <div className="mb-1 text-sm font-medium">Selected date within plan</div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+            {fmtDayLabel(startDate, baseOffset)} <span className="text-gray-500">(Day {baseOffset})</span>
+          </div>
+        </div>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
           <input type="time" value={time} onChange={(e)=>setTime(e.target.value)}
@@ -877,15 +965,12 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
           <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)}
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Notes</div>
-          <input value={notes} onChange={(e)=>setNotes(e.target.value)} placeholder="optional"
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-        </label>
       </div>
 
+      <div className="mb-1 text-xs text-gray-500">Tip: Click a date in the grid above (it updates “Selected date within plan”).</div>
+
       {/* recurrence controls — Google Calendar–like (Weekly uses pill buttons) */}
-      <div className="mb-3 rounded-xl border border-gray-200 p-3">
+      <div className="mt-3 mb-3 rounded-xl border border-gray-200 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-3">
           <div className="text-sm font-medium">Repeat</div>
           <select value={repeat} onChange={(e)=>setRepeat(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm">
@@ -940,7 +1025,7 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
               <input type="radio" name="monthlyMode" value="nth" checked={monthlyMode==="nth"} onChange={()=>setMonthlyMode("nth")} />
               the Nth weekday (e.g., 2nd Tue)
             </label>
-            <div className="text-xs text-gray-500">Based on the base date you chose in “Day (0=start)”.</div>
+            <div className="text-xs text-gray-500">Based on the selected date within plan.</div>
           </div>
         )}
 
@@ -971,31 +1056,175 @@ function TasksEditorAdvanced({ startDate, tasks, setTasks }) {
         <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
           <Plus className="h-4 w-4" /> Add task(s)
         </button>
-        <button onClick={()=>setTasks([])} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs hover:bg-gray-50">
-          <RotateCcw className="h-3 w-3" /> Clear composer
+        <button onClick={()=>{ setTitle(""); setTime(""); setDur(60); setNotes(""); setRepeat("none"); setInterval(1); setEndMode("count"); setCount(4); setUntilDate(""); setWeeklyDays([false,true,false,true,false,false,false]); setMonthlyMode("dom"); }}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs hover:bg-gray-50">
+          <RotateCcw className="h-3 w-3" /> Reset fields
         </button>
       </div>
-
-      {tasks.length > 0 && (
-        <div className="mt-4 space-y-2">
-          {tasks.map((t) => (
-            <div key={t.id} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-3">
-              <div className="text-sm">
-                <div className="font-medium text-gray-900">{t.title}</div>
-                <div className="text-gray-500">
-                  {fmtDayLabel(startDate, t.dayOffset)} • {t.time || "all-day"} • {t.durationMins}m{t.notes ? ` • ${t.notes}` : ""}
-                </div>
-              </div>
-              <button onClick={()=>setTasks(tasks.filter(x=>x.id!==t.id))} className="rounded-lg border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
 
-/* ---------- Preview list grouped by date (handles long monthly series) ---------- */
+/* Small wrapper to host the calendar and wire events to composer */
+function TaskDatePicker({ startDate }) {
+  const [offset, setOffset] = useState(0);
+  return (
+    <DayOffsetCalendar
+      startDate={startDate}
+      valueOffset={offset}
+      onPickOffset={(o)=>{ setOffset(o); const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset:o }}); window.dispatchEvent(ev); }}
+    />
+  );
+}
+
+/* Calendar grid component reused above */
+function DayOffsetCalendar({ startDate, valueOffset, onPickOffset }) {
+  const start = parseISODate(startDate) || new Date();
+  const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
+  const maxDays = 120;
+  const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const endUTC = new Date(startUTC.getTime() + maxDays*24*3600*1000);
+  const selectedUTC = new Date(startUTC.getTime() + valueOffset*24*3600*1000);
+
+  function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
+  function gotoMonth(delta){ const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth(); setViewMonth(new Date(Date.UTC(y, m+delta, 1))); }
+
+  const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
+  const firstOfMonth = new Date(Date.UTC(year, month, 1));
+  const startDow = firstOfMonth.getUTCDay();
+  const gridStart = new Date(Date.UTC(year, month, 1 - startDow));
+  const weeks = Array.from({ length: 6 }).map((_, w) =>
+    Array.from({ length: 7 }).map((_, d) => {
+      const cell = new Date(gridStart);
+      cell.setUTCDate(gridStart.getUTCDate() + (w*7 + d));
+      const isSameMonth = cell.getUTCMonth() === month;
+      const isDisabled = cell < startUTC || cell > endUTC;
+      const isSelected = fmtDateYMD(cell) === fmtDateYMD(selectedUTC);
+      return { cell, isSameMonth, isDisabled, isSelected, label: String(cell.getUTCDate()) };
+    })
+  );
+
+  return (
+    <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-medium">Pick date within plan</div>
+        <div className="flex items-center gap-1">
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-12)} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-1)} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
+          <div className="px-2 text-sm font-semibold">{monthLabel(viewMonth)}</div>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d)=>(<div key={d}>{d}</div>))}
+      </div>
+
+      <div className="grid grid-cols-7 gap-1">
+        {weeks.map((row, ri) => row.map((c, ci) => (
+          <DayCell
+            key={`${ri}-${ci}`}
+            label={c.label}
+            isDim={!c.isSameMonth}
+            isDisabled={c.isDisabled}
+            isSelected={c.isSelected}
+            onClick={()=>{
+              const off = offsetFromStart(startDate, c.cell);
+              onPickOffset?.(off);
+              const ev = new CustomEvent("p2t:setBaseOffset",{ detail: { offset: off, dateUTC: c.cell }});
+              window.dispatchEvent(ev);
+            }}
+          />
+        )))}
+      </div>
+
+      <div className="mt-2 text-xs text-gray-600">
+        Window: {format(startUTC, "MMM d")} → {format(endUTC, "MMM d")} •
+        Selected: {format(selectedUTC, "EEE MMM d")} (Day {offsetFromStart(startDate, selectedUTC)})
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Preview & push section (separated for clarity) ---------- */
+function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplaceMode, resultMsg, setResultMsg, selectedUserEmail, plannerEmail, downloadICS }) {
+  // hook to receive tasks from editor
+  useEffect(()=>{
+    function onAdd(e){
+      const add = (e.detail || []).map(t => ({ id: uid(), ...t }));
+      setTasks(prev => [...prev, ...add]);
+    }
+    window.addEventListener("p2t:addTasks", onAdd);
+    return () => window.removeEventListener("p2t:addTasks", onAdd);
+  }, [setTasks]);
+
+  const previewItems = useMemo(() => {
+    return [...tasks].sort((a, b) => {
+      const ao = a.dayOffset||0, bo=b.dayOffset||0;
+      if (ao !== bo) return ao - bo;
+      return (a.time || "").localeCompare(b.time || "");
+    });
+  }, [tasks]);
+
+  async function pushToSelectedUser() {
+    try {
+      setResultMsg("Pushing...");
+      if (!selectedUserEmail) throw new Error("Choose a user first.");
+      if (tasks.length === 0) throw new Error("Add at least one task.");
+      const planBlock = renderPlanBlock({ plan, tasks });
+      const resp = await fetch("/api/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userEmail: selectedUserEmail, plannerEmail, planBlock, mode: (replaceMode ? "replace" : "append") }),
+      });
+      const text = await resp.text();
+      let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
+      if (!resp.ok) throw new Error(data.error || "Push failed");
+      const deletedMsg = data.mode === "replace" ? `Removed ${data.deleted} existing tasks. ` : "";
+      setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle}".`);
+    } catch (e) {
+      setResultMsg("Error: " + e.message);
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-3 text-sm font-semibold">3) Preview & deliver</div>
+      {previewItems.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-xs text-gray-500">
+          Nothing to preview yet — add a task above.
+        </div>
+      ) : (
+        <>
+          <PreviewSchedule startDate={plan.startDate} items={previewItems} />
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
+              Replace existing tasks in this list before pushing
+            </label>
+            <button
+              onClick={pushToSelectedUser}
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            >
+              Push Plan to Selected User
+            </button>
+            <button
+              onClick={downloadICS}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm hover:bg-gray-50"
+              title="Export a .ics calendar file of these items"
+            >
+              <Download className="h-4 w-4" /> Export .ics
+            </button>
+            <div className="text-xs text-gray-600">{resultMsg}</div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+/* ---------- Preview list grouped by date ---------- */
 function PreviewSchedule({ startDate, items }) {
   const groups = useMemo(()=>{
     const map = new Map(); // ymd -> items[]
@@ -1185,9 +1414,7 @@ function buildICS(plan, tasks){
   lines.push("END:VCALENDAR");
   return lines.join("\r\n");
 }
-function escapeICS(s=""){
-  return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n");
-}
+function escapeICS(s=""){ return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n"); }
 
 /* ---------- Plan2Tasks export text (tasks only) ---------- */
 export function renderPlanBlock({ plan, tasks }) {
