@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import {
   Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus,
-  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight
+  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, X
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
@@ -438,7 +438,7 @@ function UsersTable(props){
   );
 }
 
-/* ---------------- Tasks wizard with calendar grid + recurrence ---------------- */
+/* ---------------- Tasks wizard (uses modal calendar picker) ---------------- */
 function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
@@ -493,33 +493,6 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       return (a.time || "").localeCompare(b.time || "");
     });
   }, [tasks]);
-
-  async function pushToSelectedUser() {
-    try {
-      setResultMsg("Pushing...");
-      if (!selectedUserEmail) throw new Error("Choose a user first.");
-      if (tasks.length === 0) throw new Error("Add at least one task.");
-      const planBlock = renderPlanBlock({ plan, tasks });
-      const resp = await fetch("/api/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userEmail: selectedUserEmail, plannerEmail, planBlock, mode: (replaceMode ? "replace" : "append") }),
-      });
-      const text = await resp.text();
-      let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
-      if (!resp.ok) throw new Error(data.error || "Push failed");
-      const deletedMsg = data.mode === "replace" ? `Removed ${data.deleted} existing tasks. ` : "";
-      setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle}".`);
-
-      // refresh history
-      const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
-      const r2 = await fetch(`/api/history?${q.toString()}`);
-      const j2 = await r2.json();
-      setHistLists(j2.lists || []);
-    } catch (e) {
-      setResultMsg("Error: " + e.message);
-    }
-  }
 
   function downloadICS() {
     const ics = buildICS(plan, tasks);
@@ -601,18 +574,12 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         <div className="mb-2">
           <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
-            Use the calendar grid to pick a date (it sets <b>Day</b>), set time/recurrence, and click <b>Add task(s)</b>.
+            Click <b>Pick date</b> to open the calendar grid (with month/year controls). That sets the task’s <b>Day</b>.
+            Choose Repeat (Daily / Weekly / Monthly), then <b>Add task(s)</b>.
           </div>
         </div>
 
-        <DayOffsetCalendar
-          startDate={plan.startDate}
-          valueOffset={0}
-          onPickOffset={(off)=>{
-            const ev = new CustomEvent("p2t:setBaseOffset",{ detail: { offset: off }});
-            window.dispatchEvent(ev);
-          }}
-        />
+        <DatePickerButton startDate={plan.startDate} />
 
         <TasksEditorAdvanced startDate={plan.startDate} />
       </div>
@@ -650,43 +617,93 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   );
 }
 
-/* ---------------- Calendar grid to pick a date ---------------- */
-function DayCell({ label, isDim, isDisabled, isSelected, onClick }) {
+/* ---------------- Compact “Pick date” -> modal calendar ---------------- */
+function DatePickerButton({ startDate }) {
+  const start = parseISODate(startDate) || new Date();
+  const [open, setOpen] = useState(false);
+  const [offset, setOffset] = useState(0); // what’s currently selected
+
+  useEffect(()=>{
+    // initialize downstream editor with Day 0 once
+    const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: 0 }});
+    window.dispatchEvent(ev);
+  },[]);
+
+  const label = `${fmtDayLabel(startDate, offset)} (Day ${offset})`;
+
   return (
-    <button
-      type="button"
-      className={cn(
-        "h-8 w-8 rounded-full text-xs flex items-center justify-center transition",
-        isDisabled ? "text-gray-300 cursor-not-allowed"
-        : isSelected ? "bg-cyan-600 text-white"
-        : "hover:bg-gray-100",
-        isDim && !isDisabled && !isSelected ? "text-gray-400" : "text-gray-700"
+    <div className="mb-3 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={()=>setOpen(true)}
+        className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50"
+      >
+        <Calendar className="h-4 w-4" />
+        Pick date
+      </button>
+
+      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+        Selected: <b>{label}</b>
+      </div>
+
+      {open && (
+        <Modal onClose={()=>setOpen(false)} title="Choose a date">
+          <CalendarGrid
+            startDate={startDate}
+            valueOffset={offset}
+            onPickOffset={(o)=>{
+              setOffset(o);
+              // notify the task editor
+              const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: o }});
+              window.dispatchEvent(ev);
+              setOpen(false);
+            }}
+          />
+        </Modal>
       )}
-      onClick={isDisabled ? undefined : onClick}
-      aria-pressed={isSelected ? "true" : "false"}
-    >
-      {label}
-    </button>
+    </div>
   );
 }
 
-function DayOffsetCalendar({ startDate, valueOffset = 0, onPickOffset }) {
+function Modal({ title, children, onClose }) {
+  useEffect(() => {
+    function onEsc(e){ if (e.key === "Escape") onClose?.(); }
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold">{title}</div>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* Calendar grid with month/year controls (compact) */
+function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   const start = parseISODate(startDate) || new Date();
   const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
-  const maxDays = 120; // 4 months window
+  const maxDays = 180; // ~6 months window
   const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
   const endUTC = new Date(startUTC.getTime() + maxDays*24*3600*1000);
   const selectedUTC = new Date(startUTC.getTime() + valueOffset*24*3600*1000);
 
   function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
-  function gotoMonth(delta){
-    const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth();
-    setViewMonth(new Date(Date.UTC(y, m+delta, 1)));
-  }
+  function gotoMonth(delta){ const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth(); setViewMonth(new Date(Date.UTC(y, m+delta, 1))); }
 
+  // build 6-week grid
   const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
   const firstOfMonth = new Date(Date.UTC(year, month, 1));
-  const startDow = firstOfMonth.getUTCDay();
+  const startDow = firstOfMonth.getUTCDay(); // 0..6 Sun..Sat
   const gridStart = new Date(Date.UTC(year, month, 1 - startDow));
   const weeks = Array.from({ length: 6 }).map((_, w) =>
     Array.from({ length: 7 }).map((_, d) => {
@@ -700,9 +717,8 @@ function DayOffsetCalendar({ startDate, valueOffset = 0, onPickOffset }) {
   );
 
   return (
-    <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-3">
+    <div>
       <div className="mb-2 flex items-center justify-between">
-        <div className="text-sm font-medium">Pick date within plan (sets <b>Day</b>)</div>
         <div className="flex items-center gap-1">
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-12)} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-1)} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
@@ -710,6 +726,12 @@ function DayOffsetCalendar({ startDate, valueOffset = 0, onPickOffset }) {
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
         </div>
+        <button
+          className="rounded-lg border px-2 py-1 text-xs"
+          onClick={()=>{ setViewMonth(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))); }}
+        >
+          Jump to start (Day 0)
+        </button>
       </div>
 
       <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
@@ -718,19 +740,24 @@ function DayOffsetCalendar({ startDate, valueOffset = 0, onPickOffset }) {
 
       <div className="grid grid-cols-7 gap-1">
         {weeks.map((row, ri) => row.map((c, ci) => (
-          <DayCell
+          <button
             key={`${ri}-${ci}`}
-            label={c.label}
-            isDim={!c.isSameMonth}
-            isDisabled={c.isDisabled}
-            isSelected={c.isSelected}
+            type="button"
+            className={cn(
+              "h-8 w-8 rounded-full text-xs flex items-center justify-center transition",
+              c.isDisabled ? "text-gray-300 cursor-not-allowed"
+              : c.isSelected ? "bg-cyan-600 text-white"
+              : "hover:bg-gray-100",
+              !c.isSameMonth && !c.isDisabled && !c.isSelected ? "text-gray-400" : "text-gray-700"
+            )}
             onClick={()=>{
+              if (c.isDisabled) return;
               const off = offsetFromStart(startDate, c.cell);
               onPickOffset?.(off);
-              const ev = new CustomEvent("p2t:setBaseOffset",{ detail: { offset: off, dateUTC: c.cell }});
-              window.dispatchEvent(ev);
             }}
-          />
+          >
+            {c.label}
+          </button>
         )))}
       </div>
 
@@ -742,7 +769,7 @@ function DayOffsetCalendar({ startDate, valueOffset = 0, onPickOffset }) {
   );
 }
 
-/* ---------- Advanced recurrence editor (weekly = pill buttons) ---------- */
+/* ---------- Tasks editor (repeat: None/Daily/Weekly/Monthly; weekly pills) ---------- */
 function TasksEditorAdvanced({ startDate }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
@@ -762,7 +789,7 @@ function TasksEditorAdvanced({ startDate }) {
   const [count, setCount] = useState(4);
   const [untilDate, setUntilDate] = useState("");
 
-  const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // Mon/Wed by default
+  const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // Mon/Wed default
   const WEEK_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
   const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
@@ -776,7 +803,6 @@ function TasksEditorAdvanced({ startDate }) {
     const name = title.trim();
     if (!name) return;
     const base = addDaysSafe(startDate, Number(baseOffset) || 0);
-
     const baseObj = {
       title: name,
       time: time || undefined,
@@ -923,10 +949,10 @@ function TasksEditorAdvanced({ startDate }) {
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
         <div className="block">
-           <div className="mb-1 text-sm font-medium">Selected date within plan</div>
-           <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-             {fmtDayLabel(startDate, baseOffset)} <span className="text-gray-500">(Day {baseOffset})</span>
-           </div>
+          <div className="mb-1 text-sm font-medium">Selected date within plan</div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+            {fmtDayLabel(startDate, baseOffset)} <span className="text-gray-500">(Day {baseOffset})</span>
+          </div>
         </div>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
@@ -940,7 +966,7 @@ function TasksEditorAdvanced({ startDate }) {
         </label>
       </div>
 
-      <div className="mb-1 text-xs text-gray-500">Tip: click a date in the grid above (it updates “Selected date within plan”).</div>
+      <div className="mb-1 text-xs text-gray-500">Tip: use the <b>Pick date</b> button above to set the date (Day).</div>
 
       <div className="mt-3 mb-3 rounded-xl border border-gray-200 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-3">
@@ -952,21 +978,21 @@ function TasksEditorAdvanced({ startDate }) {
             <option value="monthly">Monthly</option>
           </select>
 
-          {repeat !== "none" && (
-            <>
-              <span className="text-sm">every</span>
-              <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
-                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
-              <span className="text-sm">
-                {repeat === "daily" ? "day(s)" : repeat === "weekly" ? "week(s)" : "month(s)"}
-              </span>
-            </>
-          )}
+        {repeat !== "none" && (
+          <>
+            <span className="text-sm">every</span>
+            <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
+              className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+            <span className="text-sm">
+              {repeat === "daily" ? "day(s)" : repeat === "weekly" ? "week(s)" : "month(s)"}
+            </span>
+          </>
+        )}
         </div>
 
         {repeat === "weekly" && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
+            {WEEK_LABELS.map((lbl, i)=>(
               <button
                 type="button"
                 key={i}
