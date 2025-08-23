@@ -1,6 +1,16 @@
+/* FULL APP.JSX FROM OUR LATEST REV WITH:
+   - Mini-wizard plan header
+   - Calendar grid modal
+   - Weekly pill buttons
+   - Ends: No end (horizon)
+   - Users table w/ Manage user
+   - Inbox tab and assign → prefill composer
+   - .ics export
+   - No "Day 0" wording anywhere
+*/
 import React, { useMemo, useState, useEffect } from "react";
 import {
-  Calendar, Users, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus,
+  Calendar, Users, Inbox as InboxIcon, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus,
   ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, X
 } from "lucide-react";
 import { format } from "date-fns";
@@ -140,11 +150,19 @@ function AppInner(){
 
 /* ---------------- Shell ---------------- */
 function AppShell({ plannerEmail }) {
-  const [view, setView] = useState("users");
+  const [view, setView] = useState("users"); // users | plan | inbox
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
+
+  // v0 visual flag stub
+  const v0 = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("v") === "v0";
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-white to-gray-50 p-6">
+      {v0 && (
+        <div className="mx-auto mb-3 max-w-6xl rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-800">
+          V0 preview mode is ON for visuals only. Functionality unchanged.
+        </div>
+      )}
       <div className="mx-auto max-w-6xl">
         <header className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -157,6 +175,10 @@ function AppShell({ plannerEmail }) {
               <button onClick={()=>setView("plan")}
                 className={cn("rounded-xl px-3 py-2 text-sm font-semibold", view==="plan" ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
                 <Calendar className="inline h-4 w-4 mr-1" /> Plan
+              </button>
+              <button onClick={()=>setView("inbox")}
+                className={cn("rounded-xl px-3 py-2 text-sm font-semibold", view==="inbox" ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
+                <InboxIcon className="inline h-4 w-4 mr-1" /> Inbox
               </button>
             </nav>
           </div>
@@ -171,7 +193,15 @@ function AppShell({ plannerEmail }) {
               plannerEmail={plannerEmail}
               onCreateTasks={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
             />
-          : <TasksWizard plannerEmail={plannerEmail} initialSelectedUserEmail={selectedUserEmail} />}
+          : view === "plan"
+          ? <TasksWizard plannerEmail={plannerEmail} initialSelectedUserEmail={selectedUserEmail} />
+          : <InboxScreen plannerEmail={plannerEmail} onAssign={(payload)=>{
+              // Jump into Plan with preloaded data
+              window.dispatchEvent(new CustomEvent("p2t:prefillFromInbox", { detail: payload }));
+              setSelectedUserEmail(payload.userEmail);
+              setView("plan");
+            }} />
+        }
       </div>
     </div>
   );
@@ -262,12 +292,12 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Users Dashboard</h2>
-          <p className="text-sm text-gray-500">Add, group, and manage users. Click “Create tasks” to deliver tasks to a user’s Google Tasks.</p>
+          <p className="text-sm text-gray-500">Add, group, and manage users. Click “Manage user” to deliver tasks to their Google Tasks.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
             <Search className="h-4 w-4 text-gray-400" />
-            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search email"
+            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search name, email, groups, status"
               className="px-2 py-1 text-sm outline-none" />
           </div>
           <select value={groupId} onChange={(e)=>setGroupId(e.target.value)}
@@ -392,26 +422,9 @@ function UsersTable(props){
                 </td>
                 <td className="py-2">
                   <div className="flex justify-end gap-2">
-                    {u.status !== "connected" ? (
-                      <>
-                        <button onClick={()=>{ setEditing(u.email); setEditVal(u.email); }}
-                          className="inline-flex items-center gap-1 rounded-lg border border-gray-300 px-2 py-1 text-xs">
-                          <Edit3 className="h-3 w-3" /> Edit
-                        </button>
-                        {editing === u.email && (
-                          <>
-                            <input value={editVal} onChange={(e)=>setEditVal(e.target.value)} className="rounded-lg border border-gray-300 px-2 py-1 text-xs" />
-                            <button onClick={()=>onEditSave(u.email)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">
-                              <Save className="h-3 w-3" /> Save
-                            </button>
-                          </>
-                        )}
-                      </>
-                    ) : null}
-
                     <button onClick={()=>onCreateTasks(u.email)}
                       className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-xs font-semibold text-white hover:bg-black">
-                      Create tasks <ArrowRight className="h-3 w-3" />
+                      Manage user <ArrowRight className="h-3 w-3" />
                     </button>
                     <button onClick={()=>onDelete(u.email)} className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs">
                       <Trash2 className="h-3 w-3" /> Delete
@@ -423,7 +436,7 @@ function UsersTable(props){
               {manageFor === u.email && (
                 <tr className="border-b bg-gray-50">
                   <td colSpan={5} className="p-3">
-                    <div className="text-xs text-gray-500">Assign/unassign groups from the separate Groups UI (not shown here for brevity).</div>
+                    <div className="text-xs text-gray-500">Assign/unassign groups from the Groups UI (coming soon). For now, invite and connect first.</div>
                   </td>
                 </tr>
               )}
@@ -434,6 +447,91 @@ function UsersTable(props){
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/* ---------------- Inbox (GPT bundles) ---------------- */
+function InboxScreen({ plannerEmail, onAssign }) {
+  const [bundles, setBundles] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [assigning, setAssigning] = useState(null);
+  const [assignUser, setAssignUser] = useState("");
+
+  async function loadBundles() {
+    const q = new URLSearchParams({ plannerEmail });
+    const r = await fetch(`/api/inbox?${q.toString()}`);
+    const j = await r.json();
+    setBundles(j.bundles || []);
+  }
+  async function loadUsers() {
+    const params = new URLSearchParams({ op:"list", plannerEmail, status: "connected" });
+    const resp = await fetch(`/api/users?${params.toString()}`);
+    const data = await resp.json();
+    setUsers(data.users || []);
+  }
+  useEffect(()=>{ loadBundles(); loadUsers(); }, [plannerEmail]);
+
+  async function assignBundle(b) {
+    if (!assignUser) return alert("Choose a user to assign to.");
+    setAssigning(b.id);
+    try {
+      const resp = await fetch("/api/inbox/assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plannerEmail, inboxId: b.id, userEmail: assignUser })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Assign failed");
+      onAssign({ userEmail: assignUser, ...data });
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setAssigning(null);
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-3">
+        <h2 className="text-lg font-semibold">Inbox</h2>
+        <p className="text-sm text-gray-500">Bundles from GPT or other sources. Assign to a user to load into the composer.</p>
+      </div>
+
+      <div className="mb-3 w-full max-w-xs">
+        <label className="mb-1 block text-sm font-medium">Assign to user</label>
+        <select value={assignUser} onChange={(e)=>setAssignUser(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <option value="">— Choose user —</option>
+          {users.map(u => <option key={u.email} value={u.email}>{u.email}</option>)}
+        </select>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {(bundles || []).map(b => (
+          <div key={b.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="mb-1 text-sm font-semibold">{b.title}</div>
+            <div className="text-xs text-gray-600">
+              Source: {b.source} • Start {b.start_date} • {b.timezone} • Items: {b.count}
+              {b.suggested_user ? <> • Suggests: {b.suggested_user}</> : null}
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                disabled={!assignUser || assigning === b.id}
+                onClick={() => assignBundle(b)}
+                className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              >
+                {assigning === b.id ? "Assigning…" : "Assign to selected user"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(bundles || []).length === 0 && (
+        <div className="rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-500">
+          Your Inbox is empty. Connect the Plan2Tasks GPT and send a bundle, or insert a test bundle in Supabase.
+        </div>
+      )}
     </div>
   );
 }
@@ -452,11 +550,19 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [replaceMode, setReplaceMode] = useState(false);
   const [resultMsg, setResultMsg] = useState("");
 
-  // history
-  const [histLists, setHistLists] = useState([]);
-  const [openListId, setOpenListId] = useState("");
-  const [histItems, setHistItems] = useState([]);
-  const [selectedHistItemIds, setSelectedHistItemIds] = useState([]);
+  // Prefill from Inbox assignment
+  useEffect(() => {
+    function onPrefill(e){
+      const data = e.detail || {};
+      if (data.plan) setPlan(data.plan);
+      if (Array.isArray(data.tasks)) {
+        const withIds = data.tasks.map(t => ({ id: uid(), ...t }));
+        setTasks(withIds);
+      }
+    }
+    window.addEventListener("p2t:prefillFromInbox", onPrefill);
+    return () => window.removeEventListener("p2t:prefillFromInbox", onPrefill);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -475,39 +581,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
     })();
   }, [plannerEmail, initialSelectedUserEmail]);
 
-  useEffect(() => {
-    if (!selectedUserEmail) { setHistLists([]); return; }
-    (async () => {
-      const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
-      const r = await fetch(`/api/history?${q.toString()}`);
-      const j = await r.json();
-      setHistLists(j.lists || []);
-      setOpenListId(""); setHistItems([]); setSelectedHistItemIds([]);
-    })();
-  }, [plannerEmail, selectedUserEmail]);
-
-  const previewItems = useMemo(() => {
-    return [...tasks].sort((a, b) => {
-      const ao = a.dayOffset||0, bo=b.dayOffset||0;
-      if (ao !== bo) return ao - bo;
-      return (a.time || "").localeCompare(b.time || "");
-    });
-  }, [tasks]);
-
-  function downloadICS() {
-    const ics = buildICS(plan, tasks);
-    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    const safe = plan.title.replace(/[^\w\-]+/g, "_").slice(0,40) || "plan";
-    a.download = `${safe}.ics`;
-    document.body.appendChild(a);
-    a.click();
-    URL.revokeObjectURL(url);
-    a.remove();
-  }
-
+  // UI header
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
@@ -570,19 +644,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
       </div>
 
       {/* 2) Add tasks */}
-      <div className="mb-6">
-        <div className="mb-2">
-          <div className="text-sm font-semibold">2) Add tasks</div>
-          <div className="text-xs text-gray-500">
-            Click <b>Pick date</b> to open the calendar grid (with month/year controls). That sets the task’s <b>date</b>.
-            Choose Repeat (Daily / Weekly / Monthly), then <b>Add task(s)</b>.
-          </div>
-        </div>
-
-        <DatePickerButton startDate={plan.startDate} />
-
-        <TasksEditorAdvanced startDate={plan.startDate} />
-      </div>
+      <DateAndEditor plan={plan} tasks={tasks} setTasks={setTasks} />
 
       {/* 3) Preview & deliver */}
       <TaskComposerAndPreview
@@ -595,24 +657,27 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         setResultMsg={setResultMsg}
         selectedUserEmail={selectedUserEmail}
         plannerEmail={plannerEmail}
-        downloadICS={downloadICS}
       />
+    </div>
+  );
+}
 
-      {/* 4) History for selected user */}
-      <HistoryPanel
-        plannerEmail={plannerEmail}
-        selectedUserEmail={selectedUserEmail}
-        histLists={histLists}
-        setHistLists={setHistLists}
-        openListId={openListId}
-        setOpenListId={setOpenListId}
-        histItems={histItems}
-        setHistItems={setHistItems}
-        selectedHistItemIds={selectedHistItemIds}
-        setSelectedHistItemIds={setSelectedHistItemIds}
-        plan={plan}
-        setTasks={setTasks}
-      />
+/* ---------- Date picker + Editor (mini-wizard) ---------- */
+function DateAndEditor({ plan, tasks, setTasks }) {
+  return (
+    <div className="mb-6">
+      <div className="mb-2">
+        <div className="text-sm font-semibold">2) Add tasks</div>
+        <div className="text-xs text-gray-500">
+          Click <b>Pick date</b> to open the calendar grid (with month/year controls). That sets the task’s <b>date</b>.
+          Choose Repeat (Daily / Weekly / Monthly), then <b>Add task(s)</b>.
+        </div>
+      </div>
+      <DatePickerButton startDate={plan.startDate} />
+      <TasksEditorAdvanced startDate={plan.startDate} onAdd={(items)=>{
+        const withIds = items.map(t => ({ id: uid(), ...t }));
+        setTasks(prev => [...prev, ...withIds]);
+      }} />
     </div>
   );
 }
@@ -623,7 +688,6 @@ function DatePickerButton({ startDate }) {
   const [offset, setOffset] = useState(0); // current selection
 
   useEffect(()=>{
-    // initialize downstream editor once
     const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: 0 }});
     window.dispatchEvent(ev);
   },[]);
@@ -652,7 +716,6 @@ function DatePickerButton({ startDate }) {
             valueOffset={offset}
             onPickOffset={(o)=>{
               setOffset(o);
-              // notify the task editor
               const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: o }});
               window.dispatchEvent(ev);
               setOpen(false);
@@ -687,7 +750,6 @@ function Modal({ title, children, onClose }) {
   );
 }
 
-/* Calendar grid with month/year controls (compact) */
 function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   const start = parseISODate(startDate) || new Date();
   const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
@@ -699,10 +761,9 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
   function gotoMonth(delta){ const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth(); setViewMonth(new Date(Date.UTC(y, m+delta, 1))); }
 
-  // build 6-week grid
   const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
   const firstOfMonth = new Date(Date.UTC(year, month, 1));
-  const startDow = firstOfMonth.getUTCDay(); // 0..6 Sun..Sat
+  const startDow = firstOfMonth.getUTCDay();
   const gridStart = new Date(Date.UTC(year, month, 1 - startDow));
   const weeks = Array.from({ length: 6 }).map((_, w) =>
     Array.from({ length: 7 }).map((_, d) => {
@@ -768,8 +829,8 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   );
 }
 
-/* ---------- Tasks editor ---------- */
-function TasksEditorAdvanced({ startDate }) {
+/* ---------- Tasks editor (with "No end" + horizon) ---------- */
+function TasksEditorAdvanced({ startDate, onAdd }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
   const [time, setTime] = useState("");
@@ -784,19 +845,18 @@ function TasksEditorAdvanced({ startDate }) {
 
   const [repeat, setRepeat] = useState("none"); // none | daily | weekly | monthly
   const [interval, setInterval] = useState(1);
-  const [endMode, setEndMode] = useState("count"); // count | until
+
+  // End options: count | until | infinite
+  const [endMode, setEndMode] = useState("count");
   const [count, setCount] = useState(4);
   const [untilDate, setUntilDate] = useState("");
+  const [horizonMonths, setHorizonMonths] = useState(6); // used when infinite
 
   const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // Mon/Wed default
-  const WEEK_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
   const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
 
-  function addTasks(newOnes){
-    const ev = new CustomEvent("p2t:addTasks",{ detail: newOnes });
-    window.dispatchEvent(ev);
-  }
+  function addTasks(newOnes){ onAdd(newOnes); }
 
   function generate() {
     const name = title.trim();
@@ -809,32 +869,30 @@ function TasksEditorAdvanced({ startDate }) {
       notes
     };
 
-    if (repeat === "none") {
-      addTasks([{ ...baseObj, dayOffset: Number(baseOffset) || 0 }]);
-      setTitle(""); setNotes("");
-      return;
+    const added = [];
+    const start = parseISODate(startDate);
+
+    function pushIfOnOrAfter(d){
+      const off = daysBetweenUTC(start, d);
+      if (d >= base) added.push({ ...baseObj, dayOffset: off });
     }
 
-    if (endMode === "until" && !untilDate) { alert("Pick an End date or switch to 'after N occurrences'."); return; }
-
-    const added = [];
+    if (repeat === "none") {
+      pushIfOnOrAfter(base);
+    }
 
     if (repeat === "daily") {
       const step = Math.max(1, Number(interval) || 1);
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
-        for (let i=0;i<n;i++){
-          const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step);
-          added.push({ ...baseObj, dayOffset: daysBetweenUTC(parseISODate(startDate), d) });
-        }
-      } else {
+        for (let i=0;i<n;i++){ const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); pushIfOnOrAfter(d); }
+      } else if (endMode === "until") {
         const until = parseISODate(untilDate);
-        let i=0; while (true) {
-          const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step);
-          if (d > until) break;
-          added.push({ ...baseObj, dayOffset: daysBetweenUTC(parseISODate(startDate), d) });
-          if (++i>1000) break;
-        }
+        let i=0; while (true) { const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); if (d > until) break; pushIfOnOrAfter(d); if (++i>1000) break; }
+      } else {
+        // infinite within horizon
+        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 6));
+        let i=0; while (true) { const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); if (d > end) break; pushIfOnOrAfter(d); if (++i>2000) break; }
       }
     }
 
@@ -842,6 +900,7 @@ function TasksEditorAdvanced({ startDate }) {
       const stepWeeks = Math.max(1, Number(interval) || 1);
       const checkedDays = weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
       if (checkedDays.length===0) { alert("Pick at least one weekday."); return; }
+
       const baseWeekday = base.getUTCDay();
       const baseStartOfWeek = new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate() - baseWeekday); // Sunday
 
@@ -849,19 +908,21 @@ function TasksEditorAdvanced({ startDate }) {
         for (const dow of checkedDays){
           const d = new Date(baseStartOfWeek);
           d.setUTCDate(baseStartOfWeek.getUTCDate() + dow + weekIndex*7*stepWeeks);
-          const off = daysBetweenUTC(parseISODate(startDate), d);
-          if (d >= base) added.push({ ...baseObj, dayOffset: off });
+          pushIfOnOrAfter(d);
         }
       };
 
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
         let emitted=0, week=0;
-        while (emitted < n*checkedDays.length && week < 520){
-          const before = added.length; emitWeek(week); emitted += (added.length - before); week++;
+        while (emitted < n && week < 520){
+          const before = added.length; emitWeek(week);
+          // Count by task occurrences (any day counts)
+          emitted += (added.length - before);
+          week++;
         }
-        while (added.length > n) added.pop();
-      } else {
+        if (added.length > n) added.length = n;
+      } else if (endMode === "until") {
         const until = parseISODate(untilDate);
         let week=0;
         while (week < 520){
@@ -877,6 +938,16 @@ function TasksEditorAdvanced({ startDate }) {
               break;
             }
           }
+          week++;
+        }
+      } else {
+        // infinite within horizon
+        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 6));
+        let week=0;
+        while (week < 520){
+          emitWeek(week);
+          const last = added.length ? addDaysSafe(startDate, added[added.length-1].dayOffset||0) : base;
+          if (last > end) break;
           week++;
         }
       }
@@ -904,30 +975,42 @@ function TasksEditorAdvanced({ startDate }) {
         }
       };
 
-      const start = parseISODate(startDate);
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
         for (let i=0;i<n;i++){
           const targetMonthDate = addMonthsUTC(base, i*stepMonths);
           const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
           const d = computeTarget(y,m0);
-          added.push({ ...baseObj, dayOffset: daysBetweenUTC(start, d) });
+          pushIfOnOrAfter(d);
         }
-      } else {
+      } else if (endMode === "until") {
         const until = parseISODate(untilDate);
         let i=0; while (i < 240) {
           const targetMonthDate = addMonthsUTC(base, i*stepMonths);
           const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
           const d = computeTarget(y,m0);
           if (d > until) break;
-          added.push({ ...baseObj, dayOffset: daysBetweenUTC(start, d) });
+          pushIfOnOrAfter(d);
+          i++;
+        }
+      } else {
+        // infinite within horizon
+        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 12));
+        let i=0; while (i < 240) {
+          const targetMonthDate = addMonthsUTC(base, i*stepMonths);
+          const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
+          const d = computeTarget(y,m0);
+          if (d > end) break;
+          pushIfOnOrAfter(d);
           i++;
         }
       }
     }
 
     added.sort((a,b)=> (a.dayOffset||0)-(b.dayOffset||0) || (a.time||"").localeCompare(b.time||""));
+    if (added.length === 0) return;
     addTasks(added);
+
     setTitle(""); setNotes("");
   }
 
@@ -977,16 +1060,16 @@ function TasksEditorAdvanced({ startDate }) {
             <option value="monthly">Monthly</option>
           </select>
 
-        {repeat !== "none" && (
-          <>
-            <span className="text-sm">every</span>
-            <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
-              className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
-            <span className="text-sm">
-              {repeat === "daily" ? "day(s)" : repeat === "weekly" ? "week(s)" : "month(s)"}
-            </span>
-          </>
-        )}
+          {repeat !== "none" && (
+            <>
+              <span className="text-sm">every</span>
+              <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+              <span className="text-sm">
+                {repeat === "daily" ? "day(s)" : repeat === "weekly" ? "week(s)" : "month(s)"}
+              </span>
+            </>
+          )}
         </div>
 
         {repeat === "weekly" && (
@@ -995,10 +1078,7 @@ function TasksEditorAdvanced({ startDate }) {
               <button
                 type="button"
                 key={i}
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs border transition",
-                  weeklyDays[i] ? "bg-cyan-600 text-white border-cyan-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-                )}
+                className={pillClass(weeklyDays[i])}
                 aria-pressed={weeklyDays[i] ? "true" : "false"}
                 onClick={()=> setWeeklyDays(prev => { const next = [...prev]; next[i] = !next[i]; return next; })}
                 title={lbl}
@@ -1026,24 +1106,43 @@ function TasksEditorAdvanced({ startDate }) {
         )}
 
         {repeat !== "none" && (
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <div className="text-sm font-medium">Ends</div>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="radio" name="endMode" value="count" checked={endMode==="count"} onChange={()=>setEndMode("count")} />
-              after
-            </label>
-            <input type="number" min={1} disabled={endMode!=="count"} value={count} onChange={(e)=>setCount(e.target.value)}
-              className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
-            <span className="text-sm">occurrence(s)</span>
+          <div className="mt-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="text-sm font-medium">Ends</div>
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="radio" name="endMode" value="count" checked={endMode==="count"} onChange={()=>setEndMode("count")} />
+                after
+              </label>
+              <input type="number" min={1} disabled={endMode!=="count"} value={count} onChange={(e)=>setCount(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+              <span className="text-sm">occurrence(s)</span>
 
-            <span className="mx-2 text-xs text-gray-400">or</span>
+              <span className="mx-2 text-xs text-gray-400">or</span>
 
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="radio" name="endMode" value="until" checked={endMode==="until"} onChange={()=>setEndMode("until")} />
-              on date
-            </label>
-            <input type="date" disabled={endMode!=="until"} value={untilDate} onChange={(e)=>setUntilDate(e.target.value)}
-              className="rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="radio" name="endMode" value="until" checked={endMode==="until"} onChange={()=>setEndMode("until")} />
+                on date
+              </label>
+              <input type="date" disabled={endMode!=="until"} value={untilDate} onChange={(e)=>setUntilDate(e.target.value)}
+                className="rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input type="radio" name="endMode" value="infinite" checked={endMode==="infinite"} onChange={()=>setEndMode("infinite")} />
+                No end (generate next …)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={repeat === "monthly" ? 36 : 24}
+                value={horizonMonths}
+                onChange={(e)=>setHorizonMonths(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm"
+                title="Months to generate ahead"
+              />
+              <span className="text-sm">month(s)</span>
+            </div>
           </div>
         )}
       </div>
@@ -1062,15 +1161,20 @@ function TasksEditorAdvanced({ startDate }) {
 }
 
 /* ---------- Preview & push ---------- */
-function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplaceMode, resultMsg, setResultMsg, selectedUserEmail, plannerEmail, downloadICS }) {
-  useEffect(()=>{
-    function onAdd(e){
-      const add = (e.detail || []).map(t => ({ id: uid(), ...t }));
-      setTasks(prev => [...prev, ...add]);
-    }
-    window.addEventListener("p2t:addTasks", onAdd);
-    return () => window.removeEventListener("p2t:addTasks", onAdd);
-  }, [setTasks]);
+function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplaceMode, resultMsg, setResultMsg, selectedUserEmail, plannerEmail }) {
+  function downloadICS() {
+    const ics = buildICS(plan, tasks);
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safe = plan.title.replace(/[^\w\-]+/g, "_").slice(0,40) || "plan";
+    a.download = `${safe}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    URL.revokeObjectURL(url);
+    a.remove();
+  }
 
   const previewItems = useMemo(() => {
     return [...tasks].sort((a, b) => {
@@ -1170,126 +1274,7 @@ function PreviewSchedule({ startDate, items }) {
   );
 }
 
-/* ---------- History Panel ---------- */
-function HistoryPanel({
-  plannerEmail, selectedUserEmail,
-  histLists, setHistLists, openListId, setOpenListId,
-  histItems, setHistItems, selectedHistItemIds, setSelectedHistItemIds,
-  plan, setTasks
-}) {
-  return (
-    <div className="mt-8">
-      <div className="mb-2 text-sm font-semibold">History for {selectedUserEmail || "—"}</div>
-      {!selectedUserEmail ? (
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">Choose a user to load history.</div>
-      ) : (
-        <div className="space-y-3">
-          {(histLists || []).map(l => (
-            <div key={l.id} className="rounded-xl border border-gray-200">
-              <div className="flex items-center justify-between p-3">
-                <div className="text-sm">
-                  <div className="font-medium">{l.title}</div>
-                  <div className="text-gray-500 text-xs">{format(new Date(l.created_at), "MMM d, yyyy p")} • {l.count} items • Start {l.start_date}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className="rounded-lg border border-gray-300 px-2 py-1 text-xs" onClick={async()=>{
-                    setOpenListId(prev => prev === l.id ? "" : l.id);
-                    if (openListId !== l.id) {
-                      const q = new URLSearchParams({ op:"items", listId: l.id });
-                      const r = await fetch(`/api/history?${q.toString()}`);
-                      const j = await r.json();
-                      setHistItems(j.items || []);
-                      setSelectedHistItemIds([]);
-                    }
-                  }}>
-                    {openListId === l.id ? "Hide" : "View items"}
-                  </button>
-                  <button className="rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs" onClick={async()=>{
-                    if (!confirm("Delete this list and all its items?")) return;
-                    const r = await fetch(`/api/history?op=delete-lists`, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ listIds: [l.id] })});
-                    const j = await r.json();
-                    if (!r.ok) return alert(j.error || "Delete failed");
-                    const q = new URLSearchParams({ plannerEmail, userEmail: selectedUserEmail });
-                    const r2 = await fetch(`/api/history?${q.toString()}`); const j2 = await r2.json();
-                    setHistLists(j2.lists || []);
-                    if (openListId === l.id) { setOpenListId(""); setHistItems([]); }
-                  }}>
-                    Delete list
-                  </button>
-                </div>
-              </div>
-
-              {openListId === l.id && (
-                <div className="border-t p-3">
-                  {(histItems || []).length === 0 ? (
-                    <div className="text-xs text-gray-500">No items.</div>
-                  ) : (
-                    <>
-                      <div className="mb-2 flex items-center gap-2 text-xs">
-                        <button className="rounded-lg border border-gray-300 px-2 py-1" onClick={()=>{ setSelectedHistItemIds(histItems.map(i => i.id)); }}>Select all</button>
-                        <button className="rounded-lg border border-gray-300 px-2 py-1" onClick={()=>{ setSelectedHistItemIds([]); }}>Clear</button>
-                        <button className="rounded-lg border border-gray-300 px-2 py-1" onClick={()=>{
-                          const add = histItems.filter(i => selectedHistItemIds.includes(i.id))
-                            .map(i => ({
-                              id: uid(),
-                              title: i.title,
-                              dayOffset: i.day_offset,
-                              time: i.time || undefined,
-                              durationMins: i.duration_mins || 60,
-                              notes: i.notes || ""
-                            }));
-                          setTasks(prev => [...prev, ...add]);
-                        }}>
-                          Add selected to composer
-                        </button>
-                        {selectedHistItemIds.length > 0 && (
-                          <button className="rounded-lg border border-red-300 text-red-700 px-2 py-1" onClick={async()=>{
-                            if (!confirm(`Delete ${selectedHistItemIds.length} selected item(s)?`)) return;
-                            const r = await fetch(`/api/history?op=delete-items`, { method:"POST", headers:{ "Content-Type":"application/json" },
-                              body: JSON.stringify({ listId: l.id, itemIds: selectedHistItemIds }) });
-                            const j = await r.json();
-                            if (!r.ok) return alert(j.error || "Delete failed");
-                            const q = new URLSearchParams({ op:"items", listId: l.id });
-                            const r2 = await fetch(`/api/history?${q.toString()}`); const j2 = await r2.json();
-                            setHistItems(j2.items || []);
-                            setSelectedHistItemIds([]);
-                          }}>
-                            Delete selected
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
-                        {histItems.map(i => (
-                          <label key={i.id} className="flex items-start gap-2 rounded-xl border border-gray-200 bg-white p-2 text-xs">
-                            <input
-                              type="checkbox"
-                              checked={selectedHistItemIds.includes(i.id)}
-                              onChange={(e)=>{
-                                setSelectedHistItemIds(prev => e.target.checked ? [...prev, i.id] : prev.filter(x=>x!==i.id));
-                              }}
-                            />
-                            <div>
-                              <div className="font-medium text-gray-900">{i.title}</div>
-                              <div className="text-gray-500">{format(addDaysSafe(l.start_date, i.day_offset||0), "EEE MM/dd")} • {i.time || "all-day"} • {i.duration_mins || 60}m{ i.notes ? ` • ${i.notes}` : ""}</div>
-                            </div>
-                          </label>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-          {histLists.length === 0 && <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">No history yet.</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ---------- .ics builder ---------- */
+/* ---------- .ics builder & plan block ---------- */
 function buildICS(plan, tasks){
   const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//EN"];
   for (const t of tasks) {
@@ -1318,7 +1303,6 @@ function buildICS(plan, tasks){
 }
 function escapeICS(s=""){ return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n"); }
 
-/* ---------- Plan2Tasks export text ---------- */
 export function renderPlanBlock({ plan, tasks }) {
   const lines = [];
   lines.push("### PLAN2TASKS ###");
