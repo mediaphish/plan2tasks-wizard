@@ -1,4 +1,4 @@
-/* FULL APP.JSX FROM OUR LATEST REV WITH:
+/* FULL APP.JSX WITH:
    - Mini-wizard plan header
    - Calendar grid modal
    - Weekly pill buttons
@@ -6,6 +6,7 @@
    - Users table w/ Manage user
    - Inbox tab and assign → prefill composer
    - .ics export
+   - Notes field restored in single-task editor
    - No "Day 0" wording anywhere
 */
 import React, { useMemo, useState, useEffect } from "react";
@@ -829,13 +830,13 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   );
 }
 
-/* ---------- Tasks editor (with "No end" + horizon) ---------- */
+/* ---------- Tasks editor (with Notes, "No end" + horizon) ---------- */
 function TasksEditorAdvanced({ startDate, onAdd }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
   const [time, setTime] = useState("");
   const [dur, setDur] = useState(60);
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(""); // RESTORED
 
   useEffect(()=>{
     function onPick(e){ setBaseOffset(Number(e.detail?.offset || 0)); }
@@ -853,7 +854,6 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
   const [horizonMonths, setHorizonMonths] = useState(6); // used when infinite
 
   const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // Mon/Wed default
-
   const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
 
   function addTasks(newOnes){ onAdd(newOnes); }
@@ -866,7 +866,7 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
       title: name,
       time: time || undefined,
       durationMins: Number.isFinite(Number(dur)) && Number(dur) > 0 ? Number(dur) : 60,
-      notes
+      notes // INCLUDED IN GENERATED TASKS
     };
 
     const added = [];
@@ -917,7 +917,6 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
         let emitted=0, week=0;
         while (emitted < n && week < 520){
           const before = added.length; emitWeek(week);
-          // Count by task occurrences (any day counts)
           emitted += (added.length - before);
           week++;
         }
@@ -1047,6 +1046,18 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
       </div>
+
+      {/* RESTORED: Notes field */}
+      <label className="block mb-3">
+        <div className="mb-1 text-sm font-medium">Notes (optional)</div>
+        <textarea
+          value={notes}
+          onChange={(e)=>setNotes(e.target.value)}
+          rows={3}
+          placeholder="Any extra details, links, or instructions for the user…"
+          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+        />
+      </label>
 
       <div className="mb-1 text-xs text-gray-500">Tip: use the <b>Pick date</b> button above to set the date.</div>
 
@@ -1264,7 +1275,9 @@ function PreviewSchedule({ startDate, items }) {
             {g.items.map((it, idx)=>(
               <div key={idx} className="rounded-xl border bg-white p-2 text-xs">
                 <div className="font-medium text-gray-900">{it.title}</div>
-                <div className="text-gray-500">{it.time || "all-day"} • {it.durationMins || 60}m{it.notes ? ` • ${it.notes}` : ""}</div>
+                <div className="text-gray-500">
+                  {it.time || "all-day"} • {it.durationMins || 60}m{it.notes ? ` • ${it.notes}` : ""}
+                </div>
               </div>
             ))}
           </div>
