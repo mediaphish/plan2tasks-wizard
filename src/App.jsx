@@ -35,7 +35,7 @@ function uid(){ return Math.random().toString(36).slice(2,10); }
 function parseISODate(s){ if (!s) return null; const d = new Date(`${s}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d; }
 function addDaysSafe(startDateStr, d){ const base = parseISODate(startDateStr) || new Date(); const dt = new Date(base); dt.setDate(dt.getDate() + (Number(d) || 0)); return dt; }
 function fmtDateYMD(d){ const y=d.getUTCFullYear(); const m=String(d.getUTCMonth()+1).padStart(2,"0"); const dd=String(d.getUTCDate()).padStart(2,"0"); return `${y}-${m}-${dd}`; }
-function fmtDayLabel(startDateStr, d){ try { return format(addDaysSafe(startDateStr, d), "EEE MM/dd"); } catch { return `Day ${d}`; } }
+function fmtDayLabel(startDateStr, d){ try { return format(addDaysSafe(startDateStr, d), "EEE MMM d"); } catch { return ""; } }
 function daysBetweenUTC(a,b){ const ms=24*3600*1000; const da=Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),a.getUTCDate()); const db=Date.UTC(b.getUTCFullYear(),b.getUTCMonth(),b.getUTCDate()); return Math.round((db-da)/ms); }
 function lastDayOfMonthUTC(y, m0){ return new Date(Date.UTC(y, m0+1, 0)).getUTCDate(); }
 function addMonthsUTC(dateUTC, months){
@@ -262,7 +262,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-lg font-semibold">Users Dashboard</h2>
-          <p className="text-sm text-gray-500">Add, group, and manage users. Click “Create tasks” to deliver tasks to a specific user’s Google Tasks.</p>
+          <p className="text-sm text-gray-500">Add, group, and manage users. Click “Create tasks” to deliver tasks to a user’s Google Tasks.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
@@ -438,7 +438,7 @@ function UsersTable(props){
   );
 }
 
-/* ---------------- Tasks wizard (uses modal calendar picker) ---------------- */
+/* ---------------- Tasks wizard ---------------- */
 function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
@@ -548,7 +548,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
             />
           </label>
           <label className="block">
-            <div className="mb-1 text-sm font-medium">Start date (Day 0)</div>
+            <div className="mb-1 text-sm font-medium">Plan start date</div>
             <input
               type="date"
               value={plan.startDate}
@@ -574,7 +574,7 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
         <div className="mb-2">
           <div className="text-sm font-semibold">2) Add tasks</div>
           <div className="text-xs text-gray-500">
-            Click <b>Pick date</b> to open the calendar grid (with month/year controls). That sets the task’s <b>Day</b>.
+            Click <b>Pick date</b> to open the calendar grid (with month/year controls). That sets the task’s <b>date</b>.
             Choose Repeat (Daily / Weekly / Monthly), then <b>Add task(s)</b>.
           </div>
         </div>
@@ -619,17 +619,16 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
 
 /* ---------------- Compact “Pick date” -> modal calendar ---------------- */
 function DatePickerButton({ startDate }) {
-  const start = parseISODate(startDate) || new Date();
   const [open, setOpen] = useState(false);
-  const [offset, setOffset] = useState(0); // what’s currently selected
+  const [offset, setOffset] = useState(0); // current selection
 
   useEffect(()=>{
-    // initialize downstream editor with Day 0 once
+    // initialize downstream editor once
     const ev = new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: 0 }});
     window.dispatchEvent(ev);
   },[]);
 
-  const label = `${fmtDayLabel(startDate, offset)} (Day ${offset})`;
+  const label = fmtDayLabel(startDate, offset);
 
   return (
     <div className="mb-3 flex items-center gap-2">
@@ -730,7 +729,7 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
           className="rounded-lg border px-2 py-1 text-xs"
           onClick={()=>{ setViewMonth(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))); }}
         >
-          Jump to start (Day 0)
+          Jump to plan start
         </button>
       </div>
 
@@ -763,13 +762,13 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
 
       <div className="mt-2 text-xs text-gray-600">
         Window: {format(startUTC, "MMM d")} → {format(endUTC, "MMM d")} •
-        Selected: {format(selectedUTC, "EEE MMM d")} (Day {offsetFromStart(startDate, selectedUTC)})
+        Selected: {format(selectedUTC, "EEE MMM d")}
       </div>
     </div>
   );
 }
 
-/* ---------- Tasks editor (repeat: None/Daily/Weekly/Monthly; weekly pills) ---------- */
+/* ---------- Tasks editor ---------- */
 function TasksEditorAdvanced({ startDate }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
@@ -949,9 +948,9 @@ function TasksEditorAdvanced({ startDate }) {
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         </label>
         <div className="block">
-          <div className="mb-1 text-sm font-medium">Selected date within plan</div>
+          <div className="mb-1 text-sm font-medium">Selected date</div>
           <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-            {fmtDayLabel(startDate, baseOffset)} <span className="text-gray-500">(Day {baseOffset})</span>
+            {fmtDayLabel(startDate, baseOffset)}
           </div>
         </div>
         <label className="block">
@@ -966,7 +965,7 @@ function TasksEditorAdvanced({ startDate }) {
         </label>
       </div>
 
-      <div className="mb-1 text-xs text-gray-500">Tip: use the <b>Pick date</b> button above to set the date (Day).</div>
+      <div className="mb-1 text-xs text-gray-500">Tip: use the <b>Pick date</b> button above to set the date.</div>
 
       <div className="mt-3 mb-3 rounded-xl border border-gray-200 p-3">
         <div className="mb-2 flex flex-wrap items-center gap-3">
@@ -992,11 +991,14 @@ function TasksEditorAdvanced({ startDate }) {
 
         {repeat === "weekly" && (
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            {WEEK_LABELS.map((lbl, i)=>(
+            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
               <button
                 type="button"
                 key={i}
-                className={pillClass(weeklyDays[i])}
+                className={cn(
+                  "rounded-full px-3 py-1 text-xs border transition",
+                  weeklyDays[i] ? "bg-cyan-600 text-white border-cyan-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                )}
                 aria-pressed={weeklyDays[i] ? "true" : "false"}
                 onClick={()=> setWeeklyDays(prev => { const next = [...prev]; next[i] = !next[i]; return next; })}
                 title={lbl}
@@ -1019,7 +1021,7 @@ function TasksEditorAdvanced({ startDate }) {
               <input type="radio" name="monthlyMode" value="nth" checked={monthlyMode==="nth"} onChange={()=>setMonthlyMode("nth")} />
               the Nth weekday (e.g., 2nd Tue)
             </label>
-            <div className="text-xs text-gray-500">Based on the selected date within plan.</div>
+            <div className="text-xs text-gray-500">Based on the selected date.</div>
           </div>
         )}
 
