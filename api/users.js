@@ -1,184 +1,102 @@
 // api/users.js
-export const config = { runtime: "nodejs" };
+import { supabaseAdmin } from "../lib/supabase-admin.js";
 
-import { supabaseAdmin } from "../lib/supabase.js";
+/*
+Usage (GET):
+/api/users?op=list&plannerEmail=PLANNER@mail.com&status=all|invited|connected&q=foo&page=1&pageSize=50
 
-function absoluteBase(req) {
-  const env = process.env.APP_BASE_URL;
-  if (env) return env.replace(/\/$/, "");
-  const host = req.headers["x-forwarded-host"] || req.headers.host;
-  const proto = req.headers["x-forwarded-proto"] || "https";
-  return `${proto}://${host}`;
-}
-
+Returns:
+{ users: [{ email, status: "invited"|"connected", invitedAt?, lastAuthorized? }], total }
+*/
 export default async function handler(req, res) {
   try {
-    const op = (req.query.op || (req.body && req.body.op) || "").toString();
-    const sb = supabaseAdmin();
+    const full = `https://${req.headers.host}${req.url || ""}`;
+    const url = new URL(full);
+    const op = (url.searchParams.get("op") || "list").toLowerCase();
+    const plannerEmail = (url.searchParams.get("plannerEmail") || "").toLowerCase();
 
-    // -------- LIST (GET) --------
-    if (req.method === "GET" && op === "list") {
-      const plannerEmail = req.query.plannerEmail;
-      const status = req.query.status;    // "connected" | "invited" | undefined
-      const groupId = req.query.groupId;  // uuid | "null" | ""
-      const q = req.query.q || "";
+    if (!plannerEmail) return res.status(400).json({ error: "Missing plannerEmail" });
 
-      if (!plannerEmail) return res.status(400).json({ error: "Missing plannerEmail" });
+    if (op !== "list") {
+      return res.status(400).json({ error: "Unsupported op" });
+    }
 
-      let usersQuery = sb
+    const status = (url.searchParams.get("status") || "all").toLowerCase(); // all|invited|connected
+    const q = (url.searchParams.get("q") || "").trim();
+    const page = Math.max(1, Number(url.searchParams.get("page") || "1"));
+    const pageSize = Math.min(100, Math.max(10, Number(url.searchParams.get("pageSize") || "50")));
+
+    // 1) Connected users from user_connections
+    let connected = [];
+    {
+      const { data, error } = await supabaseAdmin
         .from("user_connections")
-        .select("user_email,status,invite_code,updated_at")
-        .eq("planner_email", plannerEmail);
-
-      if (status) usersQuery = usersQuery.eq("status", status);
-      if (q) usersQuery = usersQuery.ilike("user_email", `%${q}%`);
-
-      const { data: usersRaw, error: e1 } = await usersQuery.order("updated_at", { ascending: false });
-      if (e1) return res.status(500).json({ error: e1.message });
-
-      const emails = (usersRaw || []).map(r => r.user_email);
-      const base = absoluteBase(req);
-      if (emails.length === 0) return res.status(200).json({ users: [] });
-
-      let memQuery = sb
-        .from("user_group_members")
-        .select("user_email, group_id")
+        .select("user_email, updated_at")
         .eq("planner_email", plannerEmail)
-        .in("user_email", emails);
+        .is("deleted_at", null);
 
-      if (groupId && groupId !== "null") memQuery = memQuery.eq("group_id", groupId);
-
-      const { data: members, error: e2 } = await memQuery;
-      if (e2) return res.status(500).json({ error: e2.message });
-
-      let filteredUsers = usersRaw;
-      if (groupId === "null") {
-        const withGroup = new Set((members || []).map(m => m.user_email));
-        filteredUsers = usersRaw.filter(u => !withGroup.has(u.user_email));
-      } else if (groupId) {
-        const withGroup = new Set((members || []).map(m => m.user_email));
-        filteredUsers = usersRaw.filter(u => withGroup.has(u.user_email));
+      if (!error && data) {
+        connected = data.map(r => ({
+          email: (r.user_email || "").toLowerCase(),
+          status: "connected",
+          lastAuthorized: r.updated_at || null
+        }));
       }
-
-      const groupIds = [...new Set((members || []).map(m => m.group_id).filter(Boolean))];
-      let groupMap = new Map();
-      if (groupIds.length > 0) {
-        const { data: groups, error: e3 } = await sb
-          .from("user_groups")
-          .select("id,name")
-          .eq("planner_email", plannerEmail)
-          .in("id", groupIds);
-        if (e3) return res.status(500).json({ error: e3.message });
-        groupMap = new Map((groups || []).map(g => [g.id, g.name]));
-      }
-
-      const groupsByEmail = new Map();
-      for (const m of (members || [])) {
-        if (!groupsByEmail.has(m.user_email)) groupsByEmail.set(m.user_email, []);
-        const name = groupMap.get(m.group_id) || null;
-        groupsByEmail.get(m.user_email).push({ id: m.group_id, name });
-      }
-
-      const users = filteredUsers.map(r => ({
-        email: r.user_email,
-        status: r.status,
-        updatedAt: r.updated_at,
-        inviteLink: r.invite_code ? `${base}/api/google/start?invite=${r.invite_code}` : null,
-        groups: groupsByEmail.get(r.user_email) || []
-      }));
-
-      return res.status(200).json({ users });
     }
 
-    // -------- UPDATE EMAIL (POST) --------
-    if (req.method === "POST" && op === "update") {
-      const { plannerEmail, userEmail, newEmail } = req.body || {};
-      if (!plannerEmail || !userEmail || !newEmail) {
-        return res.status(400).json({ error: "Missing plannerEmail, userEmail, or newEmail" });
+    // 2) Invited users from invites (if table exists)
+    let invited = [];
+    try {
+      const { data, error } = await supabaseAdmin
+        .from("invites")
+        .select("user_email, created_at, accepted_at, planner_email")
+        .eq("planner_email", plannerEmail)
+        .is("deleted_at", null);
+
+      if (!error && data) {
+        invited = data
+          .filter(r => !r.accepted_at) // show only pending invites as "invited"
+          .map(r => ({
+            email: (r.user_email || "").toLowerCase(),
+            status: "invited",
+            invitedAt: r.created_at || null
+          }));
       }
-
-      // Update connection
-      const { error: e1 } = await sb
-        .from("user_connections")
-        .update({ user_email: newEmail })
-        .eq("planner_email", plannerEmail)
-        .eq("user_email", userEmail);
-      if (e1) return res.status(500).json({ error: e1.message });
-
-      // Cascade to memberships
-      const { error: e2 } = await sb
-        .from("user_group_members")
-        .update({ user_email: newEmail })
-        .eq("planner_email", plannerEmail)
-        .eq("user_email", userEmail);
-      if (e2) return res.status(500).json({ error: e2.message });
-
-      return res.status(200).json({ ok: true });
+    } catch {
+      // If you don't have an invites table, ignore gracefully.
+      invited = [];
     }
 
-    // -------- DELETE USER (POST) --------
-    if (req.method === "POST" && op === "delete") {
-      const { plannerEmail, userEmail } = req.body || {};
-      if (!plannerEmail || !userEmail) return res.status(400).json({ error: "Missing plannerEmail or userEmail" });
+    // 3) Merge, preferring "connected" if duplicates
+    const byEmail = new Map();
+    for (const row of invited) byEmail.set(row.email, row);
+    for (const row of connected) byEmail.set(row.email, row); // overwrite to "connected"
+    let users = Array.from(byEmail.values());
 
-      // Delete memberships first
-      const { error: e1 } = await sb
-        .from("user_group_members")
-        .delete()
-        .eq("planner_email", plannerEmail)
-        .eq("user_email", userEmail);
-      if (e1) return res.status(500).json({ error: e1.message });
-
-      // Delete connection
-      const { error: e2 } = await sb
-        .from("user_connections")
-        .delete()
-        .eq("planner_email", plannerEmail)
-        .eq("user_email", userEmail);
-      if (e2) return res.status(500).json({ error: e2.message });
-
-      return res.status(200).json({ ok: true });
+    // 4) Search filter
+    if (q) {
+      const qq = q.toLowerCase();
+      users = users.filter(u => u.email.includes(qq) || (u.status || "").includes(qq));
     }
 
-    // -------- SET GROUPS (POST) --------
-    if (req.method === "POST" && op === "set-groups") {
-      const { plannerEmail, userEmail, groupIds } = req.body || {};
-      if (!plannerEmail || !userEmail || !Array.isArray(groupIds)) {
-        return res.status(400).json({ error: "Missing plannerEmail, userEmail, or groupIds[]" });
-      }
+    // 5) Status filter
+    if (status === "invited") users = users.filter(u => u.status === "invited");
+    if (status === "connected") users = users.filter(u => u.status === "connected");
 
-      const { data: existing, error: e1 } = await sb
-        .from("user_group_members")
-        .select("group_id")
-        .eq("planner_email", plannerEmail)
-        .eq("user_email", userEmail);
-      if (e1) return res.status(500).json({ error: e1.message });
+    // 6) Sort: connected first, then alpha
+    users.sort((a, b) => {
+      if (a.status !== b.status) return a.status === "connected" ? -1 : 1;
+      return a.email.localeCompare(b.email);
+    });
 
-      const have = new Set((existing || []).map(r => r.group_id));
-      const want = new Set(groupIds);
-      const toAdd = [...want].filter(id => !have.has(id));
-      const toRemove = [...have].filter(id => !want.has(id));
+    const total = users.length;
+    const start = (page - 1) * pageSize;
+    const end = start + pageSize;
+    const pageUsers = users.slice(start, end);
 
-      if (toAdd.length) {
-        const rows = toAdd.map(id => ({ planner_email: plannerEmail, user_email: userEmail, group_id: id }));
-        const { error: e2 } = await sb.from("user_group_members").insert(rows);
-        if (e2) return res.status(500).json({ error: e2.message });
-      }
-      if (toRemove.length) {
-        const { error: e3 } = await sb
-          .from("user_group_members")
-          .delete()
-          .eq("planner_email", plannerEmail)
-          .eq("user_email", userEmail)
-          .in("group_id", toRemove);
-        if (e3) return res.status(500).json({ error: e3.message });
-      }
-
-      return res.status(200).json({ ok: true });
-    }
-
-    return res.status(405).json({ error: "Use ?op=list (GET) or ?op=update/delete/set-groups (POST)" });
+    res.json({ users: pageUsers, total, page, pageSize });
   } catch (e) {
-    return res.status(500).json({ error: String(e.message || e) });
+    console.error("GET /api/users failed", e);
+    res.status(500).json({ error: "Server error" });
   }
 }
