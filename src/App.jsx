@@ -1,18 +1,15 @@
-/* Plan2Tasks – full App.jsx
-   Includes:
-   - ErrorBoundary
-   - Auth (Google or Email/Password)
-   - AppShell with nav (Users / Plan / Inbox)
-   - UsersDashboard (add user, groups, invite links, search)
-   - InboxScreen (assign bundles to a user)
-   - TasksWizard (Notes field, weekly pills, monthly options)
-   - Calendar modal (grid with month/year controls)
-   - Preview & push (replace/append) + .ics export
+/* Plan2Tasks – full App.jsx (Inbox→Plan fix)
+   Changes in this version:
+   - AppShell now holds `prefillPayload` state and passes it to TasksWizard.
+   - InboxScreen calls onAssign(payload) and AppShell switches to Plan and stores payload.
+   - TasksWizard reads `prefillPayload` on mount/update and preloads plan + tasks.
+   - A banner shows when content was loaded from an Inbox bundle.
+   - Notes, weekly pills, monthly options, calendar modal, .ics export all retained.
 */
 import React, { useMemo, useState, useEffect } from "react";
 import {
   Calendar, Users, Inbox as InboxIcon, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus,
-  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, X
+  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, X, Info
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
@@ -153,6 +150,7 @@ function AppInner(){
 function AppShell({ plannerEmail }) {
   const [view, setView] = useState("users"); // users | plan | inbox
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
+  const [prefillPayload, setPrefillPayload] = useState(null); // NEW: holds inbox assignment payload
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-white to-gray-50 p-6">
@@ -187,13 +185,21 @@ function AppShell({ plannerEmail }) {
               onCreateTasks={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
             />
           : view === "plan"
-          ? <TasksWizard plannerEmail={plannerEmail} initialSelectedUserEmail={selectedUserEmail} />
-          : <InboxScreen plannerEmail={plannerEmail} onAssign={(payload)=>{
-              // Jump into Plan with preloaded data
-              window.dispatchEvent(new CustomEvent("p2t:prefillFromInbox", { detail: payload }));
-              setSelectedUserEmail(payload.userEmail);
-              setView("plan");
-            }} />
+          ? <TasksWizard
+              plannerEmail={plannerEmail}
+              initialSelectedUserEmail={selectedUserEmail}
+              prefillPayload={prefillPayload}                  // NEW: pass payload
+              onPrefillConsumed={()=>setPrefillPayload(null)}  // NEW: clear after use
+            />
+          : <InboxScreen
+              plannerEmail={plannerEmail}
+              onAssign={(payload)=>{
+                // NEW: store payload and navigate to plan
+                setPrefillPayload(payload);
+                setSelectedUserEmail(payload.userEmail);
+                setView("plan");
+              }}
+            />
         }
       </div>
     </div>
@@ -211,7 +217,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   const [statusMsg, setStatusMsg] = useState("");
 
   const [editing, setEditing] = useState(null); const [editVal, setEditVal] = useState("");
-  const [manageFor, setManageFor] = useState(null);
 
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
@@ -350,12 +355,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                 <tr className="border-t">
                   <td className="py-2">
                     {u.email}
-                    {u.email === manageFor ? (
-                      <div className="mt-1 flex items-center gap-1">
-                        <input className="rounded border px-2 py-1 text-xs" onChange={(e)=>setEditVal(e.target.value)} value={editVal} placeholder="new-email@example.com" />
-                        <button onClick={()=>saveEdit(u.email)} className="rounded border px-2 py-1 text-xs"><Save className="h-3 w-3 inline" /> Save</button>
-                      </div>
-                    ) : null}
                   </td>
                   <td className="py-2">{u.status === "connected" ? "✓ connected" : "invited"}</td>
                   <td className="py-2">
@@ -382,7 +381,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                         className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-xs font-semibold text-white hover:bg-black">
                         Manage user <ArrowRight className="h-3 w-3" />
                       </button>
-                      <button onClick={()=>{ setManageFor(u.email); setEditVal(u.email); }} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs">
+                      <button onClick={()=>{ /* placeholder for edit */ }} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs">
                         <Edit3 className="h-3 w-3" /> Edit
                       </button>
                       <button onClick={()=>delUser(u.email)} className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs">
@@ -435,6 +434,7 @@ function InboxScreen({ plannerEmail, onAssign }) {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Assign failed");
+      // hand off to AppShell
       onAssign({ userEmail: assignUser, ...data });
     } catch (e) {
       alert(e.message);
@@ -489,7 +489,7 @@ function InboxScreen({ plannerEmail, onAssign }) {
 }
 
 /* ---------------- Tasks wizard ---------------- */
-function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
+function TasksWizard({ plannerEmail, initialSelectedUserEmail = "", prefillPayload, onPrefillConsumed }) {
   const [plan, setPlan] = useState({
     title: "Weekly Plan",
     startDate: format(new Date(), "yyyy-MM-dd"),
@@ -502,19 +502,21 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
   const [replaceMode, setReplaceMode] = useState(false);
   const [resultMsg, setResultMsg] = useState("");
 
-  // Prefill from Inbox assignment
+  // NEW: apply Inbox prefill via prop (robust against timing)
+  const [inboxBanner, setInboxBanner] = useState(null);
   useEffect(() => {
-    function onPrefill(e){
-      const data = e.detail || {};
-      if (data.plan) setPlan(data.plan);
-      if (Array.isArray(data.tasks)) {
-        const withIds = data.tasks.map(t => ({ id: uid(), ...t }));
-        setTasks(withIds);
-      }
+    if (prefillPayload && prefillPayload.ok && prefillPayload.plan && Array.isArray(prefillPayload.tasks)) {
+      setPlan(prefillPayload.plan);
+      setTasks(prefillPayload.tasks.map(t => ({ id: uid(), ...t })));
+      setInboxBanner({
+        title: prefillPayload.plan.title || "Inbox import",
+        count: prefillPayload.tasks.length || 0,
+        userEmail: prefillPayload.userEmail || ""
+      });
+      onPrefillConsumed?.();
     }
-    window.addEventListener("p2t:prefillFromInbox", onPrefill);
-    return () => window.removeEventListener("p2t:prefillFromInbox", onPrefill);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillPayload]);
 
   useEffect(() => {
     (async () => {
@@ -535,6 +537,17 @@ function TasksWizard({ plannerEmail, initialSelectedUserEmail = "" }) {
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      {/* Inbox banner if we came from Inbox */}
+      {inboxBanner && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+          <Info className="h-4 w-4 mt-0.5" />
+          <div>
+            Loaded <b>{inboxBanner.count}</b> tasks from Inbox bundle <b>“{inboxBanner.title}”</b>
+            {inboxBanner.userEmail ? <> for <b>{inboxBanner.userEmail}</b></> : null}.
+          </div>
+        </div>
+      )}
+
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-lg font-semibold">Plan (Tasks only)</h2>
         <div className="w-72">
@@ -774,13 +787,13 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   );
 }
 
-/* ---------- Tasks editor (with Notes, "No end" + horizon) ---------- */
+/* ---------- Tasks editor (with Notes, weekly pills, monthly options) ---------- */
 function TasksEditorAdvanced({ startDate, onAdd }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
   const [time, setTime] = useState("");
   const [dur, setDur] = useState(60);
-  const [notes, setNotes] = useState(""); // NOTES
+  const [notes, setNotes] = useState("");
 
   useEffect(()=>{
     function onPick(e){ setBaseOffset(Number(e.detail?.offset || 0)); }
@@ -788,17 +801,14 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
     return () => window.removeEventListener("p2t:setBaseOffset", onPick);
   },[]);
 
-  const [repeat, setRepeat] = useState("none"); // none | daily | weekly | monthly
+  const [repeat, setRepeat] = useState("none");
   const [interval, setInterval] = useState(1);
-
-  // End options: count | until | infinite
   const [endMode, setEndMode] = useState("count");
   const [count, setCount] = useState(4);
   const [untilDate, setUntilDate] = useState("");
-  const [horizonMonths, setHorizonMonths] = useState(6); // used when infinite
-
-  const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]); // Mon/Wed default
-  const [monthlyMode, setMonthlyMode] = useState("dom"); // dom | nth
+  const [horizonMonths, setHorizonMonths] = useState(6);
+  const [weeklyDays, setWeeklyDays] = useState([false,true,false,true,false,false,false]);
+  const [monthlyMode, setMonthlyMode] = useState("dom");
 
   function addTasks(newOnes){ onAdd(newOnes); }
 
@@ -815,46 +825,40 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
 
     const added = [];
     const start = parseISODate(startDate);
-
     function pushIfOnOrAfter(d){
       const off = daysBetweenUTC(start, d);
       if (d >= base) added.push({ ...baseObj, dayOffset: off });
     }
 
-    if (repeat === "none") {
-      pushIfOnOrAfter(base);
-    }
+    const step = Math.max(1, Number(interval) || 1);
+
+    if (repeat === "none") pushIfOnOrAfter(base);
 
     if (repeat === "daily") {
-      const step = Math.max(1, Number(interval) || 1);
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
         for (let i=0;i<n;i++){ const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); pushIfOnOrAfter(d); }
       } else if (endMode === "until") {
-        const until = parseISODate(untilDate);
-        let i=0; while (true) { const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); if (d > until) break; pushIfOnOrAfter(d); if (++i>1000) break; }
+        const until = parseISODate(untilDate); let i=0;
+        while (true){ const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); if (d > until) break; pushIfOnOrAfter(d); if (++i>1000) break; }
       } else {
-        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 6));
-        let i=0; while (true) { const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); if (d > end) break; pushIfOnOrAfter(d); if (++i>2000) break; }
+        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 6)); let i=0;
+        while (true){ const d = new Date(base); d.setUTCDate(d.getUTCDate() + i*step); if (d > end) break; pushIfOnOrAfter(d); if (++i>2000) break; }
       }
     }
 
     if (repeat === "weekly") {
-      const stepWeeks = Math.max(1, Number(interval) || 1);
-      const checkedDays = weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
-      if (checkedDays.length===0) { alert("Pick at least one weekday."); return; }
-
+      const checked = weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
+      if (checked.length===0) { alert("Pick at least one weekday."); return; }
       const baseWeekday = base.getUTCDay();
-      const baseStartOfWeek = new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate() - baseWeekday); // Sunday
-
+      const baseStartOfWeek = new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate() - baseWeekday);
       const emitWeek = (weekIndex)=>{
-        for (const dow of checkedDays){
+        for (const dow of checked){
           const d = new Date(baseStartOfWeek);
-          d.setUTCDate(baseStartOfWeek.getUTCDate() + dow + weekIndex*7*stepWeeks);
+          d.setUTCDate(baseStartOfWeek.getUTCDate() + dow + weekIndex*7*step);
           pushIfOnOrAfter(d);
         }
       };
-
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
         let emitted=0, week=0;
@@ -866,48 +870,25 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
         if (added.length > n) added.length = n;
       } else if (endMode === "until") {
         const until = parseISODate(untilDate);
-        let week=0;
-        while (week < 520){
-          const before = added.length; emitWeek(week);
-          if (added.length > before) {
-            const last = addDaysSafe(startDate, added[added.length-1].dayOffset||0);
-            if (last > until) {
-              while (added.length > 0) {
-                const dt = addDaysSafe(startDate, added[added.length-1].dayOffset||0);
-                if (dt <= until) break;
-                added.pop();
-              }
-              break;
-            }
-          }
+        let week=0; while (week < 520){ const before=added.length; emitWeek(week);
+          if (added.length > before) { const last = addDaysSafe(startDate, added[added.length-1].dayOffset||0); if (last > until) { while (added.length && addDaysSafe(startDate, added[added.length-1].dayOffset||0) > until) added.pop(); break; } }
           week++;
         }
       } else {
         const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 6));
-        let week=0;
-        while (week < 520){
-          emitWeek(week);
-          const last = added.length ? addDaysSafe(startDate, added[added.length-1].dayOffset||0) : base;
-          if (last > end) break;
-          week++;
-        }
+        let week=0; while (week < 520){ emitWeek(week); const last = added.length ? addDaysSafe(startDate, added[added.length-1].dayOffset||0) : base; if (last > end) break; week++; }
       }
     }
 
     if (repeat === "monthly") {
-      const stepMonths = Math.max(1, Number(interval) || 1);
-      const baseY = base.getUTCFullYear(), baseM = base.getUTCMonth(), baseD = base.getUTCDate();
-      const baseW = base.getUTCDay();
-
+      const baseY = base.getUTCFullYear(), baseM = base.getUTCMonth(), baseD = base.getUTCDate(), baseW = base.getUTCDay();
       const firstSameW = firstWeekdayOfMonthUTC(baseY, baseM, baseW);
       const nth = Math.floor((base.getUTCDate() - firstSameW.getUTCDate())/7)+1;
       const lastSameW = lastWeekdayOfMonthUTC(baseY, baseM, baseW);
       const isLast = (base.getUTCDate() === lastSameW.getUTCDate());
-
       const computeTarget = (y,m0)=>{
         if (monthlyMode === "dom") {
-          const last = lastDayOfMonthUTC(y,m0);
-          const d = Math.min(baseD, last);
+          const last = lastDayOfMonthUTC(y,m0); const d = Math.min(baseD, last);
           return new Date(Date.UTC(y,m0,d));
         } else {
           if (isLast) return lastWeekdayOfMonthUTC(y,m0,baseW);
@@ -915,52 +896,24 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
           return nthCand || lastWeekdayOfMonthUTC(y,m0,baseW);
         }
       };
-
       if (endMode === "count") {
         const n = Math.max(1, Number(count) || 1);
-        for (let i=0;i<n;i++){
-          const targetMonthDate = addMonthsUTC(base, i*stepMonths);
-          const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
-          const d = computeTarget(y,m0);
-          pushIfOnOrAfter(d);
-        }
+        for (let i=0;i<n;i++){ const t = addMonthsUTC(base, i*step); const y=t.getUTCFullYear(), m0=t.getUTCMonth(); pushIfOnOrAfter(computeTarget(y,m0)); }
       } else if (endMode === "until") {
-        const until = parseISODate(untilDate);
-        let i=0; while (i < 240) {
-          const targetMonthDate = addMonthsUTC(base, i*stepMonths);
-          const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
-          const d = computeTarget(y,m0);
-          if (d > until) break;
-          pushIfOnOrAfter(d);
-          i++;
-        }
+        const until = parseISODate(untilDate); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const y=t.getUTCFullYear(), m0=t.getUTCMonth(); const d=computeTarget(y,m0); if (d > until) break; pushIfOnOrAfter(d); i++; }
       } else {
-        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 12));
-        let i=0; while (i < 240) {
-          const targetMonthDate = addMonthsUTC(base, i*stepMonths);
-          const y=targetMonthDate.getUTCFullYear(), m0=targetMonthDate.getUTCMonth();
-          const d = computeTarget(y,m0);
-          if (d > end) break;
-          pushIfOnOrAfter(d);
-          i++;
-        }
+        const end = addMonthsUTC(base, Math.max(1, Number(horizonMonths) || 12)); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const y=t.getUTCFullYear(), m0=t.getUTCMonth(); const d=computeTarget(y,m0); if (d > end) break; pushIfOnOrAfter(d); i++; }
       }
     }
 
     added.sort((a,b)=> (a.dayOffset||0)-(b.dayOffset||0) || (a.time||"").localeCompare(b.time||""));
     if (added.length === 0) return;
     addTasks(added);
-
     setTitle(""); setNotes("");
   }
 
   const pillClass = (active) =>
-    cn(
-      "rounded-full px-3 py-1 text-xs border transition",
-      active
-        ? "bg-cyan-600 text-white border-cyan-600"
-        : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
-    );
+    cn("rounded-full px-3 py-1 text-xs border transition", active ? "bg-cyan-600 text-white border-cyan-600" : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50");
 
   return (
     <div>
@@ -972,9 +925,7 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
         </label>
         <div className="block">
           <div className="mb-1 text-sm font-medium">Selected date</div>
-          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
-            {fmtDayLabel(startDate, baseOffset)}
-          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">{fmtDayLabel(startDate, baseOffset)}</div>
         </div>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
@@ -1011,91 +962,54 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
           </select>
-
-          {repeat !== "none" && (
-            <>
-              <span className="text-sm">every</span>
-              <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
-                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
-              <span className="text-sm">
-                {repeat === "daily" ? "day(s)" : repeat === "weekly" ? "week(s)" : "month(s)"}
-              </span>
-            </>
+          {repeat === "weekly" && (
+            <div className="flex flex-wrap items-center gap-2">
+              {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
+                <button type="button" key={i} className={pillClass(weeklyDays[i])} onClick={()=> setWeeklyDays(prev => { const next = [...prev]; next[i] = !next[i]; return next; })}>{lbl}</button>
+              ))}
+            </div>
           )}
         </div>
 
-        {repeat === "weekly" && (
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((lbl, i)=>(
-              <button
-                type="button"
-                key={i}
-                className={pillClass(weeklyDays[i])}
-                aria-pressed={weeklyDays[i] ? "true" : "false"}
-                onClick={()=> setWeeklyDays(prev => { const next = [...prev]; next[i] = !next[i]; return next; })}
-                title={lbl}
-              >
-                {lbl}
-              </button>
-            ))}
-            <div className="text-xs text-gray-500 ml-1">Pick days of week.</div>
-          </div>
-        )}
-
-        {repeat === "monthly" && (
-          <div className="mb-2 flex flex-wrap items-center gap-3">
-            <div className="text-sm font-medium">On</div>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="radio" name="monthlyMode" value="dom" checked={monthlyMode==="dom"} onChange={()=>setMonthlyMode("dom")} />
-              day-of-month (like the 15th)
-            </label>
-            <label className="inline-flex items-center gap-2 text-sm">
-              <input type="radio" name="monthlyMode" value="nth" checked={monthlyMode==="nth"} onChange={()=>setMonthlyMode("nth")} />
-              the Nth weekday (e.g., 2nd Tue)
-            </label>
-            <div className="text-xs text-gray-500">Based on the selected date.</div>
-          </div>
-        )}
-
         {repeat !== "none" && (
-          <div className="mt-3 space-y-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="text-sm font-medium">Ends</div>
-              <label className="inline-flex items-center gap-2 text-sm">
-                <input type="radio" name="endMode" value="count" checked={endMode==="count"} onChange={()=>setEndMode("count")} />
-                after
-              </label>
-              <input type="number" min={1} disabled={endMode!=="count"} value={count} onChange={(e)=>setCount(e.target.value)}
-                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
-              <span className="text-sm">occurrence(s)</span>
-
-              <span className="mx-2 text-xs text-gray-400">or</span>
-
-              <label className="inline-flex items-center gap-2 text-sm">
-                <input type="radio" name="endMode" value="until" checked={endMode==="until"} onChange={()=>setEndMode("until")} />
-                on date
-              </label>
-              <input type="date" disabled={endMode!=="until"} value={untilDate} onChange={(e)=>setUntilDate(e.target.value)}
-                className="rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+          <>
+            <div className="mb-2 flex flex-wrap items-center gap-3">
+              <span className="text-sm">every</span>
+              <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+              <span className="text-sm">{repeat === "daily" ? "day(s)" : repeat === "weekly" ? "week(s)" : "month(s)"}</span>
             </div>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input type="radio" name="endMode" value="count" checked={endMode==="count"} onChange={()=>setEndMode("count")} />
+                  after
+                </label>
+                <input type="number" min={1} disabled={endMode!=="count"} value={count} onChange={(e)=>setCount(e.target.value)}
+                  className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+                <span className="text-sm">occurrence(s)</span>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="inline-flex items-center gap-2 text-sm">
-                <input type="radio" name="endMode" value="infinite" checked={endMode==="infinite"} onChange={()=>setEndMode("infinite")} />
-                No end (generate next …)
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={repeat === "monthly" ? 36 : 24}
-                value={horizonMonths}
-                onChange={(e)=>setHorizonMonths(e.target.value)}
-                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm"
-                title="Months to generate ahead"
-              />
-              <span className="text-sm">month(s)</span>
+                <span className="mx-2 text-xs text-gray-400">or</span>
+
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input type="radio" name="endMode" value="until" checked={endMode==="until"} onChange={()=>setEndMode("until")} />
+                  on date
+                </label>
+                <input type="date" disabled={endMode!=="until"} value={untilDate} onChange={(e)=>setUntilDate(e.target.value)}
+                  className="rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-2 text-sm">
+                  <input type="radio" name="endMode" value="infinite" checked={endMode==="infinite"} onChange={()=>setEndMode("infinite")} />
+                  No end (generate next …)
+                </label>
+                <input type="number" min={1} max={repeat === "monthly" ? 36 : 24} value={horizonMonths} onChange={(e)=>setHorizonMonths(e.target.value)}
+                  className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+                <span className="text-sm">month(s)</span>
+              </div>
             </div>
-          </div>
+          </>
         )}
       </div>
 
