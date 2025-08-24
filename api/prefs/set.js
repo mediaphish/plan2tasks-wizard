@@ -8,13 +8,14 @@ export default async function handler(req, res) {
     if (!plannerEmail || !prefs) return res.status(400).json({ error: "Missing plannerEmail or prefs" });
 
     const row = {
-      planner_email: String(plannerEmail).toLowerCase(),
-      default_view: prefs.default_view === "plan" ? "plan" : "users",
+      planner_email: plannerEmail.toLowerCase(),
+      default_view: prefs.default_view || "users",
       auto_archive_after_assign: !!prefs.auto_archive_after_assign,
       default_timezone: prefs.default_timezone || "America/Chicago",
-      default_push_mode: prefs.default_push_mode === "replace" ? "replace" : "append",
+      default_push_mode: (prefs.default_push_mode === "replace" ? "replace" : "append"),
       show_inbox_badge: prefs.show_inbox_badge !== false,
       open_drawer_on_import: !!prefs.open_drawer_on_import,
+      updated_at: new Date().toISOString()
     };
 
     const { data, error } = await supabaseAdmin
