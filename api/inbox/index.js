@@ -1,37 +1,61 @@
 // api/inbox/index.js
-import { supabaseAdmin } from '../../lib/supabase-admin.js';
+import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
 export default async function handler(req, res) {
+  if (req.method !== "GET") {
+    res.status(405).json({ error: "GET only" });
+    return;
+  }
+
+  const plannerEmailRaw = (req.query.plannerEmail || "").trim();
+  if (!plannerEmailRaw) {
+    res.status(400).json({ error: "Missing plannerEmail" });
+    return;
+  }
+
   try {
-    if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
-    const plannerEmail = req.query.plannerEmail || req.query.planner_email;
-    if (!plannerEmail) return res.status(400).json({ error: 'plannerEmail required' });
+    // Case-insensitive match so 'Bart@Example' and 'bart@example' are the same.
+    const { data: bundles, error: bErr } = await supabaseAdmin
+      .from("inbox_bundles")
+      .select("id, title, start_date, timezone, source, suggested_user, created_at, planner_email")
+      .ilike("planner_email", plannerEmailRaw) // case-insensitive equality
+      .order("created_at", { ascending: false });
 
-    const { data: bundles, error: berr } = await supabaseAdmin
-      .from('inbox_bundles')
-      .select('id, source, title, start_date, timezone, suggested_user, assigned_user_email, assigned_at, created_at')
-      .eq('planner_email', plannerEmail)
-      .order('created_at', { ascending: false });
+    if (bErr) throw bErr;
 
-    if (berr) return res.status(500).json({ error: berr.message });
-
-    const ids = (bundles || []).map(b => b.id);
-    let countsMap = {};
-    if (ids.length) {
-      const { data: counts, error: cerr } = await supabaseAdmin
-        .from('inbox_tasks')
-        .select('bundle_id, count:id')
-        .in('bundle_id', ids)
-        .group('bundle_id');
-
-      if (!cerr && counts) {
-        for (const row of counts) countsMap[row.bundle_id] = Number(row.count || 0);
-      }
+    if (!bundles || bundles.length === 0) {
+      res.json({ bundles: [] });
+      return;
     }
-    const out = (bundles || []).map(b => ({ ...b, count: countsMap[b.id] || 0 }));
-    return res.status(200).json({ bundles: out });
+
+    const bundleIds = bundles.map(b => b.id);
+
+    const { data: tasks, error: tErr } = await supabaseAdmin
+      .from("inbox_tasks")
+      .select("id, bundle_id")
+      .in("bundle_id", bundleIds);
+
+    if (tErr) throw tErr;
+
+    const counts = {};
+    for (const t of tasks || []) {
+      counts[t.bundle_id] = (counts[t.bundle_id] || 0) + 1;
+    }
+
+    const out = bundles.map(b => ({
+      id: b.id,
+      title: b.title,
+      start_date: b.start_date,
+      timezone: b.timezone,
+      source: b.source,
+      suggested_user: b.suggested_user,
+      count: counts[b.id] || 0,
+      created_at: b.created_at
+    }));
+
+    res.json({ bundles: out });
   } catch (e) {
-    console.error('inbox/list error', e);
-    return res.status(500).json({ error: 'Server error' });
+    console.error("GET /api/inbox error", e);
+    res.status(500).json({ error: "Server error" });
   }
 }
