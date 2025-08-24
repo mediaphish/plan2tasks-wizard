@@ -14,19 +14,21 @@ export default async function handler(req, res) {
       .eq("planner_email", plannerEmail)
       .single();
 
-    if (error && error.code !== "PGRST116") throw error; // not found is ok
-
-    const prefs = data || {
-      planner_email: plannerEmail,
-      default_view: "users",
-      auto_archive_after_assign: true,
-      default_timezone: "America/Chicago",
-      default_push_mode: "append",
-      show_inbox_badge: true,
-      open_drawer_on_import: false,
-    };
-
-    res.json({ prefs });
+    if (error && error.code !== "PGRST116") throw error; // 116 = not found
+    if (!data) {
+      // defaults if none saved yet
+      return res.json({
+        prefs: {
+          default_view: "users",
+          auto_archive_after_assign: true,
+          default_timezone: "America/Chicago",
+          default_push_mode: "append",
+          show_inbox_badge: true,
+          open_drawer_on_import: false
+        }
+      });
+    }
+    res.json({ prefs: data });
   } catch (e) {
     console.error("GET /api/prefs/get", e);
     res.status(500).json({ error: "Server error" });
