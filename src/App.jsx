@@ -1,41 +1,20 @@
-/* Plan2Tasks – App.jsx with robust Inbox→Plan handoff
-   - Saves Inbox assignment payload to localStorage
-   - Auto-loads payload on Plan screen
-   - Shows banner + fallback "Load last Inbox bundle" button
+/* src/App.jsx — Plan2Tasks
+   - Inbox tabs (New / Assigned / Archived) with bulk actions + confirm modals
+   - Assign stamps metadata; optional auto-archive toggle
+   - Manage User view includes History panel with restore/duplicate/export/archive/delete
+   - Snapshot saved after successful push via /api/history/snapshot
 */
 import React, { useMemo, useState, useEffect } from "react";
 import {
   Calendar, Users, Inbox as InboxIcon, Plus, Trash2, Edit3, Save, Search, Tag, FolderPlus,
-  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, X, Info
+  ArrowRight, Download, RotateCcw, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight, X, Info,
+  Archive, ArchiveRestore, CheckSquare, Square
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-/* ---------------- Error Boundary ---------------- */
-class ErrorBoundary extends React.Component {
-  constructor(props){ super(props); this.state = { error: null }; }
-  static getDerivedStateFromError(error){ return { error }; }
-  componentDidCatch(error, info){ console.error("UI crash:", error, info); }
-  render(){
-    if (this.state.error) {
-      return (
-        <div className="min-h-screen bg-red-50 p-6">
-          <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-white p-4">
-            <h2 className="mb-2 text-lg font-bold text-red-700">Something went wrong in the UI</h2>
-            <pre className="overflow-auto rounded bg-red-100 p-3 text-xs text-red-900">
-{String(this.state.error?.message || this.state.error)}
-            </pre>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-/* ---------------- helpers ---------------- */
-function cn(...classes){ return classes.filter(Boolean).join(" "); }
-const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
+/* ---------- tiny utils ---------- */
+function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function parseISODate(s){ if (!s) return null; const d = new Date(`${s}T00:00:00`); return Number.isNaN(d.getTime()) ? null : d; }
 function addDaysSafe(startDateStr, d){ const base = parseISODate(startDateStr) || new Date(); const dt = new Date(base); dt.setDate(dt.getDate() + (Number(d) || 0)); return dt; }
@@ -58,8 +37,29 @@ function offsetFromStart(startDateStr, cellDateUTC){
   const cUTC = Date.UTC(cellDateUTC.getUTCFullYear(), cellDateUTC.getUTCMonth(), cellDateUTC.getUTCDate());
   return Math.round((cUTC - sUTC) / (24*3600*1000));
 }
+const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 
-/* ---------------- Auth ---------------- */
+/* ---------- ErrorBoundary ---------- */
+class ErrorBoundary extends React.Component {
+  constructor(p){ super(p); this.state={ error:null }; }
+  static getDerivedStateFromError(error){ return { error }; }
+  componentDidCatch(error, info){ console.error("UI crash:", error, info); }
+  render(){
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen bg-red-50 p-6">
+          <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-white p-4">
+            <h2 className="mb-2 text-lg font-bold text-red-700">Something went wrong in the UI</h2>
+            <pre className="overflow-auto rounded bg-red-100 p-3 text-xs text-red-900">{String(this.state.error?.message || this.state.error)}</pre>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+/* ---------- Auth ---------- */
 function AuthScreen({ onSignedIn }) {
   const [mode, setMode] = useState("signup");
   const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
@@ -121,7 +121,7 @@ function AuthScreen({ onSignedIn }) {
   );
 }
 
-/* ---------------- Root ---------------- */
+/* ---------- Root ---------- */
 export default function App() {
   return (
     <ErrorBoundary>
@@ -143,9 +143,9 @@ function AppInner(){
   return <AppShell plannerEmail={plannerEmail} />;
 }
 
-/* ---------------- Shell ---------------- */
+/* ---------- Shell & routing ---------- */
 function AppShell({ plannerEmail }) {
-  const [view, setView] = useState("users"); // users | plan | inbox
+  const [view, setView] = useState("inbox"); // inbox | users | plan
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
   const [prefillPayload, setPrefillPayload] = useState(null);
 
@@ -156,6 +156,10 @@ function AppShell({ plannerEmail }) {
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold">Plan2Tasks</h1>
             <nav className="ml-4 flex gap-2">
+              <button onClick={()=>setView("inbox")}
+                className={cn("rounded-xl px-3 py-2 text-sm font-semibold", view==="inbox" ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
+                <InboxIcon className="inline h-4 w-4 mr-1" /> Inbox
+              </button>
               <button onClick={()=>setView("users")}
                 className={cn("rounded-xl px-3 py-2 text-sm font-semibold", view==="users" ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
                 <Users className="inline h-4 w-4 mr-1" /> Users
@@ -163,10 +167,6 @@ function AppShell({ plannerEmail }) {
               <button onClick={()=>setView("plan")}
                 className={cn("rounded-xl px-3 py-2 text-sm font-semibold", view==="plan" ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
                 <Calendar className="inline h-4 w-4 mr-1" /> Plan
-              </button>
-              <button onClick={()=>setView("inbox")}
-                className={cn("rounded-xl px-3 py-2 text-sm font-semibold", view==="inbox" ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
-                <InboxIcon className="inline h-4 w-4 mr-1" /> Inbox
               </button>
             </nav>
           </div>
@@ -176,65 +176,269 @@ function AppShell({ plannerEmail }) {
           </div>
         </header>
 
-        {view === "users"
-          ? <UsersDashboard
-              plannerEmail={plannerEmail}
-              onCreateTasks={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
-            />
-          : view === "plan"
-          ? <TasksWizard
-              plannerEmail={plannerEmail}
-              initialSelectedUserEmail={selectedUserEmail}
-              prefillPayload={prefillPayload}
-              onPrefillConsumed={()=>setPrefillPayload(null)}
-            />
-          : <InboxScreen
-              plannerEmail={plannerEmail}
-              onAssign={(payload)=>{
-                // Save to localStorage AND pass via state
-                try { localStorage.setItem("p2t_last_prefill", JSON.stringify(payload)); } catch {}
-                setPrefillPayload(payload);
-                setSelectedUserEmail(payload.userEmail);
-                setView("plan");
-              }}
-            />
-        }
+        {view === "inbox" && (
+          <InboxScreen
+            plannerEmail={plannerEmail}
+            onAssign={(payload)=>{
+              try { localStorage.setItem("p2t_last_prefill", JSON.stringify(payload)); } catch {}
+              setPrefillPayload(payload);
+              setSelectedUserEmail(payload.userEmail);
+              setView("plan");
+            }}
+          />
+        )}
+        {view === "users" && (
+          <UsersDashboard
+            plannerEmail={plannerEmail}
+            onCreateTasks={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
+          />
+        )}
+        {view === "plan" && (
+          <TasksWizard
+            plannerEmail={plannerEmail}
+            initialSelectedUserEmail={selectedUserEmail}
+            prefillPayload={prefillPayload}
+            onPrefillConsumed={()=>setPrefillPayload(null)}
+          />
+        )}
       </div>
     </div>
   );
 }
 
-/* ---------------- Users Dashboard ---------------- */
-function UsersDashboard({ plannerEmail, onCreateTasks }) {
+/* ---------- Confirm Modal ---------- */
+function ConfirmModal({ open, title, body, confirmText="Confirm", confirmClass="bg-red-600", onConfirm, onClose }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="mb-2 text-sm font-semibold">{title}</div>
+        <div className="mb-3 text-xs text-gray-700 whitespace-pre-wrap">{body}</div>
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onClose} className="rounded-lg border px-3 py-1.5 text-xs">Cancel</button>
+          <button onClick={onConfirm} className={cn("rounded-lg px-3 py-1.5 text-xs text-white", confirmClass)}>{confirmText}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Inbox Screen with tabs & bulk ---------- */
+function InboxScreen({ plannerEmail, onAssign }) {
+  const [tab, setTab] = useState("new"); // new | assigned | archived
+  const [bundles, setBundles] = useState([]);
+  const [assignUser, setAssignUser] = useState("");
   const [users, setUsers] = useState([]);
-  const [groups, setGroups] = useState([]);
-  const [tab, setTab] = useState("connected");
-  const [q, setQ] = useState("");
-  const [groupId, setGroupId] = useState("");
-  const [addEmail, setAddEmail] = useState("");
-  const [statusMsg, setStatusMsg] = useState("");
+  const [autoArchive, setAutoArchive] = useState(true);
+  const [selected, setSelected] = useState(new Set());
+  const [mod, setMod] = useState({open:false, action:null, ids:[], text:""});
 
-  const [editing, setEditing] = useState(null); const [editVal, setEditVal] = useState("");
-
-  const [showCreateGroup, setShowCreateGroup] = useState(false);
-  const [newGroupName, setNewGroupName] = useState("");
-
-  async function loadGroups() {
-    const params = new URLSearchParams({ op:"list", plannerEmail });
-    const resp = await fetch(`/api/groups?${params.toString()}`);
-    const data = await resp.json();
-    setGroups(data.groups || []);
+  async function loadBundles() {
+    const qs = new URLSearchParams({ plannerEmail, status: tab });
+    const r = await fetch(`/api/inbox?${qs.toString()}`);
+    const j = await r.json();
+    setBundles(j.bundles || []);
+    setSelected(new Set());
   }
   async function loadUsers() {
-    const params = new URLSearchParams({ op:"list", plannerEmail, status: tab });
-    if (q) params.set("q", q);
-    if (groupId) params.set("groupId", groupId);
+    const params = new URLSearchParams({ op:"list", plannerEmail, status: "connected" });
     const resp = await fetch(`/api/users?${params.toString()}`);
     const data = await resp.json();
     setUsers(data.users || []);
   }
-  useEffect(()=>{ loadGroups(); }, [plannerEmail]);
-  useEffect(()=>{ loadUsers(); }, [plannerEmail, tab, q, groupId]);
+  useEffect(()=>{ loadUsers(); }, [plannerEmail]);
+  useEffect(()=>{ loadBundles(); }, [plannerEmail, tab]);
+
+  function toggle(id){
+    const next = new Set(selected); next.has(id) ? next.delete(id) : next.add(id); setSelected(next);
+  }
+  function allIds(){ return (bundles||[]).map(b=>b.id); }
+  function setAll(checked){
+    setSelected(checked ? new Set(allIds()) : new Set());
+  }
+
+  async function doAction(action, ids) {
+    const body = { plannerEmail, bundleIds: ids };
+    const ep = action === "archive" ? "/api/inbox/archive"
+            : action === "restore" ? "/api/inbox/restore"
+            : "/api/inbox/delete";
+    const r = await fetch(ep, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!r.ok) alert(j.error || "Failed");
+    await loadBundles();
+  }
+
+  async function assignBundle(b) {
+    if (!assignUser) return alert("Choose a user to assign to.");
+    const resp = await fetch("/api/inbox/assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plannerEmail, inboxId: b.id, userEmail: assignUser })
+    });
+    const data = await resp.json();
+    if (!resp.ok) return alert(data.error || "Assign failed");
+    onAssign({ userEmail: assignUser, ...data });
+    if (autoArchive) {
+      await doAction("archive", [b.id]);
+    } else {
+      await loadBundles();
+    }
+  }
+
+  function confirmBulk(action){
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    const verb = action === "archive" ? "Archive" : action === "restore" ? "Restore" : "Permanently delete";
+    setMod({
+      open:true, action, ids,
+      text: `${verb} ${ids.length} bundle${ids.length>1?"s":""}? This cannot be undone for Delete.`
+    });
+  }
+  function confirmSingle(action, id, title){
+    const verb = action === "archive" ? "Archive" : action === "restore" ? "Restore" : "Permanently delete";
+    setMod({
+      open:true, action, ids:[id],
+      text: `${verb} “${title}”? This cannot be undone for Delete.`
+    });
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Inbox</h2>
+          <p className="text-sm text-gray-500">Assign bundles to a user, then open Plan to push. Toggle auto-archive after assign if you like.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-xs text-gray-600 flex items-center gap-2">
+            <input id="aa" type="checkbox" checked={autoArchive} onChange={e=>setAutoArchive(e.target.checked)} />
+            <label htmlFor="aa">Auto-archive after assign</label>
+          </div>
+          <div>
+            <label className="text-xs block mb-1">Assign to user</label>
+            <select value={assignUser} onChange={(e)=>setAssignUser(e.target.value)} className="rounded-xl border border-gray-300 px-3 py-2 text-sm">
+              <option value="">— Choose user —</option>
+              {users.map(u => <option key={u.email} value={u.email}>{u.email}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="mb-3 flex items-center gap-2">
+        {["new","assigned","archived"].map(t=>(
+          <button key={t} onClick={()=>setTab(t)}
+            className={cn("rounded-xl px-3 py-2 text-sm font-semibold",
+              tab===t ? "bg-cyan-600 text-white" : "bg-white border border-gray-300")}>
+            {t==="new"?"New":t==="assigned"?"Assigned":"Archived"}
+          </button>
+        ))}
+      </div>
+
+      {/* Bulk bar */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2 text-xs">
+          <button onClick={()=>setAll(selected.size !== bundles.length)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
+            {selected.size === bundles.length && bundles.length>0 ? <CheckSquare className="h-3 w-3"/> : <Square className="h-3 w-3" />} Select all
+          </button>
+          <span className="text-gray-500">{selected.size} selected</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {tab!=="archived" && (
+            <button onClick={()=>confirmBulk("archive")} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs">
+              <Archive className="h-3 w-3" /> Archive
+            </button>
+          )}
+          {tab==="archived" && (
+            <button onClick={()=>confirmBulk("restore")} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs">
+              <ArchiveRestore className="h-3 w-3" /> Restore
+            </button>
+          )}
+          <button onClick={()=>confirmBulk("delete")} className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs">
+            <Trash2 className="h-3 w-3" /> Delete…
+          </button>
+        </div>
+      </div>
+
+      {/* List */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {(bundles || []).map(b => (
+          <div key={b.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="mb-1 text-sm font-semibold">{b.title}</div>
+                <div className="text-xs text-gray-600">
+                  Items: {b.count} • Start {b.start_date} • {b.timezone} • Source: {b.source}
+                  {b.assigned_user ? <> • Assigned to {b.assigned_user}</> : null}
+                  {b.archived_at ? <> • Archived</> : null}
+                </div>
+              </div>
+              <input type="checkbox" checked={selected.has(b.id)} onChange={()=>toggle(b.id)} />
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              {tab!=="archived" && (
+                <button
+                  onClick={()=>assignBundle(b)}
+                  className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white">
+                  Assign to selected user
+                </button>
+              )}
+              {tab!=="archived" && (
+                <button onClick={()=>confirmSingle("archive", b.id, b.title)} className="rounded-xl border px-3 py-2 text-xs">
+                  Archive
+                </button>
+              )}
+              {tab==="archived" && (
+                <button onClick={()=>confirmSingle("restore", b.id, b.title)} className="rounded-xl border px-3 py-2 text-xs">
+                  Restore
+                </button>
+              )}
+              <button onClick={()=>confirmSingle("delete", b.id, b.title)} className="rounded-xl border border-red-300 text-red-700 px-3 py-2 text-xs">
+                Delete…
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(bundles || []).length === 0 && (
+        <div className="mt-6 rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-500">
+          No bundles on this tab.
+        </div>
+      )}
+
+      <ConfirmModal
+        open={mod.open}
+        title="Please confirm"
+        body={mod.text}
+        confirmText={mod.action==="archive"?"Archive":mod.action==="restore"?"Restore":"Delete"}
+        confirmClass={mod.action==="delete"?"bg-red-600":"bg-cyan-600"}
+        onClose={()=>setMod({open:false})}
+        onConfirm={async ()=>{
+          const { action, ids } = mod;
+          setMod({open:false});
+          await doAction(action, ids);
+        }}
+      />
+    </div>
+  );
+}
+
+/* ---------- Users Dashboard (same add user; history lives on Manage User) ---------- */
+function UsersDashboard({ plannerEmail, onCreateTasks }) {
+  const [users, setUsers] = useState([]);
+  const [q, setQ] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [statusMsg, setStatusMsg] = useState("");
+
+  async function loadUsers() {
+    const params = new URLSearchParams({ op:"list", plannerEmail, status: "all", q });
+    const resp = await fetch(`/api/users?${params.toString()}`);
+    const data = await resp.json();
+    setUsers(data.users || []);
+  }
+  useEffect(()=>{ loadUsers(); }, [plannerEmail, q]);
 
   async function addUser() {
     setStatusMsg("Creating invite...");
@@ -246,35 +450,20 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
     setAddEmail("");
     await loadUsers();
   }
-  async function delUser(email) {
-    if (!confirm(`Delete ${email}?`)) return;
-    const resp = await fetch(`/api/users?op=delete`, { method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ plannerEmail, userEmail: email }) });
-    const data = await resp.json();
-    if (!resp.ok) return alert(data.error || "Delete failed");
-    await loadUsers();
-  }
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Users Dashboard</h2>
-          <p className="text-sm text-gray-500">Add, group, and manage users. Click “Manage user” to deliver tasks to their Google Tasks.</p>
+          <h2 className="text-lg font-semibold">Users</h2>
+          <p className="text-sm text-gray-500">Search users and click <b>Manage user</b> to create and deliver tasks.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
             <Search className="h-4 w-4 text-gray-400" />
-            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search name, email, groups, status"
+            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search email/name/status"
               className="px-2 py-1 text-sm outline-none" />
           </div>
-          <select value={groupId} onChange={(e)=>setGroupId(e.target.value)}
-            className="rounded-xl border border-gray-300 px-3 py-2 text-sm">
-            <option value="">All groups</option>
-            <option value="null">No group</option>
-            {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-          </select>
-          {/* Create group button omitted for brevity — unchanged UX here */}
         </div>
       </div>
 
@@ -305,12 +494,6 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
                       className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-xs font-semibold text-white hover:bg-black">
                       Manage user <ArrowRight className="h-3 w-3" />
                     </button>
-                    <button className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs">
-                      <Edit3 className="h-3 w-3" /> Edit
-                    </button>
-                    <button className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs">
-                      <Trash2 className="h-3 w-3" /> Delete
-                    </button>
                   </div>
                 </td>
               </tr>
@@ -325,323 +508,7 @@ function UsersDashboard({ plannerEmail, onCreateTasks }) {
   );
 }
 
-/* ---------------- Inbox (GPT bundles) ---------------- */
-function InboxScreen({ plannerEmail, onAssign }) {
-  const [bundles, setBundles] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [assigning, setAssigning] = useState(null);
-  const [assignUser, setAssignUser] = useState("");
-
-  async function loadBundles() {
-    const q = new URLSearchParams({ plannerEmail });
-    const r = await fetch(`/api/inbox?${q.toString()}`);
-    const j = await r.json();
-    setBundles(j.bundles || []);
-  }
-  async function loadUsers() {
-    const params = new URLSearchParams({ op:"list", plannerEmail, status: "connected" });
-    const resp = await fetch(`/api/users?${params.toString()}`);
-    const data = await resp.json();
-    setUsers(data.users || []);
-  }
-  useEffect(()=>{ loadBundles(); loadUsers(); }, [plannerEmail]);
-
-  async function assignBundle(b) {
-    if (!assignUser) return alert("Choose a user to assign to.");
-    setAssigning(b.id);
-    try {
-      const resp = await fetch("/api/inbox/assign", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail, inboxId: b.id, userEmail: assignUser })
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Assign failed");
-
-      // Save to localStorage as a safety net
-      try { localStorage.setItem("p2t_last_prefill", JSON.stringify({ userEmail: assignUser, ...data })); } catch {}
-
-      // hand off to AppShell/state
-      onAssign({ userEmail: assignUser, ...data });
-    } catch (e) {
-      alert(e.message);
-    } finally {
-      setAssigning(null);
-    }
-  }
-
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="mb-3">
-        <h2 className="text-lg font-semibold">Inbox</h2>
-        <p className="text-sm text-gray-500">Bundles from GPT or other sources. Assign to a user to load into the composer.</p>
-      </div>
-
-      <div className="mb-3 w-full max-w-xs">
-        <label className="mb-1 block text-sm font-medium">Assign to user</label>
-        <select value={assignUser} onChange={(e)=>setAssignUser(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-          <option value="">— Choose user —</option>
-          {users.map(u => <option key={u.email} value={u.email}>{u.email}</option>)}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        {(bundles || []).map(b => (
-          <div key={b.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <div className="mb-1 text-sm font-semibold">{b.title}</div>
-            <div className="text-xs text-gray-600">
-              Source: {b.source} • Start {b.start_date} • {b.timezone} • Items: {b.count}
-              {b.suggested_user ? <> • Suggests: {b.suggested_user}</> : null}
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                disabled={!assignUser || assigning === b.id}
-                onClick={() => assignBundle(b)}
-                className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-              >
-                {assigning === b.id ? "Assigning…" : "Assign to selected user"}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {(bundles || []).length === 0 && (
-        <div className="rounded-xl border border-gray-200 bg-white p-4 text-xs text-gray-500">
-          Your Inbox is empty. Connect the Plan2Tasks GPT and send a bundle, or insert a test bundle in Supabase.
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ---------------- Tasks wizard ---------------- */
-function TasksWizard({ plannerEmail, initialSelectedUserEmail = "", prefillPayload, onPrefillConsumed }) {
-  const [plan, setPlan] = useState({
-    title: "Weekly Plan",
-    startDate: format(new Date(), "yyyy-MM-dd"),
-    timezone: "America/Chicago",
-  });
-  const [tasks, setTasks] = useState([]);
-
-  const [users, setUsers] = useState([]);
-  const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
-  const [replaceMode, setReplaceMode] = useState(false);
-  const [resultMsg, setResultMsg] = useState("");
-
-  const [inboxBanner, setInboxBanner] = useState(null);
-  const [loadedFromStorage, setLoadedFromStorage] = useState(false);
-
-  // Apply Inbox prefill from state
-  useEffect(() => {
-    if (prefillPayload && prefillPayload.ok && prefillPayload.plan && Array.isArray(prefillPayload.tasks)) {
-      setPlan(prefillPayload.plan);
-      setTasks(prefillPayload.tasks.map(t => ({ id: uid(), ...t })));
-      setInboxBanner({
-        title: prefillPayload.plan.title || "Inbox import",
-        count: prefillPayload.tasks.length || 0,
-        userEmail: prefillPayload.userEmail || ""
-      });
-      onPrefillConsumed?.();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillPayload]);
-
-  // Fallback: auto-load last payload from localStorage if tasks are empty
-  useEffect(() => {
-    if (tasks.length === 0 && !prefillPayload && !loadedFromStorage) {
-      try {
-        const raw = localStorage.getItem("p2t_last_prefill");
-        if (raw) {
-          const p = JSON.parse(raw);
-          if (p && p.ok && p.plan && Array.isArray(p.tasks)) {
-            setPlan(p.plan);
-            setTasks(p.tasks.map(t => ({ id: uid(), ...t })));
-            setInboxBanner({
-              title: p.plan.title || "Inbox import",
-              count: p.tasks.length || 0,
-              userEmail: p.userEmail || ""
-            });
-            setLoadedFromStorage(true);
-          }
-        }
-      } catch {}
-    }
-  }, [tasks.length, prefillPayload, loadedFromStorage]);
-
-  useEffect(() => {
-    (async () => {
-      const params = new URLSearchParams({ op:"list", plannerEmail });
-      const resp = await fetch(`/api/users?${params.toString()}`);
-      const data = await resp.json();
-      setUsers(data.users || []);
-      if (!initialSelectedUserEmail) {
-        const connected = (data.users || []).find(u => u.status === "connected");
-        const any = (data.users || [])[0];
-        const sel = connected?.email || any?.email || "";
-        setSelectedUserEmail(sel);
-      } else {
-        setSelectedUserEmail(initialSelectedUserEmail);
-      }
-    })();
-  }, [plannerEmail, initialSelectedUserEmail]);
-
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      {inboxBanner && (
-        <div className="mb-4 flex items-start gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
-          <Info className="h-4 w-4 mt-0.5" />
-          <div>
-            Loaded <b>{inboxBanner.count}</b> tasks from Inbox bundle <b>“{inboxBanner.title}”</b>
-            {inboxBanner.userEmail ? <> for <b>{inboxBanner.userEmail}</b></> : null}.
-          </div>
-        </div>
-      )}
-
-      {(!inboxBanner && tasks.length === 0) && (
-        <div className="mb-3">
-          <button
-            onClick={()=>{
-              try {
-                const raw = localStorage.getItem("p2t_last_prefill");
-                if (!raw) return alert("No saved Inbox payload found.");
-                const p = JSON.parse(raw);
-                if (!p?.ok || !p.plan || !Array.isArray(p.tasks)) return alert("Saved Inbox payload is invalid.");
-                setPlan(p.plan);
-                setTasks(p.tasks.map(t => ({ id: uid(), ...t })));
-                setInboxBanner({ title: p.plan.title || "Inbox import", count: p.tasks.length || 0, userEmail: p.userEmail || "" });
-              } catch {
-                alert("Could not load last Inbox payload.");
-              }
-            }}
-            className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs hover:bg-gray-50"
-          >
-            Load last Inbox bundle
-          </button>
-        </div>
-      )}
-
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Plan (Tasks only)</h2>
-        <div className="w-72">
-          <select
-            value={selectedUserEmail}
-            onChange={(e) => setSelectedUserEmail(e.target.value)}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-          >
-            <option value="">— Choose user —</option>
-            {users.map(u => (
-              <option key={u.email} value={u.email}>
-                {u.email} {u.status === "connected" ? "✓" : "(invited)"}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* 1) List title / Start date / Timezone */}
-      <div className="mb-6">
-        <div className="mb-2">
-          <div className="text-sm font-semibold">1) Task list (Google)</div>
-          <div className="text-xs text-gray-500">
-            <b>Title</b> becomes the Google Tasks <b>list name</b>. Tasks you add below go inside that list.
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">Task list title</div>
-            <input
-              value={plan.title}
-              onChange={(e) => setPlan({ ...plan, title: e.target.value })}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-              placeholder="e.g., Week of Sep 1"
-            />
-          </label>
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">Plan start date</div>
-            <input
-              type="date"
-              value={plan.startDate}
-              onChange={(e) => setPlan({ ...plan, startDate: e.target.value })}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block">
-            <div className="mb-1 text-sm font-medium">Timezone</div>
-            <select
-              value={plan.timezone}
-              onChange={(e) => setPlan({ ...plan, timezone: e.target.value })}
-              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-            >
-              {TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz}</option>))}
-            </select>
-          </label>
-        </div>
-      </div>
-
-      {/* 2) Add tasks */}
-      <DateAndEditor plan={plan} tasks={tasks} setTasks={setTasks} />
-
-      {/* 3) Preview & deliver */}
-      <TaskComposerAndPreview
-        plan={plan}
-        tasks={tasks}
-        setTasks={setTasks}
-        replaceMode={replaceMode}
-        setReplaceMode={setReplaceMode}
-        resultMsg={resultMsg}
-        setResultMsg={setResultMsg}
-        selectedUserEmail={selectedUserEmail}
-        plannerEmail={plannerEmail}
-      />
-    </div>
-  );
-}
-
-/* ---------- Date picker + Editor ---------- */
-function DateAndEditor({ plan, tasks, setTasks }) {
-  return (
-    <div className="mb-6">
-      <div className="mb-2">
-        <div className="text-sm font-semibold">2) Add tasks</div>
-        <div className="text-xs text-gray-500">
-          Click <b>Pick date</b> to open the calendar grid (with month/year controls). That sets the task’s <b>date</b>.
-          Choose Repeat (Daily / Weekly / Monthly), then <b>Add task(s)</b>.
-        </div>
-      </div>
-      <DatePickerButton startDate={plan.startDate} />
-      <TasksEditorAdvanced startDate={plan.startDate} onAdd={(items)=>{
-        const withIds = items.map(t => ({ id: uid(), ...t }));
-        setTasks(prev => [...prev, ...withIds]);
-      }} />
-    </div>
-  );
-}
-
-/* ---------------- Compact calendar modal ---------------- */
-function DatePickerButton({ startDate }) {
-  const [open, setOpen] = useState(false);
-  const [offset, setOffset] = useState(0);
-  useEffect(()=>{ window.dispatchEvent(new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: 0 }})); },[]);
-  const label = fmtDayLabel(startDate, offset);
-
-  return (
-    <div className="mb-3 flex items-center gap-2">
-      <button type="button" onClick={()=>setOpen(true)}
-        className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
-        <Calendar className="h-4 w-4" /> Pick date
-      </button>
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">Selected: <b>{label}</b></div>
-      {open && (
-        <Modal onClose={()=>setOpen(false)} title="Choose a date">
-          <CalendarGrid startDate={startDate} valueOffset={offset}
-            onPickOffset={(o)=>{ setOffset(o); window.dispatchEvent(new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: o }})); setOpen(false); }} />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
+/* ---------- Date Picker Modal components (same as before) ---------- */
 function Modal({ title, children, onClose }) {
   useEffect(() => { function onEsc(e){ if (e.key === "Escape") onClose?.(); }
     window.addEventListener("keydown", onEsc); return () => window.removeEventListener("keydown", onEsc);
@@ -659,7 +526,6 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
-
 function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   const start = parseISODate(startDate) || new Date();
   const [viewMonth, setViewMonth] = useState(() => new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
@@ -667,10 +533,8 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
   const startUTC = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
   const endUTC = new Date(startUTC.getTime() + maxDays*24*3600*1000);
   const selectedUTC = new Date(startUTC.getTime() + valueOffset*24*3600*1000);
-
   function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
   function gotoMonth(delta){ const y=viewMonth.getUTCFullYear(), m=viewMonth.getUTCMonth(); setViewMonth(new Date(Date.UTC(y, m+delta, 1))); }
-
   const year = viewMonth.getUTCFullYear(), month = viewMonth.getUTCMonth();
   const firstOfMonth = new Date(Date.UTC(year, month, 1));
   const startDow = firstOfMonth.getUTCDay();
@@ -685,7 +549,6 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
       return { cell, isSameMonth, isDisabled, isSelected, label: String(cell.getUTCDate()) };
     })
   );
-
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
@@ -728,16 +591,32 @@ function CalendarGrid({ startDate, valueOffset = 0, onPickOffset }) {
           </button>
         )))}
       </div>
-
-      <div className="mt-2 text-xs text-gray-600">
-        Window: {format(startUTC, "MMM d")} → {format(endUTC, "MMM d")} •
-        Selected: {format(selectedUTC, "EEE MMM d")}
-      </div>
+    </div>
+  );
+}
+function DatePickerButton({ startDate }) {
+  const [open, setOpen] = useState(false);
+  const [offset, setOffset] = useState(0);
+  useEffect(()=>{ window.dispatchEvent(new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: 0 }})); },[]);
+  const label = fmtDayLabel(startDate, offset);
+  return (
+    <div className="mb-3 flex items-center gap-2">
+      <button type="button" onClick={()=>setOpen(true)}
+        className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+        <Calendar className="h-4 w-4" /> Pick date
+      </button>
+      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">Selected: <b>{label}</b></div>
+      {open && (
+        <Modal onClose={()=>setOpen(false)} title="Choose a date">
+          <CalendarGrid startDate={startDate} valueOffset={offset}
+            onPickOffset={(o)=>{ setOffset(o); window.dispatchEvent(new CustomEvent("p2t:setBaseOffset",{ detail:{ offset: o }})); setOpen(false); }} />
+        </Modal>
+      )}
     </div>
   );
 }
 
-/* ---------- Tasks editor (with Notes, weekly pills, monthly options) ---------- */
+/* ---------- Tasks editor / preview / push ---------- */
 function TasksEditorAdvanced({ startDate, onAdd }) {
   const [title, setTitle] = useState("");
   const [baseOffset, setBaseOffset] = useState(0);
@@ -770,14 +649,12 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
       durationMins: Number.isFinite(Number(dur)) && Number(dur) > 0 ? Number(dur) : 60,
       notes
     };
-
     const added = [];
     const start = parseISODate(startDate);
     function pushIfOnOrAfter(d){
       const off = daysBetweenUTC(start, d);
       if (d >= base) added.push({ ...baseObj, dayOffset: off });
     }
-
     const step = Math.max(1, Number(interval) || 1);
 
     if (repeat === "none") pushIfOnOrAfter(base);
@@ -963,7 +840,7 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
         <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">
           <Plus className="h-4 w-4" /> Add task(s)
         </button>
-        <button onClick={()=>{ /* reset fields */ }}
+        <button onClick={()=>{ /* could reset */ }}
           className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs hover:bg-gray-50">
           <RotateCcw className="h-3 w-3" /> Reset fields
         </button>
@@ -972,7 +849,48 @@ function TasksEditorAdvanced({ startDate, onAdd }) {
   );
 }
 
-/* ---------- Preview & push ---------- */
+function buildICS(plan, tasks){
+  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//EN"];
+  const addDays = (d,n)=>{ const x=new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())); x.setUTCDate(x.getUTCDate()+n); return x; };
+  const start = new Date(`${plan.startDate}T00:00:00Z`);
+  const fmt = (X)=> `${X.getUTCFullYear()}${String(X.getUTCMonth()+1).padStart(2,"0")}${String(X.getUTCDate()).padStart(2,"0")}T${String(X.getUTCHours()).padStart(2,"0")}${String(X.getUTCMinutes()).padStart(2,"0")}00Z`;
+  function escapeICS(s=""){ return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n"); }
+  for (const t of tasks) {
+    const dt = addDays(start, t.dayOffset || 0);
+    let dtstart, dtend;
+    if (t.time) {
+      const [hh,mm] = t.time.split(":").map(Number);
+      const st = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), hh||0, mm||0));
+      const en = new Date(st.getTime() + (t.durationMins || 60) * 60000);
+      dtstart = `DTSTART:${fmt(st)}`; dtend = `DTEND:${fmt(en)}`;
+    } else {
+      const ymd = `${dt.getUTCFullYear()}${String(dt.getUTCMonth()+1).padStart(2,"0")}${String(dt.getUTCDate()).padStart(2,"0")}`;
+      const next = addDays(dt,1);
+      const ymd2 = `${next.getUTCFullYear()}${String(next.getUTCMonth()+1).padStart(2,"0")}${String(next.getUTCDate()).padStart(2,"0")}`;
+      dtstart = `DTSTART;VALUE=DATE:${ymd}`; dtend = `DTEND;VALUE=DATE:${ymd2}`;
+    }
+    const id = `${uid()}@plan2tasks`;
+    lines.push("BEGIN:VEVENT", `UID:${id}`, `SUMMARY:${escapeICS(t.title)}`, dtstart, dtend,
+      `DESCRIPTION:${escapeICS(t.notes || "")}`, "END:VEVENT");
+  }
+  lines.push("END:VCALENDAR");
+  return lines.join("\r\n");
+}
+
+export function renderPlanBlock({ plan, tasks }) {
+  const lines = [];
+  lines.push("### PLAN2TASKS ###");
+  lines.push(`Title: ${plan.title}`);
+  lines.push(`Start: ${plan.startDate}`);
+  lines.push(`Timezone: ${plan.timezone}`);
+  lines.push("--- Blocks ---");
+  lines.push("--- Tasks ---");
+  for (const t of tasks) lines.push(`- ${t.title} | day=${t.dayOffset || 0} | time=${t.time || ""} | dur=${t.durationMins || 60} | notes=${t.notes || ""}`);
+  lines.push("### END ###");
+  return lines.join("\n");
+}
+
+/* ---------- Preview & push + History panel ---------- */
 function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplaceMode, resultMsg, setResultMsg, selectedUserEmail, plannerEmail }) {
   function downloadICS() {
     const ics = buildICS(plan, tasks);
@@ -1010,8 +928,19 @@ function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplace
       const text = await resp.text();
       let data; try { data = JSON.parse(text); } catch { throw new Error(text.slice(0,200)); }
       if (!resp.ok) throw new Error(data.error || "Push failed");
+
+      // Snapshot history
+      await fetch("/api/history/snapshot", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({
+          plannerEmail, userEmail: selectedUserEmail, plan, tasks,
+          mode: replaceMode ? "replace" : "append",
+          listTitle: data.listTitle || plan.title
+        })
+      });
+
       const deletedMsg = data.mode === "replace" ? `Removed ${data.deleted} existing tasks. ` : "";
-      setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle}".`);
+      setResultMsg(`${deletedMsg}Success — created ${data.created} tasks in "${data.listTitle || plan.title}".`);
     } catch (e) {
       setResultMsg("Error: " + e.message);
     }
@@ -1049,11 +978,11 @@ function TaskComposerAndPreview({ plan, tasks, setTasks, replaceMode, setReplace
           </div>
         </>
       )}
+      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} />
     </>
   );
 }
 
-/* ---------- Preview list grouped by date ---------- */
 function PreviewSchedule({ startDate, items }) {
   const groups = useMemo(()=>{
     const map = new Map();
@@ -1088,44 +1017,316 @@ function PreviewSchedule({ startDate, items }) {
   );
 }
 
-/* ---------- .ics builder & plan block ---------- */
-function buildICS(plan, tasks){
-  const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//EN"];
-  for (const t of tasks) {
-    const dt = addDaysSafe(plan.startDate, t.dayOffset || 0);
-    const y = dt.getUTCFullYear();
-    const m = String(dt.getUTCMonth()+1).padStart(2,"0");
-    const d = String(dt.getUTCDate()).padStart(2,"0");
-    let dtstart, dtend;
-    if (t.time) {
-      const [hh, mm] = (t.time || "00:00").split(":").map(Number);
-      const startUTC = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), hh || 0, mm || 0));
-      const endUTC = new Date(startUTC.getTime() + (t.durationMins || 60) * 60000);
-      const fmt = (X)=> `${X.getUTCFullYear()}${String(X.getUTCMonth()+1).padStart(2,"0")}${String(X.getUTCDate()).padStart(2,"0")}T${String(X.getUTCHours()).padStart(2,"0")}${String(X.getUTCMinutes()).padStart(2,"0")}00Z`;
-      dtstart = `DTSTART:${fmt(startUTC)}`; dtend = `DTEND:${fmt(endUTC)}`;
-    } else {
-      dtstart = `DTSTART;VALUE=DATE:${y}${m}${d}`;
-      dtend   = `DTEND;VALUE=DATE:${y}${m}${String(Number(d)+1).padStart(2,"0")}`;
-    }
-    const id = `${uid()}@plan2tasks`;
-    lines.push("BEGIN:VEVENT", `UID:${id}`, `SUMMARY:${escapeICS(t.title)}`, dtstart, dtend,
-      `DESCRIPTION:${escapeICS([t.notes ? t.notes : "", t.time ? `Time: ${t.time} (${plan.timezone})` : "", t.durationMins ? `Duration: ${t.durationMins}m`:""].filter(Boolean).join("\\n"))}`,
-      "END:VEVENT");
-  }
-  lines.push("END:VCALENDAR");
-  return lines.join("\r\n");
-}
-function escapeICS(s=""){ return String(s).replace(/([,;])/g,"\\$1").replace(/\n/g,"\\n"); }
+/* ---------- History Panel ---------- */
+function HistoryPanel({ plannerEmail, userEmail }) {
+  const [tab, setTab] = useState("active"); // active | archived
+  const [rows, setRows] = useState([]);
+  const [q, setQ] = useState("");
+  const [selected, setSelected] = useState(new Set());
+  const [mod, setMod] = useState({open:false, action:null, ids:[], text:""});
 
-export function renderPlanBlock({ plan, tasks }) {
-  const lines = [];
-  lines.push("### PLAN2TASKS ###");
-  lines.push(`Title: ${plan.title}`);
-  lines.push(`Start: ${plan.startDate}`);
-  lines.push(`Timezone: ${plan.timezone}`);
-  lines.push("--- Blocks ---");
-  lines.push("--- Tasks ---");
-  for (const t of tasks) lines.push(`- ${t.title} | day=${t.dayOffset || 0} | time=${t.time || ""} | dur=${t.durationMins || 60} | notes=${t.notes || ""}`);
-  lines.push("### END ###");
-  return lines.join("\n");
+  async function load() {
+    if (!userEmail) { setRows([]); return; }
+    const qs = new URLSearchParams({ plannerEmail, userEmail, status: tab, q });
+    const r = await fetch(`/api/history/list?${qs.toString()}`);
+    const j = await r.json();
+    setRows(j.items || []);
+    setSelected(new Set());
+  }
+  useEffect(()=>{ load(); }, [plannerEmail, userEmail, tab, q]);
+
+  function toggle(id){ const next=new Set(selected); next.has(id)?next.delete(id):next.add(id); setSelected(next); }
+  function setAll(checked){ setSelected(checked ? new Set(rows.map(r=>r.id)) : new Set()); }
+
+  async function doAction(action, ids){
+    const ep = action==="archive" ? "/api/history/archive"
+            : action==="unarchive" ? "/api/history/unarchive"
+            : "/api/history/delete";
+    const r = await fetch(ep, { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ plannerEmail, planIds: ids })
+    });
+    const j = await r.json();
+    if (!r.ok) alert(j.error || "Failed");
+    await load();
+  }
+
+  async function restore(planId, duplicate=false){
+    const r = await fetch("/api/history/restore", { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ plannerEmail, planId }) });
+    const j = await r.json();
+    if (!r.ok) return alert(j.error || "Restore failed");
+    // Fill composer via localStorage handoff
+    const payload = { ok:true, userEmail, plan: j.plan, tasks: j.tasks };
+    if (duplicate) payload.plan.title = `${payload.plan.title} (copy)`;
+    try { localStorage.setItem("p2t_last_prefill", JSON.stringify(payload)); } catch {}
+    alert("Loaded to composer. Go to Plan tab.");
+  }
+
+  function confirmBulk(action){
+    const ids = Array.from(selected);
+    if (!ids.length) return;
+    const verb = action==="archive"?"Archive":action==="unarchive"?"Unarchive":"Permanently delete";
+    setMod({ open:true, action, ids, text: `${verb} ${ids.length} item(s)? This cannot be undone for Delete.` });
+  }
+
+  return (
+    <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <div>
+          <div className="text-sm font-semibold">History</div>
+          <div className="text-xs text-gray-500">Previously pushed lists for {userEmail || "—"}.</div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
+            <Search className="h-4 w-4 text-gray-400" />
+            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search title…" className="px-2 py-1 text-sm outline-none" />
+          </div>
+          <div className="rounded-xl border border-gray-300 bg-white">
+            <button onClick={()=>setTab("active")} className={cn("px-3 py-2 text-xs", tab==="active"?"bg-cyan-600 text-white rounded-l-xl":"")}>Active</button>
+            <button onClick={()=>setTab("archived")} className={cn("px-3 py-2 text-xs", tab==="archived"?"bg-cyan-600 text-white rounded-r-xl":"")}>Archived</button>
+          </div>
+        </div>
+      </div>
+
+      {/* bulk bar */}
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <button onClick={()=>setAll(selected.size !== rows.length)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
+          {selected.size === rows.length && rows.length>0 ? <CheckSquare className="h-3 w-3"/> : <Square className="h-3 w-3" />} Select all
+        </button>
+        <div className="flex items-center gap-2">
+          {tab==="active" ? (
+            <button onClick={()=>confirmBulk("archive")} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> <Archive className="h-3 w-3" /> Archive </button>
+          ) : (
+            <button onClick={()=>confirmBulk("unarchive")} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> <ArchiveRestore className="h-3 w-3" /> Unarchive </button>
+          )}
+          <button onClick={()=>confirmBulk("delete")} className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"> <Trash2 className="h-3 w-3" /> Delete… </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-gray-500">
+              <th className="py-2"></th>
+              <th className="py-2">Title</th>
+              <th className="py-2">Start</th>
+              <th className="py-2">Items</th>
+              <th className="py-2">Mode</th>
+              <th className="py-2">Pushed</th>
+              <th className="py-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r=>(
+              <tr key={r.id} className="border-t">
+                <td className="py-2"><input type="checkbox" checked={selected.has(r.id)} onChange={()=>toggle(r.id)} /></td>
+                <td className="py-2">{r.title}</td>
+                <td className="py-2">{r.start_date}</td>
+                <td className="py-2">{r.items_count}</td>
+                <td className="py-2">{r.mode}</td>
+                <td className="py-2">{new Date(r.pushed_at).toLocaleString()}</td>
+                <td className="py-2">
+                  <div className="flex justify-end gap-2">
+                    <a href={`/api/history/ics?planId=${r.id}`} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> <Download className="h-3 w-3" /> .ics </a>
+                    <button onClick={()=>restore(r.id, false)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> Restore </button>
+                    <button onClick={()=>restore(r.id, true)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> Duplicate </button>
+                    {tab==="active" ? (
+                      <button onClick={()=>setMod({open:true, action:"archive", ids:[r.id], text:`Archive “${r.title}”?`})}
+                        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> <Archive className="h-3 w-3" /> </button>
+                    ) : (
+                      <button onClick={()=>setMod({open:true, action:"unarchive", ids:[r.id], text:`Unarchive “${r.title}”?`})}
+                        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"> <ArchiveRestore className="h-3 w-3" /> </button>
+                    )}
+                    <button onClick={()=>setMod({open:true, action:"delete", ids:[r.id], text:`Permanently delete “${r.title}”? This cannot be undone.`})}
+                      className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"> <Trash2 className="h-3 w-3" /> </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={7} className="py-6 text-gray-500">No history on this tab.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <ConfirmModal
+        open={mod.open}
+        title="Please confirm"
+        body={mod.text}
+        confirmText={mod.action==="delete"?"Delete":mod.action==="archive"?"Archive":mod.action==="unarchive"?"Unarchive":"Confirm"}
+        confirmClass={mod.action==="delete"?"bg-red-600":"bg-cyan-600"}
+        onClose={()=>setMod({open:false})}
+        onConfirm={async ()=>{
+          const { action, ids } = mod;
+          setMod({open:false});
+          await doAction(action, ids);
+        }}
+      />
+    </div>
+  );
+}
+
+/* ---------- Tasks Wizard (Plan) ---------- */
+function TasksWizard({ plannerEmail, initialSelectedUserEmail = "", prefillPayload, onPrefillConsumed }) {
+  const [plan, setPlan] = useState({
+    title: "Weekly Plan",
+    startDate: format(new Date(), "yyyy-MM-dd"),
+    timezone: "America/Chicago",
+  });
+  const [tasks, setTasks] = useState([]);
+
+  const [users, setUsers] = useState([]);
+  const [selectedUserEmail, setSelectedUserEmail] = useState(initialSelectedUserEmail);
+  const [replaceMode, setReplaceMode] = useState(false);
+  const [resultMsg, setResultMsg] = useState("");
+
+  const [inboxBanner, setInboxBanner] = useState(null);
+  const [loadedFromStorage, setLoadedFromStorage] = useState(false);
+
+  // Apply Inbox prefill
+  useEffect(() => {
+    if (prefillPayload && prefillPayload.ok && prefillPayload.plan && Array.isArray(prefillPayload.tasks)) {
+      setPlan(prefillPayload.plan);
+      setTasks(prefillPayload.tasks.map(t => ({ id: uid(), ...t })));
+      setInboxBanner({
+        title: prefillPayload.plan.title || "Inbox import",
+        count: prefillPayload.tasks.length || 0,
+        userEmail: prefillPayload.userEmail || ""
+      });
+      onPrefillConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillPayload]);
+
+  // Fallback: load last payload from localStorage
+  useEffect(() => {
+    if (tasks.length === 0 && !prefillPayload && !loadedFromStorage) {
+      try {
+        const raw = localStorage.getItem("p2t_last_prefill");
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (p && p.ok && p.plan && Array.isArray(p.tasks)) {
+            setPlan(p.plan);
+            setTasks(p.tasks.map(t => ({ id: uid(), ...t })));
+            setInboxBanner({
+              title: p.plan.title || "Inbox import",
+              count: p.tasks.length || 0,
+              userEmail: p.userEmail || ""
+            });
+            setLoadedFromStorage(true);
+          }
+        }
+      } catch {}
+    }
+  }, [tasks.length, prefillPayload, loadedFromStorage]);
+
+  useEffect(() => {
+    (async () => {
+      const params = new URLSearchParams({ op:"list", plannerEmail });
+      const resp = await fetch(`/api/users?${params.toString()}`);
+      const data = await resp.json();
+      setUsers(data.users || []);
+      if (!initialSelectedUserEmail) {
+        const connected = (data.users || []).find(u => u.status === "connected");
+        const any = (data.users || [])[0];
+        const sel = connected?.email || any?.email || "";
+        setSelectedUserEmail(sel);
+      } else {
+        setSelectedUserEmail(initialSelectedUserEmail);
+      }
+    })();
+  }, [plannerEmail, initialSelectedUserEmail]);
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      {inboxBanner && (
+        <div className="mb-4 flex items-start gap-2 rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+          <Info className="h-4 w-4 mt-0.5" />
+          <div>
+            Loaded <b>{inboxBanner.count}</b> tasks from <b>“{inboxBanner.title}”</b>
+            {inboxBanner.userEmail ? <> for <b>{inboxBanner.userEmail}</b></> : null}.
+          </div>
+        </div>
+      )}
+
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Plan (Tasks only)</h2>
+        <div className="w-72">
+          <select
+            value={selectedUserEmail}
+            onChange={(e) => setSelectedUserEmail(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+          >
+            <option value="">— Choose user —</option>
+            {users.map(u => (
+              <option key={u.email} value={u.email}>
+                {u.email} {u.status === "connected" ? "✓" : "(invited)"}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* 1) List title / Start date / Timezone */}
+      <div className="mb-6">
+        <div className="mb-2">
+          <div className="text-sm font-semibold">1) Task list (Google)</div>
+          <div className="text-xs text-gray-500">
+            <b>Title</b> becomes the Google Tasks <b>list name</b>. Tasks you add below go inside that list.
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">Task list title</div>
+            <input
+              value={plan.title}
+              onChange={(e) => setPlan({ ...plan, title: e.target.value })}
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+              placeholder="e.g., Week of Sep 1"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">Plan start date</div>
+            <input
+              type="date"
+              value={plan.startDate}
+              onChange={(e) => setPlan({ ...plan, startDate: e.target.value })}
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">Timezone</div>
+            <select
+              value={plan.timezone}
+              onChange={(e) => setPlan({ ...plan, timezone: e.target.value })}
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              {TIMEZONES.map((tz) => (<option key={tz} value={tz}>{tz}</option>))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {/* 2) Add tasks */}
+      <DatePickerButton startDate={plan.startDate} />
+      <TasksEditorAdvanced startDate={plan.startDate} onAdd={(items)=>{
+        const withIds = items.map(t => ({ id: uid(), ...t }));
+        setTasks(prev => [...prev, ...withIds]);
+      }} />
+
+      {/* 3) Preview & deliver */}
+      <TaskComposerAndPreview
+        plan={plan}
+        tasks={tasks}
+        setTasks={setTasks}
+        replaceMode={replaceMode}
+        setReplaceMode={setReplaceMode}
+        resultMsg={resultMsg}
+        setResultMsg={setResultMsg}
+        selectedUserEmail={selectedUserEmail}
+        plannerEmail={plannerEmail}
+      />
+    </div>
+  );
 }
