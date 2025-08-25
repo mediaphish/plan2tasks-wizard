@@ -1,4 +1,4 @@
-/* src/App.jsx — Users→Plan wiring fix + everything else intact */
+/* src/App.jsx — composer clear fixes + users→plan wiring */
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
@@ -142,7 +142,7 @@ function AppShell({ plannerEmail }){
   const [view,setView]=useState("users"); // users | plan | settings
   const [inboxOpen,setInboxOpen]=useState(false);
   const [inboxBadge,setInboxBadge]=useState(0);
-  const [selectedUserEmail, setSelectedUserEmail] = useState(""); // << NEW: owned here
+  const [selectedUserEmail, setSelectedUserEmail] = useState("");
 
   // Load prefs & decide default view
   useEffect(()=>{
@@ -159,8 +159,7 @@ function AppShell({ plannerEmail }){
   async function loadBadge(){
     try{
       const qs=new URLSearchParams({ plannerEmail, status:"new" });
-      const r=await fetch(`/api/inbox?${qs.toString()}`);
-      const j=await r.json();
+      const r=await fetch(`/api/inbox?${qs.toString()}`); const j=await r.json();
       setInboxBadge((j.bundles||[]).length);
     }catch{}
   }
@@ -201,7 +200,7 @@ function AppShell({ plannerEmail }){
         {view==="users" && (
           <UsersView
             plannerEmail={plannerEmail}
-            onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }} // << switch view + set user
+            onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
           />
         )}
 
@@ -209,7 +208,7 @@ function AppShell({ plannerEmail }){
           <PlanView
             plannerEmail={plannerEmail}
             selectedUserEmail={selectedUserEmail}
-            setSelectedUserEmail={setSelectedUserEmail}
+            setSelectedUserEmail={(v)=>{ setSelectedUserEmail(v); }}
           />
         )}
 
@@ -235,7 +234,7 @@ function NavBtn({ active, onClick, icon, children }){
   );
 }
 
-/* -------------------- Inbox Drawer (unchanged) -------------------- */
+/* -------------------- Inbox Drawer -------------------- */
 function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   const [tab,setTab]=useState("new"); // new|assigned|archived
   const [rows,setRows]=useState([]);
@@ -472,7 +471,7 @@ function UsersView({ plannerEmail, onManage = () => {} }){
                 <td className="py-2 px-2">
                   <div className="flex justify-end">
                     <button
-                      onClick={(e)=>{ e.preventDefault(); onManage(r.email); }} // << call up into shell
+                      onClick={(e)=>{ e.preventDefault(); onManage(r.email); }}
                       className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-white"
                     >
                       Manage user <ArrowRight className="h-3 w-3" />
@@ -593,10 +592,19 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
     }
   })(); },[plannerEmail]);
 
-  // load last prefill if present
-  useEffect(()=>{ try{ const raw=localStorage.getItem("p2t_last_prefill"); if (raw){ const p=JSON.parse(raw);
-    if (p && p.ok && p.plan && Array.isArray(p.tasks)) setPrefill(p); } }catch{} },[]);
+  // One-time: load last prefill (from History restore) then clear it so it won’t re-apply
+  useEffect(()=>{ try{
+    const raw=localStorage.getItem("p2t_last_prefill");
+    if (raw){ const p=JSON.parse(raw);
+      if (p && p.ok && p.plan && Array.isArray(p.tasks)) { setPrefill(p); }
+      // consume & clear so it can't re-populate later
+      localStorage.removeItem("p2t_last_prefill");
+    }
+  }catch{} },[]);
   useEffect(()=>{ if (prefill){ setPlan(prefill.plan); setTasks(prefill.tasks.map(t=>({ id: uid(), ...t }))); } },[prefill]);
+
+  // NEW: whenever user selection changes, clear the composer to avoid cross-contamination
+  useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -952,7 +960,11 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
         body: JSON.stringify({ plannerEmail, userEmail: selectedUserEmail, plan, tasks: preview, mode: replaceMode?"replace":"append", listTitle: data.listTitle || plan.title })
       });
 
-      setTasks([]); // clear composer immediately
+      // ✅ Clear composer & any one-time prefill artifacts so preview empties reliably
+      setTasks([]);
+      localStorage.removeItem("p2t_last_prefill");
+      setReplaceMode(false);
+
       setMsg(`Success — ${data.created} created in “${data.listTitle||plan.title}”. Composer cleared.`);
     }catch(e){ setMsg("Error: "+e.message); }
   }
@@ -992,9 +1004,13 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
             </label>
             <button onClick={push} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Push to selected user</button>
             <button onClick={downloadICS} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><Download className="h-3 w-3" /> Export .ics</button>
+            {/* NEW: manual clear if ever needed */}
+            <button onClick={()=>{ setTasks([]); localStorage.removeItem("p2t_last_prefill"); setReplaceMode(false); setMsg("Preview cleared."); }}
+              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><X className="h-3 w-3" /> Clear preview</button>
           </div>
         </>
       )}
+      {msg && <div className="mt-2 text-xs text-gray-700">{msg}</div>}
     </div>
   );
 }
