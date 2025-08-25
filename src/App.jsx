@@ -1,9 +1,10 @@
-/* src/App.jsx — composer clear fixes + users→plan wiring */
+/* src/App.jsx — remove per-task Offset, rename plan date picker button, keep history */
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
-  Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X, CheckSquare, Square,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, RotateCcw
+  Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
+  CheckSquare, Square, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Plus, RotateCcw
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
@@ -12,25 +13,19 @@ import { supabaseClient } from "../lib/supabase-client.js";
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function parseISODate(s){ if (!s) return null; const d=new Date(`${s}T00:00:00`); return Number.isNaN(d.getTime())?null:d; }
-function addDaysSafe(startDateStr, n){ const b=parseISODate(startDateStr)||new Date(); const d=new Date(b); d.setDate(d.getDate()+(Number(n)||0)); return d; }
 function fmtDateYMD(d){ const y=d.getUTCFullYear(); const m=String(d.getUTCMonth()+1).padStart(2,"0"); const dd=String(d.getUTCDate()).padStart(2,"0"); return `${y}-${m}-${dd}`; }
-function fmtDayLabel(startDateStr, off){ try{ return format(addDaysSafe(startDateStr, off||0), "EEE MMM d"); }catch{return"";} }
 function daysBetweenUTC(a,b){ const ms=86400000; const da=Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),a.getUTCDate()); const db=Date.UTC(b.getUTCFullYear(),b.getUTCMonth(),b.getUTCDate()); return Math.round((db-da)/ms); }
-function lastDayOfMonthUTC(y,m0){ return new Date(Date.UTC(y,m0+1,0)).getUTCDate(); }
 function addMonthsUTC(dateUTC, months){
   const y=dateUTC.getUTCFullYear(), m=dateUTC.getUTCMonth(), d=dateUTC.getUTCDate();
   const nm=m+months, ny=y+Math.floor(nm/12), nmo=((nm%12)+12)%12;
-  const last=lastDayOfMonthUTC(ny,nmo), nd=Math.min(d,last);
+  const last=new Date(Date.UTC(ny,nmo+1,0)).getUTCDate();
+  const nd=Math.min(d,last);
   return new Date(Date.UTC(ny,nmo,nd));
 }
+function lastDayOfMonthUTC(y,m0){ return new Date(Date.UTC(y,m0+1,0)).getUTCDate(); }
 function firstWeekdayOfMonthUTC(y,m0,weekday){ const first=new Date(Date.UTC(y,m0,1)); const shift=(7+weekday-first.getUTCDay())%7; return new Date(Date.UTC(y,m0,1+shift)); }
 function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonthUTC(y,m0,weekday); const c=new Date(Date.UTC(y,m0, first.getUTCDate()+7*(nth-1))); return c.getUTCMonth()===m0?c:null; }
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
-function offsetFromStart(startDateStr, cellDateUTC){
-  const s=parseISODate(startDateStr); const sUTC=Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
-  const cUTC=Date.UTC(cellDateUTC.getUTCFullYear(), cellDateUTC.getUTCMonth(), cellDateUTC.getUTCDate());
-  return Math.round((cUTC - sUTC)/86400000);
-}
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 
 /* -------------------- ErrorBoundary -------------------- */
@@ -144,7 +139,6 @@ function AppShell({ plannerEmail }){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
 
-  // Load prefs & decide default view
   useEffect(()=>{
     (async ()=>{
       try{
@@ -155,7 +149,6 @@ function AppShell({ plannerEmail }){
     })();
   },[plannerEmail]);
 
-  // Fetch inbox badge (count New)
   async function loadBadge(){
     try{
       const qs=new URLSearchParams({ plannerEmail, status:"new" });
@@ -234,7 +227,76 @@ function NavBtn({ active, onClick, icon, children }){
   );
 }
 
-/* -------------------- Inbox Drawer -------------------- */
+/* -------------------- Generic modal + Calendar Grid (free pick) -------------------- */
+function Modal({ title, children, onClose }){
+  useEffect(()=>{ function onEsc(e){ if (e.key==="Escape") onClose?.(); } window.addEventListener("keydown", onEsc); return ()=>window.removeEventListener("keydown", onEsc); },[onClose]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold">{title}</div>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function CalendarGridFree({ initialDate, selectedDate, onPick }){
+  const init = parseISODate(initialDate) || new Date();
+  const sel = parseISODate(selectedDate) || init;
+  const [vm,setVm]=useState(()=>new Date(Date.UTC(sel.getUTCFullYear(), sel.getUTCMonth(), 1)));
+  function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
+  function gotoMonth(delta){ const y=vm.getUTCFullYear(), m=vm.getUTCMonth(); setVm(new Date(Date.UTC(y, m+delta, 1))); }
+
+  const year=vm.getUTCFullYear(), month=vm.getUTCMonth();
+  const firstOfMonth=new Date(Date.UTC(year, month, 1));
+  const startDow=firstOfMonth.getUTCDay();
+  const gridStart=new Date(Date.UTC(year, month, 1-startDow));
+  const weeks=Array.from({length:6}).map((_,w)=>Array.from({length:7}).map((_,d)=>{
+    const cell=new Date(gridStart); cell.setUTCDate(gridStart.getUTCDate()+(w*7+d));
+    const isSameMonth=cell.getUTCMonth()===month;
+    const isSelected=fmtDateYMD(cell)===fmtDateYMD(sel);
+    return {cell,isSameMonth,isSelected,label:String(cell.getUTCDate())};
+  }));
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-12)} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-1)} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
+          <div className="px-2 text-sm font-semibold">{monthLabel(vm)}</div>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
+        </div>
+        <button className="rounded-lg border px-2 py-1 text-xs"
+          onClick={()=>{ setVm(new Date(Date.UTC(init.getUTCFullYear(), init.getUTCMonth(), 1))); }}>
+          Jump to current
+        </button>
+      </div>
+      <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
+        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><div key={d}>{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {weeks.map((row,ri)=>row.map((c,ci)=>(
+          <button key={`${ri}-${ci}`} type="button"
+            className={cn("h-8 w-8 rounded-full text-xs flex items-center justify-center transition",
+              c.isSelected?"bg-cyan-600 text-white":"hover:bg-gray-100",
+              !c.isSameMonth && !c.isSelected ? "text-gray-400":"text-gray-700")}
+            onClick={()=>onPick?.(fmtDateYMD(c.cell))}
+          >
+            {c.label}
+          </button>
+        )))}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------- Inbox Drawer (unchanged) -------------------- */
 function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   const [tab,setTab]=useState("new"); // new|assigned|archived
   const [rows,setRows]=useState([]);
@@ -258,7 +320,6 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
 
   function toggle(id){ const n=new Set(sel); n.has(id)?n.delete(id):n.add(id); setSel(n); }
   function setAll(on){ setSel(on? new Set(rows.map(r=>r.id)) : new Set()); }
-
   async function doAction(action, ids){
     const ep = action==="archive" ? "/api/inbox/archive" : action==="restore" ? "/api/inbox/restore" : "/api/inbox/delete";
     await fetch(ep, { method:"POST", headers:{ "Content-Type":"application/json" },
@@ -266,15 +327,15 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
     });
     await load();
   }
-  async function assignRow(row){
+  async function assignRow(r){
     if (!assignTo) return alert("Choose a user first.");
-    const r = await fetch("/api/inbox/assign", { method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ plannerEmail, inboxId: row.id, userEmail: assignTo })
+    const res = await fetch("/api/inbox/assign", { method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ plannerEmail, inboxId: r.id, userEmail: assignTo })
     });
-    const j = await r.json();
-    if (!r.ok) return alert(j.error||"Assign failed");
-    if (autoArchive) await doAction("archive", [row.id]); else await load();
-    alert(`Assigned "${row.title}" to ${assignTo}. Open Plan to deliver.`);
+    const j = await res.json();
+    if (!res.ok) return alert(j.error||"Assign failed");
+    if (autoArchive) await doAction("archive", [r.id]); else await load();
+    alert(`Assigned "${r.title}" to ${assignTo}. Open Plan to deliver.`);
   }
 
   return (
@@ -305,21 +366,20 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
           </div>
         </div>
 
-        {/* bulk bar */}
         <div className="mb-2 flex items-center justify-between text-xs">
           <button onClick={()=>setAll(sel.size!==rows.length)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
             {sel.size===rows.length && rows.length>0 ? <CheckSquare className="h-3 w-3"/> : <Square className="h-3 w-3" />} Select all
           </button>
           <div className="flex items-center gap-2">
             {tab!=="archived" && (
-              <button onClick={()=>setConfirm({action:"archive", ids:Array.from(sel), text:`Archive ${sel.size} bundle(s)?`})}
+              <button onClick={()=>doAction("archive", Array.from(sel))}
                 className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3"/> Archive</button>
             )}
             {tab==="archived" && (
-              <button onClick={()=>setConfirm({action:"restore", ids:Array.from(sel), text:`Restore ${sel.size} bundle(s)?`})}
+              <button onClick={()=>doAction("restore", Array.from(sel))}
                 className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3"/> Restore</button>
             )}
-            <button onClick={()=>setConfirm({action:"delete", ids:Array.from(sel), text:`Permanently delete ${sel.size} bundle(s)? This cannot be undone.`})}
+            <button onClick={()=>doAction("delete", Array.from(sel))}
               className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"><Trash2 className="h-3 w-3"/> Delete…</button>
           </div>
         </div>
@@ -354,11 +414,11 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
                         <button onClick={()=>assignRow(r)} className="rounded-lg bg-cyan-600 px-2 py-1 text-white">Assign</button>
                       )}
                       {tab!=="archived" ? (
-                        <button onClick={()=>setConfirm({action:"archive", ids:[r.id], text:`Archive “${r.title}”?`})} className="rounded-lg border px-2 py-1">Archive</button>
+                        <button onClick={()=>doAction("archive", [r.id])} className="rounded-lg border px-2 py-1">Archive</button>
                       ) : (
-                        <button onClick={()=>setConfirm({action:"restore", ids:[r.id], text:`Restore “${r.title}”?`})} className="rounded-lg border px-2 py-1">Restore</button>
+                        <button onClick={()=>doAction("restore", [r.id])} className="rounded-lg border px-2 py-1">Restore</button>
                       )}
-                      <button onClick={()=>setConfirm({action:"delete", ids:[r.id], text:`Permanently delete “${r.title}”? This cannot be undone.`})}
+                      <button onClick={()=>doAction("delete", [r.id])}
                         className="rounded-lg border border-red-300 text-red-700 px-2 py-1">Delete…</button>
                     </div>
                   </td>
@@ -371,34 +431,12 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
           </table>
         </div>
 
-        {/* confirm modal */}
-        {confirm && (
-          <div className="fixed inset-0 z-50">
-            <div className="absolute inset-0" />
-            <div className="fixed inset-0 flex items-center justify-center">
-              <div className="absolute inset-0 bg-black/40" onClick={()=>setConfirm(null)} />
-              <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
-                <div className="mb-2 text-sm font-semibold">Please confirm</div>
-                <div className="mb-3 text-xs text-gray-700 whitespace-pre-wrap">{confirm.text}</div>
-                <div className="flex justify-end gap-2">
-                  <button onClick={()=>setConfirm(null)} className="rounded-lg border px-3 py-1.5 text-xs">Cancel</button>
-                  <button
-                    onClick={async ()=>{ const {action,ids}=confirm; setConfirm(null); await doAction(action, ids); }}
-                    className={cn("rounded-lg px-3 py-1.5 text-xs text-white", confirm.action==="delete"?"bg-red-600":"bg-cyan-600")}>
-                    {confirm.action==="delete"?"Delete":confirm.action==="archive"?"Archive":"Restore"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
       </div>
     </div>
   );
 }
 
-/* -------------------- Users (table) -------------------- */
+/* -------------------- Users table -------------------- */
 function UsersView({ plannerEmail, onManage = () => {} }){
   const [status,setStatus]=useState("all");
   const [q,setQ]=useState("");
@@ -580,6 +618,7 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
   const [replaceMode,setReplaceMode]=useState(false);
   const [msg,setMsg]=useState("");
   const [prefill, setPrefill] = useState(null);
+  const [planDateOpen,setPlanDateOpen]=useState(false);
 
   // Fetch users & set default selected if not set
   useEffect(()=>{ (async ()=>{
@@ -597,13 +636,12 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
     const raw=localStorage.getItem("p2t_last_prefill");
     if (raw){ const p=JSON.parse(raw);
       if (p && p.ok && p.plan && Array.isArray(p.tasks)) { setPrefill(p); }
-      // consume & clear so it can't re-populate later
       localStorage.removeItem("p2t_last_prefill");
     }
   }catch{} },[]);
   useEffect(()=>{ if (prefill){ setPlan(prefill.plan); setTasks(prefill.tasks.map(t=>({ id: uid(), ...t }))); } },[prefill]);
 
-  // NEW: whenever user selection changes, clear the composer to avoid cross-contamination
+  // Clear composer on user change
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
   return (
@@ -622,9 +660,48 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         </div>
       </div>
 
-      <PlanBasics plan={plan} setPlan={setPlan} />
-      <DatePickButton startDate={plan.startDate} />
-      <TaskEditor startDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
+      {/* Plan basics (no inline date input) */}
+      <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Task list title</div>
+          <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
+        </label>
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Timezone</div>
+          <select value={plan.timezone} onChange={(e)=>setPlan({...plan, timezone:e.target.value})}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
+          </select>
+        </label>
+        <div className="block">
+          <div className="mb-1 text-sm font-medium">Plan start date</div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={()=>setPlanDateOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+              <Calendar className="h-4 w-4" /> Choose Plan Start Date
+            </button>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+              {format(parseISODate(plan.startDate)||new Date(),"EEE MMM d, yyyy")}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {planDateOpen && (
+        <Modal title="Choose Plan Start Date" onClose={()=>setPlanDateOpen(false)}>
+          <CalendarGridFree
+            initialDate={plan.startDate}
+            selectedDate={plan.startDate}
+            onPick={(ymd)=>{ setPlan({...plan, startDate: ymd}); setPlanDateOpen(false); }}
+          />
+        </Modal>
+      )}
+
+      <TaskEditor
+        planStartDate={plan.startDate}
+        onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])}
+      />
 
       <ComposerPreview
         plannerEmail={plannerEmail}
@@ -643,122 +720,12 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
   );
 }
 
-function PlanBasics({ plan, setPlan }){
-  return (
-    <div className="mb-4 grid grid-cols-1 gap-4 md:grid-cols-3">
-      <label className="block">
-        <div className="mb-1 text-sm font-medium">Task list title</div>
-        <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})}
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
-      </label>
-      <label className="block">
-        <div className="mb-1 text-sm font-medium">Plan start date</div>
-        <input type="date" value={plan.startDate} onChange={(e)=>setPlan({...plan, startDate:e.target.value})}
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-      </label>
-      <label className="block">
-        <div className="mb-1 text-sm font-medium">Timezone</div>
-        <select value={plan.timezone} onChange={(e)=>setPlan({...plan, timezone:e.target.value})}
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-          {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
-        </select>
-      </label>
-    </div>
-  );
-}
-
-/* ---- Date picker (grid) ---- */
-function Modal({ title, children, onClose }){
-  useEffect(()=>{ function onEsc(e){ if (e.key==="Escape") onClose?.(); } window.addEventListener("keydown", onEsc); return ()=>window.removeEventListener("keydown", onEsc); },[onClose]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-sm font-semibold">{title}</div>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100" aria-label="Close"><X className="h-4 w-4" /></button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-function CalendarGrid({ startDate, valueOffset=0, onPickOffset }){
-  const start=parseISODate(startDate)||new Date();
-  const [vm,setVm]=useState(()=>new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
-  const maxDays=180;
-  const startUTC=new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
-  const endUTC=new Date(startUTC.getTime()+maxDays*86400000);
-  const selectedUTC=new Date(startUTC.getTime()+valueOffset*86400000);
-  function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
-  function gotoMonth(delta){ const y=vm.getUTCFullYear(), m=vm.getUTCMonth(); setVm(new Date(Date.UTC(y, m+delta, 1))); }
-  const year=vm.getUTCFullYear(), month=vm.getUTCMonth();
-  const firstOfMonth=new Date(Date.UTC(year, month, 1));
-  const startDow=firstOfMonth.getUTCDay();
-  const gridStart=new Date(Date.UTC(year, month, 1-startDow));
-  const weeks=Array.from({length:6}).map((_,w)=>Array.from({length:7}).map((_,d)=>{
-    const cell=new Date(gridStart); cell.setUTCDate(gridStart.getUTCDate()+(w*7+d));
-    const isSameMonth=cell.getUTCMonth()===month;
-    const isDisabled=cell<startUTC||cell>endUTC;
-    const isSelected=fmtDateYMD(cell)===fmtDateYMD(selectedUTC);
-    return {cell,isSameMonth,isDisabled,isSelected,label:String(cell.getUTCDate())};
-  }));
-  return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1">
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-12)} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(-1)} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
-          <div className="px-2 text-sm font-semibold">{monthLabel(vm)}</div>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
-        </div>
-        <button className="rounded-lg border px-2 py-1 text-xs"
-          onClick={()=>{ setVm(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))); }}>
-          Jump to plan start
-        </button>
-      </div>
-      <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
-        {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><div key={d}>{d}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {weeks.map((row,ri)=>row.map((c,ci)=>(
-          <button key={`${ri}-${ci}`} type="button"
-            className={cn("h-8 w-8 rounded-full text-xs flex items-center justify-center transition",
-              c.isDisabled?"text-gray-300 cursor-not-allowed":c.isSelected?"bg-cyan-600 text-white":"hover:bg-gray-100",
-              !c.isSameMonth && !c.isDisabled && !c.isSelected ? "text-gray-400":"text-gray-700")}
-            onClick={()=>{ if (c.isDisabled) return; const off=offsetFromStart(startDate, c.cell); onPickOffset?.(off); }}>
-            {c.label}
-          </button>
-        )))}
-      </div>
-    </div>
-  );
-}
-function DatePickButton({ startDate }){
-  const [open,setOpen]=useState(false); const [offset,setOffset]=useState(0);
-  const label=fmtDayLabel(startDate, offset);
-  return (
-    <div className="mb-3 flex items-center gap-2">
-      <button type="button" onClick={()=>setOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
-        <Calendar className="h-4 w-4" /> Pick date
-      </button>
-      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">Selected: <b>{label}</b></div>
-      {open && (
-        <Modal title="Choose a date" onClose={()=>setOpen(false)}>
-          <CalendarGrid startDate={startDate} valueOffset={offset}
-            onPickOffset={(o)=>{ setOffset(o); }} />
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-/* ---- Task editor with recurrence ---- */
-function TaskEditor({ startDate, onAdd }){
+/* ---- Task editor with Task Date picker & recurrence ---- */
+function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
-  const [baseOffset,setBaseOffset]=useState(0);
+  const [taskDate,setTaskDate]=useState(planStartDate); // YYYY-MM-DD
+  const [taskDateOpen,setTaskDateOpen]=useState(false);
   const [time,setTime]=useState("");
   const [dur,setDur]=useState(60);
 
@@ -769,33 +736,41 @@ function TaskEditor({ startDate, onAdd }){
   const [untilDate,setUntilDate]=useState("");
   const [horizonMonths,setHorizonMonths]=useState(6);
   const [weeklyDays,setWeeklyDays]=useState([false,true,false,true,false,false,false]);
-  const [monthlyMode,setMonthlyMode]=useState("dom");
+  const [monthlyMode,setMonthlyMode]=useState("dom"); // dom|dow
+
+  useEffect(()=>{ if (!taskDate) setTaskDate(planStartDate); },[planStartDate]);
 
   function generate(){
     const name=title.trim(); if (!name) return;
-    const base=addDaysSafe(startDate, Number(baseOffset)||0);
+    const planStart=parseISODate(planStartDate)||new Date();
+    const base=parseISODate(taskDate)||planStart;
+
     const baseObj={ title:name, time: time || undefined, durationMins: (Number(dur)>0?Number(dur):60), notes };
     const added=[];
-    const start=parseISODate(startDate);
-    function pushIfOnOrAfter(d){ const off=daysBetweenUTC(start,d); if (d>=base) added.push({ ...baseObj, dayOffset: off }); }
+    function push(d){ const off=daysBetweenUTC(planStart, d); added.push({ ...baseObj, dayOffset: off }); }
+
     const step=Math.max(1, Number(interval)||1);
 
-    if (repeat==="none"){ pushIfOnOrAfter(base); }
+    if (repeat==="none"){ push(base); }
     if (repeat==="daily"){
       if (endMode==="count"){ const n=Math.max(1, Number(count)||1);
-        for (let i=0;i<n;i++){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); pushIfOnOrAfter(d); } }
-      else if (endMode==="until"){ const until=parseISODate(untilDate); let i=0; while (true){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); if (d>until) break; pushIfOnOrAfter(d); if(++i>1000) break; } }
-      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let i=0; while (true){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); if (d>end) break; pushIfOnOrAfter(d); if(++i>2000) break; } }
+        for (let i=0;i<n;i++){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); push(d); } }
+      else if (endMode==="until"){ const until=parseISODate(untilDate); let i=0; while(true){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); if (d>until) break; push(d); if(++i>1000) break; } }
+      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let i=0; while(true){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); if (d>end) break; push(d); if(++i>2000) break; } }
     }
     if (repeat==="weekly"){
       const checked=weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
       if (checked.length===0) { alert("Pick at least one weekday."); return; }
-      const baseWeekday=base.getUTCDay(); const baseStartOfWeek=new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate()-baseWeekday);
-      const emitWeek=(weekIndex)=>{ for(const dow of checked){ const d=new Date(baseStartOfWeek); d.setUTCDate(baseStartOfWeek.getUTCDate()+dow+weekIndex*7*step); pushIfOnOrAfter(d); } };
+      const baseWeekday=base.getUTCDay();
+      const baseStartOfWeek=new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate()-baseWeekday);
+      const emitWeek=(weekIndex)=>{ for(const dow of checked){ const d=new Date(baseStartOfWeek); d.setUTCDate(baseStartOfWeek.getUTCDate()+dow+weekIndex*7*step); if (d>=base) push(d); } };
       if (endMode==="count"){ const n=Math.max(1, Number(count)||1); let emitted=0, week=0; while (emitted<n && week<520){ const before=added.length; emitWeek(week); emitted+=(added.length-before); week++; } if (added.length>n) added.length=n; }
       else if (endMode==="until"){ const until=parseISODate(untilDate); let week=0; while (week<520){ const before=added.length; emitWeek(week);
-        if (added.length>before){ const last=addDaysSafe(startDate, added[added.length-1].dayOffset||0); if (last>until){ while (added.length && addDaysSafe(startDate, added[added.length-1].dayOffset||0)>until) added.pop(); break; } } week++; } }
-      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let week=0; while (week<520){ emitWeek(week); const last=added.length?addDaysSafe(startDate, added[added.length-1].dayOffset||0):base; if (last>end) break; week++; } }
+        if (added.length>before){ const lastIdx=added.length-1; const last=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); last.setUTCDate(last.getUTCDate()+added[lastIdx].dayOffset);
+          if (last>until){ while (added.length){ const test=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); test.setUTCDate(test.getUTCDate()+added[added.length-1].dayOffset); if (test<=until) break; added.pop(); } break; } } week++; } }
+      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let week=0; while (week<520){ emitWeek(week);
+        const lastDate=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added.length?added[added.length-1].dayOffset:0; lastDate.setUTCDate(lastDate.getUTCDate()+lastOff);
+        if (lastDate>end) break; week++; } }
     }
     if (repeat==="monthly"){
       const by=base.getUTCFullYear(), bm=base.getUTCMonth(), bd=base.getUTCDate(), bw=base.getUTCDay();
@@ -807,9 +782,9 @@ function TaskEditor({ startDate, onAdd }){
         ? new Date(Date.UTC(y,m0, Math.min(bd, lastDayOfMonthUTC(y,m0))))
         : (isLast ? lastWeekdayOfMonthUTC(y,m0,bw) : (nthWeekdayOfMonthUTC(y,m0,bw, Math.max(1,nth)) || lastWeekdayOfMonthUTC(y,m0,bw)));
       if (endMode==="count"){ const n=Math.max(1, Number(count)||1);
-        for (let i=0;i<n;i++){ const t=addMonthsUTC(base, i*step); pushIfOnOrAfter(compute(t.getUTCFullYear(), t.getUTCMonth())); } }
-      else if (endMode==="until"){ const until=parseISODate(untilDate); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const d=compute(t.getUTCFullYear(), t.getUTCMonth()); if (d>until) break; pushIfOnOrAfter(d); i++; } }
-      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||12)); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const d=compute(t.getUTCFullYear(), t.getUTCMonth()); if (d>end) break; pushIfOnOrAfter(d); i++; } }
+        for (let i=0;i<n;i++){ const t=addMonthsUTC(base, i*step); push(compute(t.getUTCFullYear(), t.getUTCMonth())); } }
+      else if (endMode==="until"){ const until=parseISODate(untilDate); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const d=compute(t.getUTCFullYear(), t.getUTCMonth()); if (d>until) break; push(d); i++; } }
+      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||12)); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const d=compute(t.getUTCFullYear(), t.getUTCMonth()); if (d>end) break; push(d); i++; } }
     }
 
     added.sort((a,b)=>(a.dayOffset||0)-(b.dayOffset||0) || (a.time||"").localeCompare(b.time||""));
@@ -827,10 +802,18 @@ function TaskEditor({ startDate, onAdd }){
           <div className="mb-1 text-sm font-medium">Task title</div>
           <input value={title} onChange={(e)=>setTitle(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Strength training" />
         </label>
-        <label className="block">
-          <div className="mb-1 text-sm font-medium">Offset (days from plan start)</div>
-          <input type="number" value={baseOffset} onChange={(e)=>setBaseOffset(Number(e.target.value)||0)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-        </label>
+        <div className="block">
+          <div className="mb-1 text-sm font-medium">Task date</div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={()=>setTaskDateOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
+              <Calendar className="h-4 w-4" /> Choose Task Date
+            </button>
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+              {format(parseISODate(taskDate)||new Date(),"EEE MMM d, yyyy")}
+            </div>
+          </div>
+        </div>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
           <input type="time" value={time} onChange={(e)=>setTime(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
@@ -840,6 +823,16 @@ function TaskEditor({ startDate, onAdd }){
           <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
         </label>
       </div>
+
+      {taskDateOpen && (
+        <Modal title="Choose Task Date" onClose={()=>setTaskDateOpen(false)}>
+          <CalendarGridFree
+            initialDate={taskDate || planStartDate}
+            selectedDate={taskDate || planStartDate}
+            onPick={(ymd)=>{ setTaskDate(ymd); setTaskDateOpen(false); }}
+          />
+        </Modal>
+      )}
 
       <label className="block mb-3">
         <div className="mb-1 text-sm font-medium">Notes (optional)</div>
@@ -894,7 +887,7 @@ function TaskEditor({ startDate, onAdd }){
 
       <div className="mt-3 flex items-center justify-between">
         <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"><Plus className="h-4 w-4" /> Add task(s)</button>
-        <button onClick={()=>{ setTitle(""); setNotes(""); setTime(""); setDur(60); setRepeat("none"); setBaseOffset(0); }} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><RotateCcw className="h-3 w-3" /> Reset fields</button>
+        <button onClick={()=>{ setTitle(""); setNotes(""); setTime(""); setDur(60); setRepeat("none"); setTaskDate(planStartDate); }} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><RotateCcw className="h-3 w-3" /> Reset fields</button>
       </div>
     </div>
   );
@@ -960,7 +953,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
         body: JSON.stringify({ plannerEmail, userEmail: selectedUserEmail, plan, tasks: preview, mode: replaceMode?"replace":"append", listTitle: data.listTitle || plan.title })
       });
 
-      // ✅ Clear composer & any one-time prefill artifacts so preview empties reliably
+      // Clear composer
       setTasks([]);
       localStorage.removeItem("p2t_last_prefill");
       setReplaceMode(false);
@@ -970,7 +963,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   }
 
   const groups=useMemo(()=>{
-    const map=new Map(); for (const it of preview){ const d=addDaysSafe(plan.startDate, it.dayOffset||0); const ymd=fmtDateYMD(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))); if(!map.has(ymd)) map.set(ymd, []); map.get(ymd).push(it); }
+    const map=new Map(); for (const it of preview){ const d=new Date(`${plan.startDate}T00:00:00Z`); d.setUTCDate(d.getUTCDate()+(it.dayOffset||0)); const ymd=fmtDateYMD(d); if(!map.has(ymd)) map.set(ymd, []); map.get(ymd).push(it); }
     return Array.from(map.entries()).sort(([a],[b])=>a.localeCompare(b)).map(([ymd, arr])=>({ ymd, items: arr.sort((a,b)=>(a.time||"").localeCompare(b.time||"")) }));
   },[preview, plan.startDate]);
 
@@ -1004,7 +997,6 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
             </label>
             <button onClick={push} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Push to selected user</button>
             <button onClick={downloadICS} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><Download className="h-3 w-3" /> Export .ics</button>
-            {/* NEW: manual clear if ever needed */}
             <button onClick={()=>{ setTasks([]); localStorage.removeItem("p2t_last_prefill"); setReplaceMode(false); setMsg("Preview cleared."); }}
               className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><X className="h-3 w-3" /> Clear preview</button>
           </div>
@@ -1015,7 +1007,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   );
 }
 
-/* ---- History (user) ---- */
+/* ---- History ---- */
 function HistoryPanel({ plannerEmail, userEmail }){
   const [tab,setTab]=useState("active"); const [rows,setRows]=useState([]); const [q,setQ]=useState("");
   const [sel,setSel]=useState(new Set()); const [confirm,setConfirm]=useState(null);
@@ -1060,17 +1052,16 @@ function HistoryPanel({ plannerEmail, userEmail }){
         </div>
       </div>
 
-      {/* bulk */}
       <div className="mb-2 flex items-center justify-between text-xs">
         <button onClick={()=>setAll(sel.size!==rows.length)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
           {sel.size===rows.length && rows.length>0 ? <CheckSquare className="h-3 w-3"/> : <Square className="h-3 w-3" />} Select all
         </button>
         <div className="flex items-center gap-2">
           {tab==="active"
-            ? <button onClick={()=>setConfirm({action:"archive", ids:Array.from(sel), text:`Archive ${sel.size} plan(s)?`})} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3" /> Archive</button>
-            : <button onClick={()=>setConfirm({action:"unarchive", ids:Array.from(sel), text:`Unarchive ${sel.size} plan(s)?`})} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3" /> Unarchive</button>
+            ? <button onClick={()=>doAction("archive", Array.from(sel))} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3" /> Archive</button>
+            : <button onClick={()=>doAction("unarchive", Array.from(sel))} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3" /> Unarchive</button>
           }
-          <button onClick={()=>setConfirm({action:"delete", ids:Array.from(sel), text:`Permanently delete ${sel.size} plan(s)? This cannot be undone.`})}
+          <button onClick={()=>doAction("delete", Array.from(sel))}
             className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"><Trash2 className="h-3 w-3" /> Delete…</button>
         </div>
       </div>
@@ -1103,10 +1094,10 @@ function HistoryPanel({ plannerEmail, userEmail }){
                     <button onClick={()=>restore(r.id,false)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">Restore</button>
                     <button onClick={()=>restore(r.id,true)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">Duplicate</button>
                     {tab==="active"
-                      ? <button onClick={()=>setConfirm({action:"archive", ids:[r.id], text:`Archive “${r.title}”?`})} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3" /></button>
-                      : <button onClick={()=>setConfirm({action:"unarchive", ids:[r.id], text:`Unarchive “${r.title}”?`})} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3" /></button>
+                      ? <button onClick={()=>doAction("archive", [r.id])} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3" /></button>
+                      : <button onClick={()=>doAction("unarchive", [r.id])} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3" /></button>
                     }
-                    <button onClick={()=>setConfirm({action:"delete", ids:[r.id], text:`Permanently delete “${r.title}”? This cannot be undone.`})}
+                    <button onClick={()=>doAction("delete", [r.id])}
                       className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"><Trash2 className="h-3 w-3" /></button>
                   </div>
                 </td>
@@ -1118,28 +1109,6 @@ function HistoryPanel({ plannerEmail, userEmail }){
           </tbody>
         </table>
       </div>
-
-      {/* confirm */}
-      {confirm && (
-        <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0" />
-          <div className="fixed inset-0 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40" onClick={()=>setConfirm(null)} />
-            <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
-              <div className="mb-2 text-sm font-semibold">Please confirm</div>
-              <div className="mb-3 text-xs text-gray-700 whitespace-pre-wrap">{confirm.text}</div>
-              <div className="flex justify-end gap-2">
-                <button onClick={()=>setConfirm(null)} className="rounded-lg border px-3 py-1.5 text-xs">Cancel</button>
-                <button onClick={async ()=>{ const {action, ids}=confirm; setConfirm(null); await doAction(action, ids); }}
-                  className={cn("rounded-lg px-3 py-1.5 text-xs text-white", confirm.action==="delete"?"bg-red-600":"bg-cyan-600")}>
-                  {confirm.action==="delete"?"Delete":confirm.action==="archive"?"Archive":"Unarchive"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
