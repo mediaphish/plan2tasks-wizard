@@ -1,5 +1,5 @@
-/* src/App.jsx — remove per-task Offset, rename plan date picker button, keep history */
-import React, { useEffect, useMemo, useState } from "react";
+/* src/App.jsx — Polishing pass: responsive, tables+pagination, toasts, spacing */
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
@@ -36,7 +36,7 @@ class ErrorBoundary extends React.Component{
   render(){
     if (this.state.error) {
       return (
-        <div className="min-h-screen bg-red-50 p-6">
+        <div className="min-h-screen bg-red-50 p-4 sm:p-6">
           <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-white p-4">
             <div className="text-red-700 font-bold mb-2">Something went wrong in the UI</div>
             <pre className="bg-red-100 p-3 text-xs text-red-900 overflow-auto rounded">{String(this.state.error?.message || this.state.error)}</pre>
@@ -46,6 +46,28 @@ class ErrorBoundary extends React.Component{
     }
     return this.props.children;
   }
+}
+
+/* -------------------- Toasts -------------------- */
+function Toasts({ items, dismiss }){
+  return (
+    <div className="fixed right-3 top-3 z-[60] flex flex-col gap-2">
+      {items.map(t=>(
+        <div key={t.id}
+          className={cn("rounded-xl px-3 py-2 shadow-sm border text-xs sm:text-sm",
+            t.type==="error" ? "bg-red-600 text-white border-red-700" :
+            t.type==="warn" ? "bg-amber-600 text-white border-amber-700" :
+            "bg-emerald-600 text-white border-emerald-700"
+          )}>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{t.title || (t.type==="error"?"Error":"Success")}</span>
+            <button className="ml-auto opacity-80 hover:opacity-100" onClick={()=>dismiss(t.id)} aria-label="Dismiss"><X className="h-3.5 w-3.5" /></button>
+          </div>
+          {t.message && <div className="mt-0.5 opacity-90">{t.message}</div>}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /* -------------------- Auth -------------------- */
@@ -68,22 +90,22 @@ function AuthScreen({ onSignedIn }){
     if (error) setMsg("Error: "+error.message);
   }
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-white to-gray-50 p-6">
-      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-xl font-bold mb-1">Plan2Tasks – Planner</h1>
-        <p className="text-sm text-gray-500 mb-4">Sign in to manage users and deliver task lists.</p>
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-white to-gray-50 p-4 sm:p-6">
+      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+        <h1 className="text-lg sm:text-xl font-bold mb-1">Plan2Tasks – Planner</h1>
+        <p className="text-xs sm:text-sm text-gray-500 mb-4">Sign in to manage users and deliver task lists.</p>
 
         <button onClick={handleGoogle}
-          className="w-full mb-4 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold hover:bg-gray-50">
+          className="w-full mb-3 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50">
           <img alt="" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="h-4 w-4" />
-          Continue with Google
+          <span className="whitespace-nowrap">Continue with Google</span>
         </button>
-        <div className="my-3 text-center text-xs text-gray-400">or</div>
+        <div className="my-2 text-center text-[11px] text-gray-400">or</div>
 
-        <label className="block mb-2 text-sm font-medium">Email</label>
+        <label className="block mb-1 text-xs sm:text-sm font-medium">Email</label>
         <input value={email} onChange={(e)=>setEmail(e.target.value)} type="email"
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-        <label className="block mb-2 text-sm font-medium">Password</label>
+          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
+        <label className="block mb-1 text-xs sm:text-sm font-medium">Password</label>
         <input value={pw} onChange={(e)=>setPw(e.target.value)} type="password"
           className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         {mode==="signup" ? (
@@ -139,6 +161,14 @@ function AppShell({ plannerEmail }){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
 
+  /* toasts */
+  const [toasts,setToasts]=useState([]);
+  const toast = useCallback((type, message, title) => {
+    const id=uid(); setToasts(ts=>[...ts,{id,type,message,title}]);
+    setTimeout(()=>setToasts(ts=>ts.filter(t=>t.id!==id)), 4500);
+  },[]);
+  const dismissToast = (id)=>setToasts(ts=>ts.filter(t=>t.id!==id));
+
   useEffect(()=>{
     (async ()=>{
       try{
@@ -159,34 +189,43 @@ function AppShell({ plannerEmail }){
   useEffect(()=>{ if (prefs.show_inbox_badge) loadBadge(); },[plannerEmail, prefs.show_inbox_badge]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-6">
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-4 sm:p-6">
+      <Toasts items={toasts} dismiss={dismissToast} />
       <div className="mx-auto max-w-6xl">
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="text-2xl font-bold">Plan2Tasks</div>
-            <nav className="ml-4 flex gap-2">
-              <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}>Users</NavBtn>
-              <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}>Plan</NavBtn>
-              <NavBtn active={view==="settings"} onClick={()=>setView("settings")} icon={<SettingsIcon className="h-4 w-4" />}>Settings</NavBtn>
+        <div className="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="text-xl sm:text-2xl font-bold">Plan2Tasks</div>
+            <nav className="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
+              <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}>
+                <span className="hidden sm:inline">Users</span>
+              </NavBtn>
+              <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}>
+                <span className="hidden sm:inline">Plan</span>
+              </NavBtn>
+              <NavBtn active={view==="settings"} onClick={()=>setView("settings")} icon={<SettingsIcon className="h-4 w-4" />}>
+                <span className="hidden sm:inline">Settings</span>
+              </NavBtn>
             </nav>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={()=>setInboxOpen(true)}
-              className="relative rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50"
+              className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap"
               title="Inbox (GPT imports)"
             >
-              <InboxIcon className="inline h-4 w-4 mr-1" />
-              Inbox
+              <InboxIcon className="inline h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Inbox</span>
               {prefs.show_inbox_badge && inboxBadge>0 && (
-                <span className="absolute -top-2 -right-2 rounded-full bg-cyan-600 px-2 py-[2px] text-[10px] font-bold text-white">
+                <span className="absolute -top-2 -right-2 rounded-full bg-cyan-600 px-1.5 py-[2px] text-[10px] font-bold text-white">
                   {inboxBadge}
                 </span>
               )}
             </button>
-            <span className="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm">Signed in: <b>{plannerEmail}</b></span>
-            <button onClick={()=>supabaseClient.auth.signOut()} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Sign out</button>
+            <span className="rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm whitespace-nowrap">
+              <span className="hidden sm:inline">Signed in:&nbsp;</span><b className="truncate inline-block max-w-[140px] align-bottom">{plannerEmail}</b>
+            </span>
+            <button onClick={()=>supabaseClient.auth.signOut()} className="rounded-xl bg-gray-900 px-2.5 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-black whitespace-nowrap">Sign out</button>
           </div>
         </div>
 
@@ -194,6 +233,7 @@ function AppShell({ plannerEmail }){
           <UsersView
             plannerEmail={plannerEmail}
             onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
+            toast={toast}
           />
         )}
 
@@ -202,16 +242,18 @@ function AppShell({ plannerEmail }){
             plannerEmail={plannerEmail}
             selectedUserEmail={selectedUserEmail}
             setSelectedUserEmail={(v)=>{ setSelectedUserEmail(v); }}
+            toast={toast}
           />
         )}
 
-        {view==="settings" && <SettingsView plannerEmail={plannerEmail} prefs={prefs} onChange={setPrefs} />}
+        {view==="settings" && <SettingsView plannerEmail={plannerEmail} prefs={prefs} onChange={(p)=>{ setPrefs(p); toast("success","Preferences saved."); }} />}
 
         {inboxOpen && (
           <InboxDrawer
             plannerEmail={plannerEmail}
             autoArchive={!!prefs.auto_archive_after_assign}
             onClose={async()=>{ setInboxOpen(false); await loadBadge(); }}
+            toast={toast}
           />
         )}
       </div>
@@ -221,17 +263,20 @@ function AppShell({ plannerEmail }){
 function NavBtn({ active, onClick, icon, children }){
   return (
     <button onClick={onClick}
-      className={cn("rounded-xl px-3 py-2 text-sm font-semibold", active?"bg-cyan-600 text-white":"bg-white border border-gray-300 hover:bg-gray-50")}>
+      className={cn(
+        "rounded-xl px-2.5 py-2 text-xs sm:text-sm font-semibold whitespace-nowrap",
+        active?"bg-cyan-600 text-white":"bg-white border border-gray-300 hover:bg-gray-50"
+      )}>
       <span className="inline-flex items-center gap-1">{icon}{children}</span>
     </button>
   );
 }
 
-/* -------------------- Generic modal + Calendar Grid (free pick) -------------------- */
+/* -------------------- Modal + Calendar Grid -------------------- */
 function Modal({ title, children, onClose }){
   useEffect(()=>{ function onEsc(e){ if (e.key==="Escape") onClose?.(); } window.addEventListener("keydown", onEsc); return ()=>window.removeEventListener("keydown", onEsc); },[onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="relative w-full max-w-md rounded-2xl bg-white p-4 shadow-xl">
         <div className="mb-2 flex items-center justify-between">
@@ -243,7 +288,6 @@ function Modal({ title, children, onClose }){
     </div>
   );
 }
-
 function CalendarGridFree({ initialDate, selectedDate, onPick }){
   const init = parseISODate(initialDate) || new Date();
   const sel = parseISODate(selectedDate) || init;
@@ -296,14 +340,18 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* -------------------- Inbox Drawer (unchanged) -------------------- */
-function InboxDrawer({ plannerEmail, autoArchive, onClose }){
+/* -------------------- Inbox Drawer -------------------- */
+function InboxDrawer({ plannerEmail, autoArchive, onClose, toast }){
   const [tab,setTab]=useState("new"); // new|assigned|archived
   const [rows,setRows]=useState([]);
   const [users,setUsers]=useState([]);
   const [assignTo,setAssignTo]=useState("");
   const [sel,setSel]=useState(new Set());
-  const [confirm,setConfirm]=useState(null);
+
+  // pagination
+  const [page,setPage]=useState(1); const pageSize=25;
+  const pageCount=Math.max(1, Math.ceil(rows.length/pageSize));
+  const pageRows = useMemo(()=> rows.slice((page-1)*pageSize, (page)*pageSize), [rows,page]);
 
   useEffect(()=>{ (async ()=>{
     const qs = new URLSearchParams({ op:"list", plannerEmail, status:"all" });
@@ -314,51 +362,54 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   async function load(){
     const qs=new URLSearchParams({ plannerEmail, status: tab });
     const r=await fetch(`/api/inbox?${qs.toString()}`); const j=await r.json();
-    setRows(j.bundles||[]); setSel(new Set());
+    setRows(j.bundles||[]); setSel(new Set()); setPage(1);
   }
   useEffect(()=>{ load(); },[plannerEmail, tab]);
 
   function toggle(id){ const n=new Set(sel); n.has(id)?n.delete(id):n.add(id); setSel(n); }
-  function setAll(on){ setSel(on? new Set(rows.map(r=>r.id)) : new Set()); }
+  function setAll(on){ setSel(on? new Set(pageRows.map(r=>r.id)) : new Set()); } // page-scoped select all
   async function doAction(action, ids){
+    if (!ids.length) return;
     const ep = action==="archive" ? "/api/inbox/archive" : action==="restore" ? "/api/inbox/restore" : "/api/inbox/delete";
-    await fetch(ep, { method:"POST", headers:{ "Content-Type":"application/json" },
+    const r = await fetch(ep, { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, bundleIds: ids })
     });
+    if (!r.ok){ const t=await r.text(); toast("error", t.slice(0,180)); return; }
     await load();
+    toast("success", `${action[0].toUpperCase()+action.slice(1)}d ${ids.length} bundle(s).`);
   }
   async function assignRow(r){
-    if (!assignTo) return alert("Choose a user first.");
+    if (!assignTo) return toast("warn","Choose a user first.");
     const res = await fetch("/api/inbox/assign", { method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, inboxId: r.id, userEmail: assignTo })
     });
     const j = await res.json();
-    if (!res.ok) return alert(j.error||"Assign failed");
+    if (!res.ok) { toast("error", j.error||"Assign failed"); return; }
     if (autoArchive) await doAction("archive", [r.id]); else await load();
-    alert(`Assigned "${r.title}" to ${assignTo}. Open Plan to deliver.`);
+    toast("success", `Assigned "${r.title}" to ${assignTo}.`);
   }
 
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute right-0 top-0 h-full w-full max-w-3xl bg-white border-l border-gray-200 shadow-xl p-5 overflow-y-auto">
-        <div className="mb-3 flex items-center justify-between">
+      <div className="absolute right-0 top-0 h-full w-full max-w-3xl bg-white border-l border-gray-200 shadow-xl p-4 sm:p-5 overflow-y-auto">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-sm font-semibold">Inbox (GPT imports)</div>
-            <div className="text-xs text-gray-500">Auto-archive after Assign: <b>{autoArchive ? "On" : "Off"}</b> · <a href="#" onClick={(e)=>{e.preventDefault(); alert("Change this in Settings.");}} className="underline">Change in Settings</a></div>
+            <div className="text-sm sm:text-base font-semibold">Inbox (GPT imports)</div>
+            <div className="text-[11px] sm:text-xs text-gray-500">Auto-archive after Assign: <b>{autoArchive ? "On" : "Off"}</b> · Change in <b>Settings</b>.</div>
           </div>
-          <button onClick={onClose} className="rounded-xl border px-3 py-2 text-sm"><X className="h-4 w-4" /></button>
+          <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs sm:text-sm whitespace-nowrap"><X className="h-4 w-4" /></button>
         </div>
 
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           {["new","assigned","archived"].map(t=>(
             <button key={t} onClick={()=>setTab(t)}
-              className={cn("rounded-xl px-3 py-2 text-xs font-semibold", tab===t?"bg-cyan-600 text-white":"bg-white border border-gray-300")}>
+              className={cn("rounded-xl px-3 py-2 text-xs sm:text-sm font-semibold whitespace-nowrap", tab===t?"bg-cyan-600 text-white":"bg-white border border-gray-300")}>
               {t==="new"?"New":t==="assigned"?"Assigned":"Archived"}
             </button>
           ))}
-          <div className="ml-auto flex items-center gap-2 text-xs">
-            <span>Assign to</span>
+          <div className="ml-auto flex items-center gap-2 text-xs sm:text-sm">
+            <span className="text-gray-600">Assign to</span>
             <select value={assignTo} onChange={(e)=>setAssignTo(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1">
               <option value="">—</option>
               {users.map(u=><option key={u.email} value={u.email}>{u.email} {u.status==="connected"?"✓":""}</option>)}
@@ -366,60 +417,60 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
           </div>
         </div>
 
-        <div className="mb-2 flex items-center justify-between text-xs">
-          <button onClick={()=>setAll(sel.size!==rows.length)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
-            {sel.size===rows.length && rows.length>0 ? <CheckSquare className="h-3 w-3"/> : <Square className="h-3 w-3" />} Select all
+        <div className="mb-2 flex flex-wrap items-center justify-between text-[11px] sm:text-xs gap-2">
+          <button onClick={()=>setAll(true)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap">
+            <CheckSquare className="h-3 w-3"/> Select page
           </button>
           <div className="flex items-center gap-2">
             {tab!=="archived" && (
               <button onClick={()=>doAction("archive", Array.from(sel))}
-                className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3"/> Archive</button>
+                className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap"><Archive className="h-3 w-3"/> Archive</button>
             )}
             {tab==="archived" && (
               <button onClick={()=>doAction("restore", Array.from(sel))}
-                className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3"/> Restore</button>
+                className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap"><ArchiveRestore className="h-3 w-3"/> Restore</button>
             )}
             <button onClick={()=>doAction("delete", Array.from(sel))}
-              className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"><Trash2 className="h-3 w-3"/> Delete…</button>
+              className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 whitespace-nowrap"><Trash2 className="h-3 w-3"/> Delete…</button>
           </div>
         </div>
 
         <div className="overflow-x-auto rounded-xl border">
-          <table className="w-full text-xs">
+          <table className="w-full text-xs table-fixed min-w-[720px]">
             <thead className="bg-gray-50">
               <tr className="text-left text-gray-500">
-                <th className="py-2 px-2"></th>
-                <th className="py-2 px-2">Title</th>
-                <th className="py-2 px-2">Items</th>
-                <th className="py-2 px-2">Start</th>
-                <th className="py-2 px-2">Status</th>
-                <th className="py-2 px-2">Assigned to</th>
-                <th className="py-2 px-2">Created</th>
-                <th className="py-2 px-2 text-right">Actions</th>
+                <th className="py-2 px-2 w-8"></th>
+                <th className="py-2 px-2 w-[35%]">Title</th>
+                <th className="py-2 px-2 w-16">Items</th>
+                <th className="py-2 px-2 w-28 whitespace-nowrap">Start</th>
+                <th className="py-2 px-2 w-24">Status</th>
+                <th className="py-2 px-2 w-[22%]">Assigned to</th>
+                <th className="py-2 px-2 w-36">Created</th>
+                <th className="py-2 px-2 w-40 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(r=>(
+              {pageRows.map(r=>(
                 <tr key={r.id} className="border-t">
                   <td className="py-2 px-2"><input type="checkbox" checked={sel.has(r.id)} onChange={()=>toggle(r.id)} /></td>
-                  <td className="py-2 px-2">{r.title}</td>
+                  <td className="py-2 px-2 truncate">{r.title}</td>
                   <td className="py-2 px-2">{r.count}</td>
-                  <td className="py-2 px-2">{r.start_date}</td>
+                  <td className="py-2 px-2 whitespace-nowrap">{r.start_date}</td>
                   <td className="py-2 px-2">{r.archived_at? "Archived" : r.assigned_user ? "Assigned" : "New"}</td>
-                  <td className="py-2 px-2">{r.assigned_user || "—"}</td>
-                  <td className="py-2 px-2">{new Date(r.created_at).toLocaleString()}</td>
+                  <td className="py-2 px-2 truncate">{r.assigned_user || "—"}</td>
+                  <td className="py-2 px-2 whitespace-nowrap">{new Date(r.created_at).toLocaleString()}</td>
                   <td className="py-2 px-2">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-1 sm:gap-2">
                       {tab!=="archived" && (
-                        <button onClick={()=>assignRow(r)} className="rounded-lg bg-cyan-600 px-2 py-1 text-white">Assign</button>
+                        <button onClick={()=>assignRow(r)} className="rounded-lg bg-cyan-600 px-2 py-1 text-white text-xs sm:text-sm whitespace-nowrap">Assign</button>
                       )}
                       {tab!=="archived" ? (
-                        <button onClick={()=>doAction("archive", [r.id])} className="rounded-lg border px-2 py-1">Archive</button>
+                        <button onClick={()=>doAction("archive", [r.id])} className="rounded-lg border px-2 py-1 text-xs sm:text-sm">Archive</button>
                       ) : (
-                        <button onClick={()=>doAction("restore", [r.id])} className="rounded-lg border px-2 py-1">Restore</button>
+                        <button onClick={()=>doAction("restore", [r.id])} className="rounded-lg border px-2 py-1 text-xs sm:text-sm">Restore</button>
                       )}
                       <button onClick={()=>doAction("delete", [r.id])}
-                        className="rounded-lg border border-red-300 text-red-700 px-2 py-1">Delete…</button>
+                        className="rounded-lg border border-red-300 text-red-700 px-2 py-1 text-xs sm:text-sm">Delete…</button>
                     </div>
                   </td>
                 </tr>
@@ -431,23 +482,40 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
           </table>
         </div>
 
+        {/* Pagination */}
+        {rows.length>pageSize && (
+          <div className="mt-3 flex items-center justify-between text-xs">
+            <div className="text-gray-600">Page {page} of {pageCount}</div>
+            <div className="flex items-center gap-2">
+              <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(1)} disabled={page===1}><ChevronsLeft className="h-3 w-3" /></button>
+              <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}><ChevronLeft className="h-3 w-3" /></button>
+              <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(p=>Math.min(pageCount,p+1))} disabled={page===pageCount}><ChevronRight className="h-3 w-3" /></button>
+              <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(pageCount)} disabled={page===pageCount}><ChevronsRight className="h-3 w-3" /></button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 /* -------------------- Users table -------------------- */
-function UsersView({ plannerEmail, onManage = () => {} }){
+function UsersView({ plannerEmail, onManage = () => {}, toast }){
   const [status,setStatus]=useState("all");
   const [q,setQ]=useState("");
   const [rows,setRows]=useState([]);
   const [addEmail,setAddEmail]=useState("");
   const [msg,setMsg]=useState("");
 
+  // pagination
+  const [page,setPage]=useState(1); const pageSize=25;
+  const pageRows = useMemo(()=> rows.slice((page-1)*pageSize, (page)*pageSize), [rows,page]);
+  const pageCount=Math.max(1, Math.ceil(rows.length/pageSize));
+
   async function load(){
     const qs=new URLSearchParams({ op:"list", plannerEmail, status, q });
     const r=await fetch(`/api/users?${qs.toString()}`);
-    const j=await r.json(); setRows(j.users||[]);
+    const j=await r.json(); setRows(j.users||[]); setPage(1);
   }
   useEffect(()=>{ load(); },[plannerEmail, status, q]);
 
@@ -457,62 +525,64 @@ function UsersView({ plannerEmail, onManage = () => {} }){
       body: JSON.stringify({ plannerEmail, userEmail: addEmail.trim() })
     });
     const j=await r.json();
-    if (!r.ok) return setMsg(j.error||"Invite failed");
+    if (!r.ok) { setMsg(j.error||"Invite failed"); toast("error", j.error||"Invite failed"); return; }
     setMsg(j.emailed ? "Invite created & emailed." : "Invite created. Email not configured.");
+    toast("success", "Invite created.");
     setAddEmail(""); await load();
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-lg font-semibold">Users</div>
-          <div className="text-xs text-gray-500">Add users and manage their task lists.</div>
+          <div className="text-base sm:text-lg font-semibold">Users</div>
+          <div className="text-[11px] sm:text-xs text-gray-500">Add users and manage their task lists.</div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="rounded-xl border border-gray-300 bg-white">
+          <div className="rounded-xl border border-gray-300 bg-white overflow-hidden">
             {["all","invited","connected"].map(s=>(
               <button key={s} onClick={()=>setStatus(s)}
-                className={cn("px-3 py-2 text-xs", status===s?"bg-cyan-600 text-white":"")}>
+                className={cn("px-2.5 py-1.5 text-xs sm:text-sm whitespace-nowrap", status===s?"bg-cyan-600 text-white":"")}>
                 {s[0].toUpperCase()+s.slice(1)}
               </button>
             ))}
           </div>
           <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
             <Search className="h-4 w-4 text-gray-400" />
-            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search users…" className="px-2 py-1 text-sm outline-none" />
+            <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search users…" className="px-2 py-1 text-sm outline-none w-36 sm:w-52" />
           </div>
         </div>
       </div>
 
-      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto]">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 sm:grid-cols-[1fr_auto]">
         <input value={addEmail} onChange={(e)=>setAddEmail(e.target.value)} type="email" placeholder="user@example.com"
           className="rounded-xl border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500" />
-        <button onClick={addUser} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Add user</button>
+        <button onClick={addUser} className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 whitespace-nowrap">Add user</button>
       </div>
-      <div className="mb-3 text-xs text-gray-600">{msg}</div>
+      <div className="mb-2 text-xs text-gray-600">{msg}</div>
 
       <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs table-fixed min-w-[560px]">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
-              <th className="py-2 px-2">Email</th>
-              <th className="py-2 px-2">Status</th>
-              <th className="py-2 px-2 text-right">Actions</th>
+              <th className="py-2 px-2 w-[55%]">Email</th>
+              <th className="py-2 px-2 w-[20%]">Status</th>
+              <th className="py-2 px-2 w-[25%] text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r=>(
+            {pageRows.map(r=>(
               <tr key={r.email} className="border-t">
-                <td className="py-2 px-2">{r.email}</td>
+                <td className="py-2 px-2 truncate">{r.email}</td>
                 <td className="py-2 px-2">{r.status==="connected"?"✓ connected":"invited"}</td>
                 <td className="py-2 px-2">
                   <div className="flex justify-end">
                     <button
                       onClick={(e)=>{ e.preventDefault(); onManage(r.email); }}
-                      className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2 py-1 text-white"
+                      className="inline-flex items-center gap-1 rounded-lg bg-gray-900 px-2.5 py-1.5 text-white text-xs sm:text-sm whitespace-nowrap"
                     >
-                      Manage user <ArrowRight className="h-3 w-3" />
+                      <span className="hidden sm:inline">Manage user</span>
+                      <ArrowRight className="h-3 w-3 sm:ml-0" />
                     </button>
                   </div>
                 </td>
@@ -524,6 +594,18 @@ function UsersView({ plannerEmail, onManage = () => {} }){
           </tbody>
         </table>
       </div>
+
+      {rows.length>pageSize && (
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <div className="text-gray-600">Page {page} of {pageCount}</div>
+          <div className="flex items-center gap-2">
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(1)} disabled={page===1}><ChevronsLeft className="h-3 w-3" /></button>
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}><ChevronLeft className="h-3 w-3" /></button>
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(p=>Math.min(pageCount,p+1))} disabled={page===pageCount}><ChevronRight className="h-3 w-3" /></button>
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(pageCount)} disabled={page===pageCount}><ChevronsRight className="h-3 w-3" /></button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -540,14 +622,13 @@ function SettingsView({ plannerEmail, prefs, onChange }){
     const j=await r.json();
     if (!r.ok) return alert(j.error||"Save failed");
     onChange(j.prefs || local);
-    alert("Preferences saved.");
   }
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
       <div className="mb-3">
-        <div className="text-lg font-semibold">Settings</div>
-        <div className="text-xs text-gray-500">Personalize defaults and Inbox behavior.</div>
+        <div className="text-base sm:text-lg font-semibold">Settings</div>
+        <div className="text-[11px] sm:text-xs text-gray-500">Defaults & Inbox behavior.</div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -607,7 +688,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
 
 /* -------------------- Plan (composer + history) -------------------- */
 
-function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
+function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail, toast }){
   const [users,setUsers]=useState([]);
   const [plan,setPlan]=useState({
     title: "Weekly Plan",
@@ -620,7 +701,6 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
   const [prefill, setPrefill] = useState(null);
   const [planDateOpen,setPlanDateOpen]=useState(false);
 
-  // Fetch users & set default selected if not set
   useEffect(()=>{ (async ()=>{
     const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
@@ -631,7 +711,6 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
     }
   })(); },[plannerEmail]);
 
-  // One-time: load last prefill (from History restore) then clear it so it won’t re-apply
   useEffect(()=>{ try{
     const raw=localStorage.getItem("p2t_last_prefill");
     if (raw){ const p=JSON.parse(raw);
@@ -641,17 +720,16 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
   }catch{} },[]);
   useEffect(()=>{ if (prefill){ setPlan(prefill.plan); setTasks(prefill.tasks.map(t=>({ id: uid(), ...t }))); } },[prefill]);
 
-  // Clear composer on user change
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-      <div className="mb-4 flex items-center justify-between">
+    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-lg font-semibold">Plan (create & deliver tasks)</div>
-          <div className="text-xs text-gray-500">Title becomes the Google Tasks list name. Add tasks, preview, then push.</div>
+          <div className="text-base sm:text-lg font-semibold">Plan (create & deliver tasks)</div>
+          <div className="text-[11px] sm:text-xs text-gray-500">Title becomes the Google Tasks list name. Add tasks, preview, then push.</div>
         </div>
-        <div className="w-72">
+        <div className="w-full sm:w-72">
           <select value={selectedUserEmail || ""} onChange={(e)=>setSelectedUserEmail(e.target.value)}
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             <option value="">— Choose user —</option>
@@ -660,8 +738,8 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         </div>
       </div>
 
-      {/* Plan basics (no inline date input) */}
-      <div className="mb-3 grid grid-cols-1 gap-4 md:grid-cols-3">
+      {/* Plan basics */}
+      <div className="mb-3 grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-3">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Task list title</div>
           <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})}
@@ -678,10 +756,10 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
           <div className="mb-1 text-sm font-medium">Plan start date</div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={()=>setPlanDateOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
-              <Calendar className="h-4 w-4" /> Choose Plan Start Date
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
+              <Calendar className="h-4 w-4" /> <span className="hidden sm:inline">Choose Plan Start Date</span><span className="sm:hidden">Pick date</span>
             </button>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm whitespace-nowrap">
               {format(parseISODate(plan.startDate)||new Date(),"EEE MMM d, yyyy")}
             </div>
           </div>
@@ -712,15 +790,15 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         replaceMode={replaceMode}
         setReplaceMode={setReplaceMode}
         msg={msg}
-        setMsg={setMsg}
+        setMsg={(m)=>{ setMsg(m); if (m.startsWith("Success")) toast("success", m); if (m.startsWith("Error")) toast("error", m); }}
       />
 
-      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} />
+      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} toast={toast} />
     </div>
   );
 }
 
-/* ---- Task editor with Task Date picker & recurrence ---- */
+/* ---- Task editor ---- */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -793,11 +871,11 @@ function TaskEditor({ planStartDate, onAdd }){
     setTitle(""); setNotes("");
   }
 
-  const pill = (on)=>cn("rounded-full px-3 py-1 text-xs border", on?"bg-cyan-600 text-white border-cyan-600":"bg-white text-gray-700 border-gray-300 hover:bg-gray-50");
+  const pill = (on)=>cn("rounded-full px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs border whitespace-nowrap", on?"bg-cyan-600 text-white border-cyan-600":"bg-white text-gray-700 border-gray-300 hover:bg-gray-50");
 
   return (
-    <div className="rounded-xl border border-gray-200 p-4">
-      <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+    <div className="rounded-xl border border-gray-200 p-3 sm:p-4">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-4">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Task title</div>
           <input value={title} onChange={(e)=>setTitle(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Strength training" />
@@ -806,10 +884,10 @@ function TaskEditor({ planStartDate, onAdd }){
           <div className="mb-1 text-sm font-medium">Task date</div>
           <div className="flex items-center gap-2">
             <button type="button" onClick={()=>setTaskDateOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50">
-              <Calendar className="h-4 w-4" /> Choose Task Date
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
+              <Calendar className="h-4 w-4" /> <span className="hidden sm:inline">Choose Task Date</span><span className="sm:hidden">Pick date</span>
             </button>
-            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
+            <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm whitespace-nowrap">
               {format(parseISODate(taskDate)||new Date(),"EEE MMM d, yyyy")}
             </div>
           </div>
@@ -839,13 +917,13 @@ function TaskEditor({ planStartDate, onAdd }){
         <textarea value={notes} onChange={(e)=>setNotes(e.target.value)} rows={3} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
       </label>
 
-      <div className="mb-2 flex flex-wrap items-center gap-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2 sm:gap-3">
         <div className="text-sm font-medium">Repeat</div>
         <select value={repeat} onChange={(e)=>setRepeat(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm">
           <option value="none">None</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option>
         </select>
         {repeat==="weekly" && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>(
               <button key={d} type="button" className={pill(weeklyDays[i])} onClick={()=>setWeeklyDays(v=>{const n=[...v]; n[i]=!n[i]; return n;})}>{d}</button>
             ))}
@@ -855,26 +933,26 @@ function TaskEditor({ planStartDate, onAdd }){
 
       {repeat!=="none" && (
         <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <span className="text-sm">every</span>
-            <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+            <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)} className="w-14 sm:w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
             <span className="text-sm">{repeat==="daily"?"day(s)":repeat==="weekly"?"week(s)":"month(s)"}</span>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <label className="inline-flex items-center gap-2 text-sm"><input type="radio" name="endMode" value="count" checked={endMode==="count"} onChange={()=>setEndMode("count")} />after</label>
-            <input type="number" min={1} disabled={endMode!=="count"} value={count} onChange={(e)=>setCount(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
+            <input type="number" min={1} disabled={endMode!=="count"} value={count} onChange={(e)=>setCount(e.target.value)} className="w-14 sm:w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
             <span className="text-sm">occurrence(s)</span>
-            <span className="mx-2 text-xs text-gray-400">or</span>
+            <span className="mx-2 text-[11px] sm:text-xs text-gray-400">or</span>
             <label className="inline-flex items-center gap-2 text-sm"><input type="radio" name="endMode" value="until" checked={endMode==="until"} onChange={()=>setEndMode("until")} />on date</label>
             <input type="date" disabled={endMode!=="until"} value={untilDate} onChange={(e)=>setUntilDate(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm disabled:bg-gray-100" />
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <label className="inline-flex items-center gap-2 text-sm"><input type="radio" name="endMode" value="infinite" checked={endMode==="infinite"} onChange={()=>setEndMode("infinite")} />No end (generate next …)</label>
-            <input type="number" min={1} max={repeat==="monthly"?36:24} value={horizonMonths} onChange={(e)=>setHorizonMonths(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+            <input type="number" min={1} max={repeat==="monthly"?36:24} value={horizonMonths} onChange={(e)=>setHorizonMonths(e.target.value)} className="w-14 sm:w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
             <span className="text-sm">month(s)</span>
           </div>
           {repeat==="monthly" && (
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <span className="text-sm">Pattern</span>
               <select value={monthlyMode} onChange={(e)=>setMonthlyMode(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm">
                 <option value="dom">Same day of month</option>
@@ -886,8 +964,8 @@ function TaskEditor({ planStartDate, onAdd }){
       )}
 
       <div className="mt-3 flex items-center justify-between">
-        <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700"><Plus className="h-4 w-4" /> Add task(s)</button>
-        <button onClick={()=>{ setTitle(""); setNotes(""); setTime(""); setDur(60); setRepeat("none"); setTaskDate(planStartDate); }} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><RotateCcw className="h-3 w-3" /> Reset fields</button>
+        <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"><Plus className="h-4 w-4" /> <span className="hidden sm:inline">Add task(s)</span><span className="sm:hidden">Add</span></button>
+        <button onClick={()=>{ setTitle(""); setNotes(""); setTime(""); setDur(60); setRepeat("none"); setTaskDate(planStartDate); }} className="inline-flex items-center gap-2 rounded-xl border px-2.5 sm:px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap"><RotateCcw className="h-3 w-3" /> Reset</button>
       </div>
     </div>
   );
@@ -948,16 +1026,11 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const text=await r.text(); let data; try{ data=JSON.parse(text); }catch{ throw new Error(text.slice(0,200)); }
       if (!r.ok) throw new Error(data.error||"Push failed");
 
-      // Snapshot history
       await fetch("/api/history/snapshot", { method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ plannerEmail, userEmail: selectedUserEmail, plan, tasks: preview, mode: replaceMode?"replace":"append", listTitle: data.listTitle || plan.title })
       });
 
-      // Clear composer
-      setTasks([]);
-      localStorage.removeItem("p2t_last_prefill");
-      setReplaceMode(false);
-
+      setTasks([]); localStorage.removeItem("p2t_last_prefill"); setReplaceMode(false);
       setMsg(`Success — ${data.created} created in “${data.listTitle||plan.title}”. Composer cleared.`);
     }catch(e){ setMsg("Error: "+e.message); }
   }
@@ -981,8 +1054,8 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {g.items.map((it,idx)=>(
                     <div key={idx} className="rounded-xl border bg-white p-2 text-xs">
-                      <div className="font-medium text-gray-900">{it.title}</div>
-                      <div className="text-gray-500">{it.time || "all-day"} • {it.durationMins||60}m{it.notes?` • ${it.notes}`:""}</div>
+                      <div className="font-medium text-gray-900 truncate">{it.title}</div>
+                      <div className="text-gray-500 truncate">{it.time || "all-day"} • {it.durationMins||60}m{it.notes?` • ${it.notes}`:""}</div>
                     </div>
                   ))}
                 </div>
@@ -990,15 +1063,20 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
             ))}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            <label className="inline-flex items-center gap-2 text-sm">
+          <div className="mt-3 flex flex-wrap items-center gap-2 sm:gap-3">
+            <label className="inline-flex items-center gap-2 text-xs sm:text-sm whitespace-nowrap">
               <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
-              Replace existing tasks in this list before pushing
+              <span className="hidden sm:inline">Replace existing tasks in this list before pushing</span>
+              <span className="sm:hidden">Replace existing</span>
             </label>
-            <button onClick={push} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Push to selected user</button>
-            <button onClick={downloadICS} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><Download className="h-3 w-3" /> Export .ics</button>
+            <button onClick={push} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 sm:px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-emerald-700 whitespace-nowrap">
+              <span className="hidden sm:inline">Push to selected user</span><span className="sm:hidden">Push</span>
+            </button>
+            <button onClick={downloadICS} className="inline-flex items-center gap-2 rounded-xl border px-2.5 sm:px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap">
+              <Download className="h-3 w-3" /> .ics
+            </button>
             <button onClick={()=>{ setTasks([]); localStorage.removeItem("p2t_last_prefill"); setReplaceMode(false); setMsg("Preview cleared."); }}
-              className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs"><X className="h-3 w-3" /> Clear preview</button>
+              className="inline-flex items-center gap-2 rounded-xl border px-2.5 sm:px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap"><X className="h-3 w-3" /> Clear</button>
           </div>
         </>
       )}
@@ -1008,53 +1086,60 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
 }
 
 /* ---- History ---- */
-function HistoryPanel({ plannerEmail, userEmail }){
+function HistoryPanel({ plannerEmail, userEmail, toast }){
   const [tab,setTab]=useState("active"); const [rows,setRows]=useState([]); const [q,setQ]=useState("");
-  const [sel,setSel]=useState(new Set()); const [confirm,setConfirm]=useState(null);
+  const [sel,setSel]=useState(new Set());
+
+  // pagination
+  const [page,setPage]=useState(1); const pageSize=25;
+  const pageRows = useMemo(()=> rows.slice((page-1)*pageSize, (page)*pageSize), [rows,page]);
+  const pageCount=Math.max(1, Math.ceil(rows.length/pageSize));
 
   async function load(){
     if (!userEmail){ setRows([]); return; }
     const qs=new URLSearchParams({ plannerEmail, userEmail, status: tab, q });
-    const r=await fetch(`/api/history/list?${qs.toString()}`); const j=await r.json(); setRows(j.items||[]); setSel(new Set());
+    const r=await fetch(`/api/history/list?${qs.toString()}`); const j=await r.json(); setRows(j.items||[]); setSel(new Set()); setPage(1);
   }
   useEffect(()=>{ load(); },[plannerEmail, userEmail, tab, q]);
 
   function toggle(id){ const n=new Set(sel); n.has(id)?n.delete(id):n.add(id); setSel(n); }
-  function setAll(on){ setSel(on? new Set(rows.map(r=>r.id)) : new Set()); }
+  function setAll(on){ setSel(on? new Set(pageRows.map(r=>r.id)) : new Set()); }
 
   async function doAction(action, ids){
+    if (!ids.length) return;
     const ep = action==="archive" ? "/api/history/archive" : action==="unarchive" ? "/api/history/unarchive" : "/api/history/delete";
-    await fetch(ep,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ plannerEmail, planIds: ids }) });
-    await load();
+    const r=await fetch(ep,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ plannerEmail, planIds: ids }) });
+    if (!r.ok){ const t=await r.text(); toast("error", t.slice(0,180)); return; }
+    await load(); toast("success", `${action[0].toUpperCase()+action.slice(1)} ${ids.length} plan(s).`);
   }
   async function restore(id, duplicate=false){
     const r=await fetch("/api/history/restore",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ plannerEmail, planId: id }) });
-    const j=await r.json(); if (!r.ok) return alert(j.error||"Restore failed");
+    const j=await r.json(); if (!r.ok) { toast("error", j.error||"Restore failed"); return; }
     const payload={ ok:true, userEmail, plan:j.plan, tasks:j.tasks }; if (duplicate) payload.plan.title = `${payload.plan.title} (copy)`;
-    localStorage.setItem("p2t_last_prefill", JSON.stringify(payload)); alert("Loaded to composer. Switch to Plan tab.");
+    localStorage.setItem("p2t_last_prefill", JSON.stringify(payload)); toast("success","Loaded to composer. Switch to Plan tab.");
   }
 
   return (
-    <div className="mt-8 rounded-2xl border border-gray-200 bg-white p-4">
-      <div className="mb-3 flex items-center justify-between">
+    <div className="mt-6 sm:mt-8 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4">
+      <div className="mb-2 sm:mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-sm font-semibold">History</div>
-          <div className="text-xs text-gray-500">Previously pushed lists for {userEmail || "—"}.</div>
+          <div className="text-[11px] sm:text-xs text-gray-500">Previously pushed lists for {userEmail || "—"}.</div>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2 py-1">
-            <Search className="h-4 w-4 text-gray-400" /><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search title…" className="px-2 py-1 text-sm outline-none" />
+            <Search className="h-4 w-4 text-gray-400" /><input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Search title…" className="px-2 py-1 text-sm outline-none w-36 sm:w-52" />
           </div>
-          <div className="rounded-xl border border-gray-300 bg-white">
-            <button onClick={()=>setTab("active")} className={cn("px-3 py-2 text-xs", tab==="active"?"bg-cyan-600 text-white rounded-l-xl":"")}>Active</button>
-            <button onClick={()=>setTab("archived")} className={cn("px-3 py-2 text-xs", tab==="archived"?"bg-cyan-600 text-white rounded-r-xl":"")}>Archived</button>
+          <div className="rounded-xl border border-gray-300 bg-white overflow-hidden">
+            <button onClick={()=>setTab("active")} className={cn("px-2.5 py-1.5 text-xs", tab==="active"?"bg-cyan-600 text-white":"")}>Active</button>
+            <button onClick={()=>setTab("archived")} className={cn("px-2.5 py-1.5 text-xs", tab==="archived"?"bg-cyan-600 text-white":"")}>Archived</button>
           </div>
         </div>
       </div>
 
-      <div className="mb-2 flex items-center justify-between text-xs">
-        <button onClick={()=>setAll(sel.size!==rows.length)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
-          {sel.size===rows.length && rows.length>0 ? <CheckSquare className="h-3 w-3"/> : <Square className="h-3 w-3" />} Select all
+      <div className="mb-2 flex items-center justify-between text-[11px] sm:text-xs">
+        <button onClick={()=>setAll(true)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">
+          <CheckSquare className="h-3 w-3"/> Select page
         </button>
         <div className="flex items-center gap-2">
           {tab==="active"
@@ -1067,38 +1152,38 @@ function HistoryPanel({ plannerEmail, userEmail }){
       </div>
 
       <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs table-fixed min-w-[760px]">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
-              <th className="py-2 px-2"></th>
-              <th className="py-2 px-2">Title</th>
-              <th className="py-2 px-2">Start</th>
-              <th className="py-2 px-2">Items</th>
-              <th className="py-2 px-2">Mode</th>
-              <th className="py-2 px-2">Pushed</th>
-              <th className="py-2 px-2 text-right">Actions</th>
+              <th className="py-2 px-2 w-8"></th>
+              <th className="py-2 px-2 w-[36%]">Title</th>
+              <th className="py-2 px-2 w-28">Start</th>
+              <th className="py-2 px-2 w-16">Items</th>
+              <th className="py-2 px-2 w-20">Mode</th>
+              <th className="py-2 px-2 w-40">Pushed</th>
+              <th className="py-2 px-2 w-44 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r=>(
+            {pageRows.map(r=>(
               <tr key={r.id} className="border-t">
                 <td className="py-2 px-2"><input type="checkbox" checked={sel.has(r.id)} onChange={()=>toggle(r.id)} /></td>
-                <td className="py-2 px-2">{r.title}</td>
-                <td className="py-2 px-2">{r.start_date}</td>
+                <td className="py-2 px-2 truncate">{r.title}</td>
+                <td className="py-2 px-2 whitespace-nowrap">{r.start_date}</td>
                 <td className="py-2 px-2">{r.items_count}</td>
                 <td className="py-2 px-2">{r.mode}</td>
-                <td className="py-2 px-2">{new Date(r.pushed_at).toLocaleString()}</td>
+                <td className="py-2 px-2 whitespace-nowrap">{new Date(r.pushed_at).toLocaleString()}</td>
                 <td className="py-2 px-2">
-                  <div className="flex justify-end gap-2">
-                    <a href={`/api/history/ics?planId=${r.id}`} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Download className="h-3 w-3" /> .ics</a>
-                    <button onClick={()=>restore(r.id,false)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">Restore</button>
-                    <button onClick={()=>restore(r.id,true)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1">Duplicate</button>
+                  <div className="flex justify-end gap-1 sm:gap-2">
+                    <a href={`/api/history/ics?planId=${r.id}`} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap"><Download className="h-3 w-3" /> .ics</a>
+                    <button onClick={()=>restore(r.id,false)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap">Restore</button>
+                    <button onClick={()=>restore(r.id,true)} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap">Duplicate</button>
                     {tab==="active"
-                      ? <button onClick={()=>doAction("archive", [r.id])} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><Archive className="h-3 w-3" /></button>
-                      : <button onClick={()=>doAction("unarchive", [r.id])} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1"><ArchiveRestore className="h-3 w-3" /></button>
+                      ? <button onClick={()=>doAction("archive", [r.id])} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap"><Archive className="h-3 w-3" /></button>
+                      : <button onClick={()=>doAction("unarchive", [r.id])} className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 whitespace-nowrap"><ArchiveRestore className="h-3 w-3" /></button>
                     }
                     <button onClick={()=>doAction("delete", [r.id])}
-                      className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1"><Trash2 className="h-3 w-3" /></button>
+                      className="inline-flex items-center gap-1 rounded-lg border border-red-300 text-red-700 px-2 py-1 whitespace-nowrap"><Trash2 className="h-3 w-3" /></button>
                   </div>
                 </td>
               </tr>
@@ -1109,6 +1194,18 @@ function HistoryPanel({ plannerEmail, userEmail }){
           </tbody>
         </table>
       </div>
+
+      {rows.length>pageSize && (
+        <div className="mt-3 flex items-center justify-between text-xs">
+          <div className="text-gray-600">Page {page} of {pageCount}</div>
+          <div className="flex items-center gap-2">
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(1)} disabled={page===1}><ChevronsLeft className="h-3 w-3" /></button>
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1}><ChevronLeft className="h-3 w-3" /></button>
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(p=>Math.min(pageCount,p+1))} disabled={page===pageCount}><ChevronRight className="h-3 w-3" /></button>
+            <button className="rounded-lg border px-2 py-1" onClick={()=>setPage(pageCount)} disabled={page===pageCount}><ChevronsRight className="h-3 w-3" /></button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
