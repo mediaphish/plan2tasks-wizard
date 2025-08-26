@@ -393,7 +393,7 @@ function UsersView({ plannerEmail, onManage, onToast }){
   const [page,setPage]=useState(1);
   const [pageSize,setPageSize]=useState(10);
 
-  const [inviteUser,setInviteUser]=useState("");
+  const [inviteUser, setInviteUser] = React.useState("");
 
   async function load(){
     setLoading(true);
@@ -465,18 +465,24 @@ function UsersView({ plannerEmail, onManage, onToast }){
                   {(u.name||"—")} · {(u.status==="connected"?"Connected ✓":(u.status||"—"))}
                 </div>
               </div>
-              <div className="shrink-0 flex gap-1">
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={()=>setInviteUser(u.email)}
-                  className="rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold hover:bg-gray-50 whitespace-nowrap"
-                  title="Invite / Get link"
+                  onClick={() => setInviteUser(u.email)}
+                  className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"
+                  title="Invite this user"
                 >
                   Invite
                 </button>
+              
                 <button
-                  onClick={()=>onManage(u.email)}
-                  className="rounded-xl bg-cyan-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+                  onClick={() => onManage(u.email)}
+                  className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700"
+                  title="Go to Manage User"
                 >
+                  Manage User
+                </button>
+              </div>
+
                   Manage
                 </button>
               </div>
