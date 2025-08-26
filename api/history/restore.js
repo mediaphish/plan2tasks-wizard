@@ -7,33 +7,37 @@ export default async function handler(req, res) {
     const { plannerEmail, planId } = req.body || {};
     if (!plannerEmail || !planId) return res.status(400).json({ error: "Missing plannerEmail or planId" });
 
-    const { data: planRow, error: pErr } = await supabaseAdmin
-      .from("plans")
-      .select("id, planner_email, user_email, title, start_date, timezone")
+    const { data: plan, error: pErr } = await supabaseAdmin
+      .from("history_plans")
+      .select("*")
+      .eq("planner_email", plannerEmail)
       .eq("id", planId)
-      .eq("planner_email", plannerEmail.toLowerCase())
       .single();
     if (pErr) throw pErr;
 
-    const { data: taskRows, error: tErr } = await supabaseAdmin
-      .from("plan_tasks")
-      .select("title, day_offset, time, duration_mins, notes")
+    const { data: items, error: iErr } = await supabaseAdmin
+      .from("history_items")
+      .select("title,day_offset,time,duration_mins,notes")
       .eq("plan_id", planId)
-      .order("id", { ascending: true });
-    if (tErr) throw tErr;
+      .order("day_offset", { ascending: true });
+    if (iErr) throw iErr;
 
-    const plan = {
-      title: planRow.title,
-      startDate: planRow.start_date,
-      timezone: planRow.timezone
+    const planOut = {
+      title: plan.title,
+      startDate: plan.start_date,
+      timezone: plan.timezone,
     };
-    const tasks = (taskRows || []).map(t => ({
-      title: t.title, dayOffset: t.day_offset, time: t.time, durationMins: t.duration_mins, notes: t.notes || ""
+    const tasksOut = (items || []).map((r) => ({
+      title: r.title,
+      dayOffset: r.day_offset,
+      time: r.time || undefined,
+      durationMins: r.duration_mins || undefined,
+      notes: r.notes || undefined,
     }));
 
-    res.json({ ok: true, plan, tasks, userEmail: planRow.user_email });
+    return res.json({ ok: true, plan: planOut, tasks: tasksOut, mode: plan.mode });
   } catch (e) {
-    console.error("POST /api/history/restore", e);
-    res.status(500).json({ error: "Server error" });
+    console.error("history/restore error", e);
+    return res.status(500).json({ error: e.message || "Server error" });
   }
 }
