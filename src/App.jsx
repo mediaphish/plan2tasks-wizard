@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   Plus, RotateCcw, Info, Clock
 } from "lucide-react";
 import { format } from "date-fns";
@@ -311,7 +311,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ───────── Users (table) ───────── */
+/* ───────── Users (mobile-first) ───────── */
 function UsersView({ plannerEmail, onManage }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
@@ -377,15 +377,38 @@ function UsersView({ plannerEmail, onManage }){
         </div>
       </div>
 
-      <div className="overflow-auto rounded-lg border">
+      {/* Mobile list (no sideways scroll, Manage visible) */}
+      <div className="sm:hidden space-y-2">
+        {loading && <div className="text-gray-500 text-sm">Loading…</div>}
+        {!loading && paged.length===0 && <div className="text-gray-500 text-sm">No users found.</div>}
+        {!loading && paged.map(u=>(
+          <div key={u.email} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{u.email}</div>
+              <div className="text-[11px] text-gray-500 truncate">
+                {(u.name||"—")} · {(u.status==="connected"?"Connected ✓":(u.status||"—"))}
+              </div>
+            </div>
+            <button
+              onClick={()=>onManage(u.email)}
+              className="shrink-0 rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+            >
+              Manage User
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop/tablet table */}
+      <div className="hidden sm:block overflow-auto rounded-lg border mt-2 sm:mt-3">
         <table className="w-full text-xs sm:text-sm">
           <thead className="bg-gray-50 sticky top-0">
             <tr className="text-left text-gray-500">
-              <th className="py-2 px-2 min-w-[180px]">Email</th>
-              <th className="py-2 px-2 min-w-[120px]" title="Name">Name</th>
-              <th className="py-2 px-2 min-w-[140px]" title="Groups">Groups</th>
-              <th className="py-2 px-2 min-w-[100px]" title="Connection status">Status</th>
-              <th className="py-2 px-2 w-32 sm:w-40">Action</th>
+              <th className="py-2 px-2">Email</th>
+              <th className="py-2 px-2">Name</th>
+              <th className="py-2 px-2">Groups</th>
+              <th className="py-2 px-2">Status</th>
+              <th className="py-2 px-2 w-40">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -395,12 +418,12 @@ function UsersView({ plannerEmail, onManage }){
               <tr key={u.email} className="border-t">
                 <td className="py-2 px-2">{u.email}</td>
                 <td className="py-2 px-2 truncate max-w-[160px]">{u.name||"—"}</td>
-                <td className="py-2 px-2 truncate max-w-[220px]">{(u.groups||[]).join(", ")||"—"}</td>
+                <td className="py-2 px-2 truncate max-w-[260px]">{(u.groups||[]).join(", ")||"—"}</td>
                 <td className="py-2 px-2">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
                 <td className="py-2 px-2">
                   <button
                     onClick={()=>onManage(u.email)}
-                    className="rounded-xl bg-cyan-600 px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+                    className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
                   >
                     Manage User
                   </button>
@@ -742,15 +765,8 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      {/* Mobile hint: show until at least one task exists */}
-      {tasks.length===0 && (
-        <div className="sm:hidden mt-3 rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-600">
-          Add at least one task to open <b>Preview & Deliver</b>.
-        </div>
-      )}
-
-      {/* Hide Preview card on mobile until a task exists; always visible on ≥sm */}
-      <div className={tasks.length===0 ? "hidden sm:block" : ""}>
+      {/* Preview & Deliver is completely hidden until at least one task exists */}
+      {tasks.length>0 && (
         <ComposerPreview
           plannerEmail={plannerEmail}
           selectedUserEmail={selectedUserEmail}
@@ -762,7 +778,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           msg={msg}
           setMsg={(m)=>setMsg(m)}
         />
-      </div>
+      )}
 
       <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} onPrefill={applyPrefill} />
     </div>
@@ -993,47 +1009,43 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
         </label>
       </div>
 
-      {total===0 ? (
-        <div className="text-sm text-gray-500">No tasks yet.</div>
-      ) : (
-        <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
-          <table className="w-full min-w-[640px] text-xs sm:text-sm">
-            <thead className="bg-gray-50">
-              <tr className="text-left text-gray-500">
-                <th className="py-1.5 px-2">Title</th>
-                <th className="py-1.5 px-2">Offset</th>
-                <th className="py-1.5 px-2">Time</th>
-                <th className="py-1.5 px-2">Dur</th>
-                <th className="py-1.5 px-2">Notes</th>
-                <th className="py-1.5 px-2 text-right w-40 sm:w-48">Actions</th>
+      <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
+        <table className="w-full min-w-[640px] text-xs sm:text-sm">
+          <thead className="bg-gray-50">
+            <tr className="text-left text-gray-500">
+              <th className="py-1.5 px-2">Title</th>
+              <th className="py-1.5 px-2">Offset</th>
+              <th className="py-1.5 px-2">Time</th>
+              <th className="py-1.5 px-2">Dur</th>
+              <th className="py-1.5 px-2">Notes</th>
+              <th className="py-1.5 px-2 text-right w-40 sm:w-48">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map(t=>(
+              <tr key={t.id} className="border-t">
+                <td className="py-1.5 px-2">{t.title}</td>
+                <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
+                <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
+                <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
+                <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
+                <td className="py-1.5 px-2">
+                  <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
+                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="inline-flex items-center rounded-lg border p-1.5 text-[11px] sm:text-xs hover:bg-gray-50" title="Remove">
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span className="sr-only">Remove</span>
+                    </button>
+                  </div>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {tasks.map(t=>(
-                <tr key={t.id} className="border-t">
-                  <td className="py-1.5 px-2">{t.title}</td>
-                  <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
-                  <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
-                  <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
-                  <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
-                  <td className="py-1.5 px-2">
-                    <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
-                      <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="inline-flex items-center rounded-lg border p-1.5 text-[11px] sm:text-xs hover:bg-gray-50" title="Remove">
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span className="sr-only">Remove</span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            ))}
+          </tbody>
+        </table>
+      </div>
 
       <div className="flex items-center justify-between">
         <div className="text-[11px] sm:text-xs text-gray-500">{msg}</div>
-        <button onClick={pushNow} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap" disabled={total===0}>
+        <button onClick={pushNow} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap" disabled={!tasks.length}>
           <ArrowRight className="h-4 w-4" /> Push to Google Tasks
         </button>
       </div>
@@ -1127,7 +1139,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
         <table className="w-full min-w-[720px] text-xs sm:text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
-              <th className="py-1.5 px-2 w-8"><button onClick={()=>{ /* simple select-all */ }} title="Select all">□</button></th>
+              <th className="py-1.5 px-2 w-8"><button onClick={()=>{ /* could implement select-all */ }} title="Select all">□</button></th>
               <th className="py-1.5 px-2">Title</th>
               <th className="py-1.5 px-2">Start</th>
               <th className="py-1.5 px-2">Items</th>
