@@ -1,50 +1,43 @@
-// api/history/snapshot.js
+// api/history/list.js
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  if (req.method !== "GET") return res.status(405).json({ error: "GET only" });
   try {
-    const { plannerEmail, userEmail, plan, tasks, mode, listTitle } = req.body || {};
-    if (!plannerEmail || !userEmail || !plan || !Array.isArray(tasks)) {
-      return res.status(400).json({ error: "Missing plannerEmail, userEmail, plan, tasks" });
+    const { plannerEmail, userEmail, status = "active", q = "" } = req.query || {};
+    if (!plannerEmail || !userEmail) {
+      return res.status(400).json({ error: "Missing plannerEmail or userEmail" });
     }
-    const title = listTitle || plan.title || "Untitled";
-    const start_date = plan.startDate;
-    const timezone = plan.timezone || "America/Chicago";
-    const items_count = tasks.length;
-    const modeSafe = mode === "replace" ? "replace" : "append";
 
-    const { data: planRow, error: planErr } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("history_plans")
-      .insert({
-        planner_email: plannerEmail,
-        user_email: userEmail,
-        title,
-        start_date,
-        timezone,
-        mode: modeSafe,
-        items_count,
-      })
-      .select()
-      .single();
-    if (planErr) throw planErr;
+      .select("id,title,start_date,items_count,mode,pushed_at,archived_at")
+      .eq("planner_email", plannerEmail)
+      .eq("user_email", userEmail);
 
-    if (items_count) {
-      const rows = tasks.map((t) => ({
-        plan_id: planRow.id,
-        title: t.title,
-        day_offset: Number(t.dayOffset || 0),
-        time: t.time || null,
-        duration_mins: t.durationMins || null,
-        notes: t.notes || null,
-      }));
-      const { error: itemsErr } = await supabaseAdmin.from("history_items").insert(rows);
-      if (itemsErr) throw itemsErr;
-    }
+    if (status === "archived") query = query.not("archived_at", "is", null);
+    else query = query.is("archived_at", null);
 
-    return res.json({ ok: true, planId: planRow.id });
+    if (q) query = query.ilike("title", `%${q}%`);
+
+    query = query.order(status === "archived" ? "archived_at" : "pushed_at", { ascending: false });
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return res.json({
+      items: (data || []).map((r) => ({
+        id: r.id,
+        title: r.title,
+        start_date: r.start_date,
+        items_count: r.items_count,
+        mode: r.mode,
+        pushed_at: r.pushed_at,
+        archived: !!r.archived_at,
+      })),
+    });
   } catch (e) {
-    console.error("history/snapshot error", e);
+    console.error("history/list error", e);
     return res.status(500).json({ error: e.message || "Server error" });
   }
 }
