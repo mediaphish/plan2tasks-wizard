@@ -3,8 +3,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
-  CheckSquare, Square, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Plus, RotateCcw
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, RotateCcw, Info
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
@@ -154,7 +153,7 @@ function AppShell({ plannerEmail }){
   const [view,setView]=useState("users");
   const [inboxOpen,setInboxOpen]=useState(false);
   const [inboxBadge,setInboxBadge]=useState(0);
-  const [selectedUserEmail, setSelectedUserEmail] = useState("");
+  const [selectedUserEmail, setSelectedUserEmail] = useState(""); // NEW: lift user to shell
   const [toasts,setToasts]=useState([]);
   const toast = useCallback((type, message, title) => {
     const id=uid(); setToasts(ts=>[...ts,{id,type,message,title}]);
@@ -167,7 +166,10 @@ function AppShell({ plannerEmail }){
       try{
         const qs=new URLSearchParams({ plannerEmail });
         const r=await fetch(`/api/prefs/get?${qs.toString()}`);
-        if (r.ok){ const j=await r.json(); setPrefs(j.prefs || j); setView((j.prefs?.default_view)||"users"); }
+        if (r.ok){ const j=await r.json(); const p=j.prefs||j;
+          setPrefs(p);
+          setView(p.default_view || "users");
+        }
       }catch{}
     })();
   },[plannerEmail]);
@@ -187,7 +189,7 @@ function AppShell({ plannerEmail }){
       <div className="mx-auto max-w-6xl">
         <div className="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="text-xl sm:text-2xl font-bold">Plan2Tasks</div>
+            <div className="text-xl sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
             <nav className="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
               <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}><span className="hidden sm:inline">Users</span></NavBtn>
               <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}><span className="hidden sm:inline">Plan</span></NavBtn>
@@ -211,14 +213,14 @@ function AppShell({ plannerEmail }){
         {view==="users" && (
           <UsersView
             plannerEmail={plannerEmail}
-            onManage={(email)=>{ /* go to plan view with user selected */ setView("plan"); }}
+            onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
           />
         )}
 
         {view==="plan" && (
           <PlanView
             plannerEmail={plannerEmail}
-            selectedUserEmailProp={null}
+            selectedUserEmailProp={selectedUserEmail}
             onToast={(t,m)=>toast(t,m)}
           />
         )}
@@ -367,7 +369,7 @@ function UsersView({ plannerEmail, onManage }){
                 <td className="py-2 pr-3">{(u.groups||[]).join(", ")||"—"}</td>
                 <td className="py-2 pr-3">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
                 <td className="py-2 pr-3">
-                  <button onClick={()=>onManage(u.email)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700">Manage User</button>
+                  <button onClick={()=>onManage(u.email)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap">Manage User</button>
                 </td>
               </tr>
             ))}
@@ -382,6 +384,7 @@ function UsersView({ plannerEmail, onManage }){
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(prefs);
   useEffect(()=>setLocal(prefs),[prefs]);
+
   async function save(){
     try{
       const r=await fetch(`/api/prefs/set`,{
@@ -391,10 +394,12 @@ function SettingsView({ plannerEmail, prefs, onChange }){
       if (r.ok) onChange(local);
     }catch(e){ console.error(e); }
   }
+
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
       <div className="text-base sm:text-lg font-semibold mb-2">Settings</div>
       <div className="text-[11px] sm:text-xs text-gray-500 mb-4">Tweak defaults and preferences.</div>
+
       <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Default view</div>
@@ -403,12 +408,14 @@ function SettingsView({ plannerEmail, prefs, onChange }){
             <option value="plan">Plan</option>
           </select>
         </label>
+
         <label className="block">
           <div className="mb-1 text-sm font-medium">Default timezone</div>
           <select value={local.default_timezone} onChange={(e)=>setLocal({...local, default_timezone:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
           </select>
         </label>
+
         <label className="block">
           <div className="mb-1 text-sm font-medium">Default push mode</div>
           <select value={local.default_push_mode} onChange={(e)=>setLocal({...local, default_push_mode:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
@@ -416,6 +423,31 @@ function SettingsView({ plannerEmail, prefs, onChange }){
             <option value="replace">Replace (overwrite)</option>
           </select>
         </label>
+
+        {/* NEW: Auto-archive after assign (toggle) */}
+        <div className="block">
+          <div className="mb-1 text-sm font-medium flex items-center gap-1">
+            Auto-archive bundles after assigning
+            <span className="text-gray-400" title="If on, Inbox items are archived the moment you assign them to a user."><Info className="h-3.5 w-3.5" /></span>
+          </div>
+          <button
+            className={cn(
+              "w-16 rounded-full p-0.5 border transition relative",
+              local.auto_archive_after_assign ? "bg-cyan-600 border-cyan-700" : "bg-gray-200 border-gray-300"
+            )}
+            onClick={()=>setLocal({...local, auto_archive_after_assign: !local.auto_archive_after_assign})}
+            aria-pressed={local.auto_archive_after_assign}
+            aria-label="Toggle auto-archive"
+          >
+            <span
+              className={cn(
+                "block h-6 w-6 rounded-full bg-white shadow transform transition",
+                local.auto_archive_after_assign ? "translate-x-8" : "translate-x-0"
+              )}
+            />
+          </button>
+        </div>
+
         <label className="block">
           <div className="mb-1 text-sm font-medium">Inbox badge</div>
           <select value={String(local.show_inbox_badge)} onChange={(e)=>setLocal({...local, show_inbox_badge:(e.target.value==="true")})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
@@ -424,8 +456,9 @@ function SettingsView({ plannerEmail, prefs, onChange }){
           </select>
         </label>
       </div>
+
       <div className="mt-4">
-        <button onClick={save} className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">Save preferences</button>
+        <button onClick={save} className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black whitespace-nowrap">Save preferences</button>
       </div>
     </div>
   );
@@ -467,7 +500,13 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute right-0 top-0 h-full w-full sm:w-[430px] bg-white shadow-xl">
         <div className="flex items-center justify-between p-3 border-b">
-          <div className="text-sm font-semibold">Inbox (from GPT)</div>
+          <div className="text-sm font-semibold flex items-center gap-2">
+            Inbox (from GPT)
+            <span className={cn("text-[10px] px-2 py-0.5 rounded-full border",
+              autoArchive ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-gray-50 text-gray-700 border-gray-200")}>
+              Auto-archive: {autoArchive?"ON":"OFF"}
+            </span>
+          </div>
           <button className="rounded-lg p-1 hover:bg-gray-100" onClick={onClose}><X className="h-4 w-4" /></button>
         </div>
         <div className="p-3">
@@ -485,7 +524,7 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
               <div key={b.id} className="rounded-xl border p-3">
                 <div className="text-sm font-semibold">{b.title}</div>
                 <div className="text-[11px] text-gray-500 mb-2">Start {b.start_date} · {b.count} item(s)</div>
-                <button onClick={()=>assign(b)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700">Assign</button>
+                <button onClick={()=>assign(b)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap">Assign</button>
               </div>
             ))}
           </div>
@@ -509,15 +548,14 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
     const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
     setUsers(j.users||[]);
-    const connected=(j.users||[]).find(u=>u.status==="connected")?.email;
-    setSelectedUserEmail(selectedUserEmailProp || connected || (j.users?.[0]?.email || ""));
-  })(); },[plannerEmail]);
+    const initial = selectedUserEmailProp || (j.users||[]).find(u=>u.status==="connected")?.email || (j.users?.[0]?.email || "");
+    setSelectedUserEmail(initial);
+  })(); },[plannerEmail, selectedUserEmailProp]);
 
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
   const planDateText = format(parseISODate(plan.startDate)||new Date(),"EEE MMM d, yyyy");
 
-  /* FIX: define applyPrefill so History → Restore fills the composer immediately */
   const applyPrefill = useCallback(({ plan: rp, tasks: rt, mode })=>{
     try{
       setPlan(p=>({
@@ -813,7 +851,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
     <div className="mt-4 rounded-xl border border-gray-200 p-3 sm:p-4">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">Preview & Deliver</div>
-        <label className="inline-flex items-center gap-2 text-xs">
+        <label className="inline-flex items-center gap-2 text-xs whitespace-nowrap">
           <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
           Replace existing list (dangerous)
         </label>
@@ -843,7 +881,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
                   <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
                   <td className="py-1.5 px-2 text-gray-500">{t.notes||"—"}</td>
                   <td className="py-1.5 px-2 text-right">
-                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
+                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50 whitespace-nowrap">Remove</button>
                   </td>
                 </tr>
               ))}
@@ -854,7 +892,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
 
       <div className="flex items-center justify-between">
         <div className="text-xs text-gray-500">{msg}</div>
-        <button onClick={pushNow} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-60" disabled={total===0}>
+        <button onClick={pushNow} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap" disabled={total===0}>
           <ArrowRight className="h-4 w-4" /> Push to Google Tasks
         </button>
       </div>
@@ -905,8 +943,8 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
     <div className="mt-4 rounded-xl border border-gray-200 p-3 sm:p-4">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <button onClick={()=>setTab("active")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border", tab==="active"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Active</button>
-          <button onClick={()=>setTab("archived")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border", tab==="archived"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Archived</button>
+          <button onClick={()=>setTab("active")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border whitespace-nowrap", tab==="active"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Active</button>
+          <button onClick={()=>setTab("archived")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border whitespace-nowrap", tab==="archived"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Archived</button>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
@@ -915,13 +953,13 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
           </div>
           {tab==="active" ? (
             <>
-              <button onClick={doArchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"><Archive className="h-3.5 w-3.5" /> Archive</button>
-              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5" /> Delete…</button>
+              <button onClick={doArchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><Archive className="h-3.5 w-3.5" /> Archive</button>
+              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><Trash2 className="h-3.5 w-3.5" /> Delete…</button>
             </>
           ) : (
             <>
-              <button onClick={doUnarchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"><ArchiveRestore className="h-3.5 w-3.5" /> Unarchive</button>
-              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60"><Trash2 className="h-3.5 w-3.5" /> Delete…</button>
+              <button onClick={doUnarchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><ArchiveRestore className="h-3.5 w-3.5" /> Unarchive</button>
+              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><Trash2 className="h-3.5 w-3.5" /> Delete…</button>
             </>
           )}
         </div>
@@ -931,7 +969,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
         <table className="w-full text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
-              <th className="py-1.5 px-2 w-8"><button onClick={()=>toggleAll(true)} title="Select all"><Square className="h-4 w-4" /></button></th>
+              <th className="py-1.5 px-2 w-8"><button onClick={()=>toggleAll(true)} title="Select all">□</button></th>
               <th className="py-1.5 px-2">Title</th>
               <th className="py-1.5 px-2">Start</th>
               <th className="py-1.5 px-2">Items</th>
@@ -945,7 +983,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
             {rows.map(r=>(
               <tr key={r.id} className="border-t">
                 <td className="py-1.5 px-2">
-                  <button onClick={()=>toggle(r.id)}>{sel[r.id]?<CheckSquare className="h-4 w-4" />:<Square className="h-4 w-4" />}</button>
+                  <input type="checkbox" checked={!!sel[r.id]} onChange={()=>toggle(r.id)} />
                 </td>
                 <td className="py-1.5 px-2">{r.title}</td>
                 <td className="py-1.5 px-2">{r.start_date}</td>
@@ -954,7 +992,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
                 <td className="py-1.5 px-2">{format(new Date(r.pushed_at), "MMM d, yyyy")}</td>
                 <td className="py-1.5 px-2 text-right">
                   <a className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" href={`/api/history/ics?planId=${r.id}`} target="_blank" rel="noreferrer"><Download className="h-3.5 w-3.5" /> .ics</a>
-                  <button onClick={()=>doRestore(r.id)} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50">Restore</button>
+                  <button onClick={()=>doRestore(r.id)} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 whitespace-nowrap">Restore</button>
                 </td>
               </tr>
             ))}
