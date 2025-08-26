@@ -377,7 +377,7 @@ function UsersView({ plannerEmail, onManage }){
         </div>
       </div>
 
-      {/* Mobile list (no sideways scroll, Manage visible) */}
+      {/* Mobile list */}
       <div className="sm:hidden space-y-2">
         {loading && <div className="text-gray-500 text-sm">Loading…</div>}
         {!loading && paged.length===0 && <div className="text-gray-500 text-sm">No users found.</div>}
@@ -399,7 +399,7 @@ function UsersView({ plannerEmail, onManage }){
         ))}
       </div>
 
-      {/* Desktop/tablet table */}
+      {/* Desktop/tablet */}
       <div className="hidden sm:block overflow-auto rounded-lg border mt-2 sm:mt-3">
         <table className="w-full text-xs sm:text-sm">
           <thead className="bg-gray-50 sticky top-0">
@@ -499,7 +499,6 @@ function SettingsView({ plannerEmail, prefs, onChange }){
             Auto-archive bundles after assigning
             <span className="text-gray-400" title="If on, Inbox items are archived the moment you assign them to a user."><Info className="h-3.5 w-3.5" /></span>
           </div>
-          {/* custom toggle */}
           <button
             className={cn(
               "w-16 rounded-full p-0.5 border transition relative",
@@ -765,7 +764,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      {/* Preview & Deliver is completely hidden until at least one task exists */}
+      {/* Completely hidden until at least one task exists */}
       {tasks.length>0 && (
         <ComposerPreview
           plannerEmail={plannerEmail}
@@ -955,7 +954,16 @@ function TaskEditor({ planStartDate, onAdd }){
   );
 }
 
-/* ───────── Preview & push ───────── */
+/* ───────── Preview & push (shows actual dates) ───────── */
+function dateFromOffsetYMD(startYMD, off){
+  const base=parseISODate(startYMD)||new Date();
+  const d=new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + Number(off||0)));
+  return fmtDateYMD(d);
+}
+function displayFullDate(ymd){
+  const d=parseISODate(ymd)||new Date();
+  return format(d, "EEE MMM d, yyyy");
+}
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
   const total=tasks.length;
   async function pushNow(){
@@ -1014,7 +1022,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
               <th className="py-1.5 px-2">Title</th>
-              <th className="py-1.5 px-2">Offset</th>
+              <th className="py-1.5 px-2">Date</th>
               <th className="py-1.5 px-2">Time</th>
               <th className="py-1.5 px-2">Dur</th>
               <th className="py-1.5 px-2">Notes</th>
@@ -1022,23 +1030,26 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
             </tr>
           </thead>
           <tbody>
-            {tasks.map(t=>(
-              <tr key={t.id} className="border-t">
-                <td className="py-1.5 px-2">{t.title}</td>
-                <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
-                <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
-                <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
-                <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
-                <td className="py-1.5 px-2">
-                  <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
-                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="inline-flex items-center rounded-lg border p-1.5 text-[11px] sm:text-xs hover:bg-gray-50" title="Remove">
-                      <Trash2 className="h-3.5 w-3.5" />
-                      <span className="sr-only">Remove</span>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {tasks.map(t=>{
+              const ymd = dateFromOffsetYMD(plan.startDate, t.dayOffset||0);
+              return (
+                <tr key={t.id} className="border-t">
+                  <td className="py-1.5 px-2">{t.title}</td>
+                  <td className="py-1.5 px-2">{displayFullDate(ymd)}</td>
+                  <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
+                  <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
+                  <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
+                  <td className="py-1.5 px-2">
+                    <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
+                      <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="inline-flex items-center rounded-lg border p-1.5 text-[11px] sm:text-xs hover:bg-gray-50" title="Remove">
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span className="sr-only">Remove</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -1099,7 +1110,6 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
           <button onClick={()=>setTab("archived")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border whitespace-nowrap", tab==="archived"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Archived</button>
         </div>
 
-        {/* Desktop search */}
         <div className="hidden sm:flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2 top-2 h-4 w-4 text-gray-400" />
@@ -1119,7 +1129,6 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
           )}
         </div>
 
-        {/* Mobile: search toggle */}
         <button className="sm:hidden rounded-lg border px-2 py-1.5 text-xs" onClick={()=>setShowSearchMobile(s=>!s)} aria-label="Search">
           <Search className="h-4 w-4" />
         </button>
@@ -1139,7 +1148,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
         <table className="w-full min-w-[720px] text-xs sm:text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
-              <th className="py-1.5 px-2 w-8"><button onClick={()=>{ /* could implement select-all */ }} title="Select all">□</button></th>
+              <th className="py-1.5 px-2 w-8"><button title="Select all">□</button></th>
               <th className="py-1.5 px-2">Title</th>
               <th className="py-1.5 px-2">Start</th>
               <th className="py-1.5 px-2">Items</th>
