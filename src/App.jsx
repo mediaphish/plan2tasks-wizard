@@ -742,17 +742,27 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      <ComposerPreview
-        plannerEmail={plannerEmail}
-        selectedUserEmail={selectedUserEmail}
-        plan={plan}
-        tasks={tasks}
-        setTasks={setTasks}
-        replaceMode={replaceMode}
-        setReplaceMode={setReplaceMode}
-        msg={msg}
-        setMsg={(m)=>setMsg(m)}
-      />
+      {/* Mobile hint: show until at least one task exists */}
+      {tasks.length===0 && (
+        <div className="sm:hidden mt-3 rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-600">
+          Add at least one task to open <b>Preview & Deliver</b>.
+        </div>
+      )}
+
+      {/* Hide Preview card on mobile until a task exists; always visible on ≥sm */}
+      <div className={tasks.length===0 ? "hidden sm:block" : ""}>
+        <ComposerPreview
+          plannerEmail={plannerEmail}
+          selectedUserEmail={selectedUserEmail}
+          plan={plan}
+          tasks={tasks}
+          setTasks={setTasks}
+          replaceMode={replaceMode}
+          setReplaceMode={setReplaceMode}
+          msg={msg}
+          setMsg={(m)=>setMsg(m)}
+        />
+      </div>
 
       <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} onPrefill={applyPrefill} />
     </div>
@@ -1052,8 +1062,6 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   useEffect(()=>{ load(); },[plannerEmail,userEmail,tab]);
 
   const anySelected = Object.values(sel).some(Boolean);
-  function toggle(id){ setSel(s=>({ ...s, [id]: !s[id]})); }
-  function toggleAll(on){ const next={}; for(const r of rows){ next[r.id]=!!on; } setSel(next); }
 
   async function post(path, body){
     const r=await fetch(path,{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
