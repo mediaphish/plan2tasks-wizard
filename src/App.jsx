@@ -4,12 +4,12 @@ import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
-  Plus, RotateCcw, Info
+  Plus, RotateCcw, Info, Clock
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-/* ───────────────────── utils ───────────────────── */
+/* ───────────── utils ───────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function parseISODate(s){ if (!s) return null; const d=new Date(`${s}T00:00:00Z`); return Number.isNaN(d.getTime())?null:d; }
@@ -22,7 +22,7 @@ function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonth
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 
-/* ───────────────── ErrorBoundary ───────────────── */
+/* ───────── ErrorBoundary ───────── */
 class ErrorBoundary extends React.Component{
   constructor(p){ super(p); this.state={error:null}; }
   static getDerivedStateFromError(e){ return {error:e}; }
@@ -44,7 +44,7 @@ class ErrorBoundary extends React.Component{
   }
 }
 
-/* ─────────────────── Toasts ─────────────────── */
+/* ───────── Toasts ───────── */
 function Toasts({ items, dismiss }){
   return (
     <div className="fixed right-3 top-3 z-[60] flex flex-col gap-2">
@@ -66,7 +66,7 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* ───────────────────── Auth ───────────────────── */
+/* ───────── Auth ───────── */
 function AuthScreen({ onSignedIn }){
   const [mode,setMode]=useState("signin");
   const [email,setEmail]=useState(""); const [pw,setPw]=useState(""); const [msg,setMsg]=useState("");
@@ -122,7 +122,7 @@ function AuthScreen({ onSignedIn }){
   );
 }
 
-/* ─────────────────── Root ─────────────────── */
+/* ───────── Root ───────── */
 export default function App(){
   return (
     <ErrorBoundary>
@@ -141,7 +141,7 @@ function AppInner(){
   return <AppShell plannerEmail={plannerEmail} />;
 }
 
-/* ─────────────────── Shell ─────────────────── */
+/* ───────── Shell ───────── */
 function AppShell({ plannerEmail }){
   const [prefs, setPrefs] = useState({
     default_view: "users",
@@ -248,7 +248,7 @@ function NavBtn({ active, onClick, icon, children }){
   );
 }
 
-/* ─────────────── Modal + calendar ─────────────── */
+/* ───────── Modal + calendar ───────── */
 function Modal({ title, children, onClose }){
   useEffect(()=>{ function onEsc(e){ if (e.key==="Escape") onClose?.(); } window.addEventListener("keydown", onEsc); return ()=>window.removeEventListener("keydown", onEsc); },[onClose]);
   return (
@@ -311,7 +311,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ─────────────────── Users (table) ─────────────────── */
+/* ───────── Users (table) ───────── */
 function UsersView({ plannerEmail, onManage }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
@@ -427,7 +427,7 @@ function UsersView({ plannerEmail, onManage }){
   );
 }
 
-/* ─────────────────── Settings ─────────────────── */
+/* ───────── Settings ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(prefs);
   useEffect(()=>setLocal(prefs),[prefs]);
@@ -511,7 +511,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
   );
 }
 
-/* ─────────────────── Inbox ─────────────────── */
+/* ───────── Inbox ───────── */
 function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   const [bundles,setBundles]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -581,7 +581,83 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   );
 }
 
-/* ─────────────────── Plan ─────────────────── */
+/* ───────── Smart Time Input (12-hour display, free-form) ───────── */
+function to12hDisplay(hhmm){
+  if (!hhmm) return "";
+  const [H,M]=hhmm.split(":").map(Number);
+  let h = H%12 || 12;
+  const ampm = H<12 ? "am" : "pm";
+  return `${h}:${String(M).padStart(2,"0")} ${ampm}`;
+}
+function parseTimeHuman(str){
+  if (!str) return ""; // empty is allowed (no time)
+  let s = String(str).trim().toLowerCase();
+  if (s==="noon") return "12:00";
+  if (s==="midnight") return "00:00";
+  s = s.replace(/\./g, ":").replace(/\s+/g,"");
+  const hasAm = /am$/.test(s); const hasPm = /pm$/.test(s);
+  s = s.replace(/(am|pm)$/,"");
+  let h=0, m=0;
+
+  if (s.includes(":")){
+    const [hh,mm="0"]=s.split(":");
+    if (!/^\d+$/.test(hh) || !/^\d+$/.test(mm)) return null;
+    h = Number(hh); m = Number(mm);
+  } else {
+    if (!/^\d+$/.test(s)) return null;
+    if (s.length<=2) { h=Number(s); m=0; }
+    else if (s.length===3) { h=Number(s.slice(0,1)); m=Number(s.slice(1)); }
+    else { h=Number(s.slice(0,2)); m=Number(s.slice(2,4)); }
+  }
+  if (m<0||m>59) return null;
+  if (hasAm||hasPm){
+    if (h<1||h>12) return null;
+    if (hasPm && h!==12) h+=12;
+    if (hasAm && h===12) h=0;
+  } else {
+    if (h<0||h>23) return null;
+  }
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+}
+function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
+  const [text,setText]=useState(() => to12hDisplay(value));
+  const [bad,setBad]=useState(false);
+  useEffect(()=>{ setText(to12hDisplay(value)); },[value]);
+
+  function commit(){
+    const parsed = parseTimeHuman(text);
+    if (parsed===null){ setBad(true); return; }
+    setBad(false);
+    onChange(parsed || ""); // "" if empty
+    setText(to12hDisplay(parsed));
+  }
+  return (
+    <div className="relative">
+      <Clock className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+      <input
+        value={text}
+        onChange={(e)=>{ setBad(false); setText(e.target.value); }}
+        onBlur={commit}
+        onKeyDown={(e)=>{ if (e.key==="Enter") { e.currentTarget.blur(); } }}
+        placeholder={placeholder}
+        className={cn("w-full h-10 rounded-xl border px-8 pr-8 text-sm",
+          bad ? "border-red-500 focus:outline-none" : "border-gray-300")}
+      />
+      {!!value && (
+        <button
+          type="button"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+          title="Clear"
+          onClick={()=>{ onChange(""); setText(""); setBad(false); }}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ───────── Plan view ───────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -683,42 +759,14 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* ─────────── Time dropdown (never overflows) ─────────── */
-function generateTimeOptions(step=15){
-  const arr=[];
-  for(let h=0; h<24; h++){
-    for(let m=0; m<60; m+=step){
-      const hh=String(h).padStart(2,"0");
-      const mm=String(m).padStart(2,"0");
-      arr.push(`${hh}:${mm}`);
-    }
-  }
-  return arr;
-}
-function SelectTime({ value, onChange }){
-  const opts = useMemo(()=>generateTimeOptions(15),[]);
-  return (
-    <div className="relative w-full">
-      <select
-        value={value || ""}
-        onChange={(e)=>onChange(e.target.value)}
-        className="block w-full h-10 appearance-none rounded-xl border border-gray-300 bg-white px-3 pr-8 text-sm"
-      >
-        <option value="">— No time —</option>
-        {opts.map(t=><option key={t} value={t}>{t}</option>)}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-    </div>
-  );
-}
-
-/* ────────────── Task editor (uses SelectTime) ────────────── */
+/* ───────── Task editor (uses TimeInput) ───────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
   const [taskDate,setTaskDate]=useState(planStartDate);
   const [taskDateOpen,setTaskDateOpen]=useState(false);
-  const [time,setTime]=useState("");
+  const [time,setTime]=useState(""); // "HH:MM" or ""
+
   const [dur,setDur]=useState(60);
 
   const [repeat,setRepeat]=useState("none"); // none|daily|weekly|monthly
@@ -803,7 +851,7 @@ function TaskEditor({ planStartDate, onAdd }){
 
         <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
-          <SelectTime value={time} onChange={setTime} />
+          <TimeInput value={time} onChange={setTime} />
         </label>
 
         <label className="block min-w-0">
@@ -892,7 +940,7 @@ function TaskEditor({ planStartDate, onAdd }){
   );
 }
 
-/* ───────────── Preview & push ───────────── */
+/* ───────── Preview & push ───────── */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
   const total=tasks.length;
   async function pushNow(){
@@ -949,8 +997,8 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       {total===0 ? (
         <div className="text-sm text-gray-500">No tasks yet.</div>
       ) : (
-        <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border">
-          <table className="w-full text-xs sm:text-sm">
+        <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
+          <table className="w-full min-w-[640px] text-xs sm:text-sm">
             <thead className="bg-gray-50">
               <tr className="text-left text-gray-500">
                 <th className="py-1.5 px-2">Title</th>
@@ -966,7 +1014,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
                 <tr key={t.id} className="border-t">
                   <td className="py-1.5 px-2">{t.title}</td>
                   <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
-                  <td className="py-1.5 px-2">{t.time||"—"}</td>
+                  <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
                   <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
                   <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
                   <td className="py-1.5 px-2 text-right">
@@ -989,15 +1037,13 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   );
 }
 
-/* ─────────────────── History ───────────────────
-   Mobile: no inner scroll (page scroll only).
-   ≥ sm: contained table with its own scroll.
-─────────────────── */
+/* ───────── History (responsive; mobile search toggle; hide Mode column on mobile) ───────── */
 function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   const [tab,setTab]=useState("active");
   const [rows,setRows]=useState([]);
   const [sel,setSel]=useState({});
   const [q,setQ]=useState("");
+  const [showSearchMobile, setShowSearchMobile] = useState(false);
 
   async function load(){
     if (!plannerEmail || !userEmail) { setRows([]); return; }
@@ -1038,35 +1084,54 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
           <button onClick={()=>setTab("active")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border whitespace-nowrap", tab==="active"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Active</button>
           <button onClick={()=>setTab("archived")} className={cn("rounded-lg px-2.5 py-1.5 text-xs border whitespace-nowrap", tab==="archived"?"bg-gray-900 text-white border-gray-900":"bg-white border-gray-300")}>Archived</button>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* Desktop search box */}
+        <div className="hidden sm:flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2 top-2 h-4 w-4 text-gray-400" />
-            <input value={q} onChange={e=>setQ(e.target.value)} onBlur={load} placeholder="Search titles" className="rounded-xl border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
+            <input value={q} onChange={e=>setQ(e.target.value)} onBlur={load} placeholder="Search titles"
+              className="rounded-xl border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
           </div>
           {tab==="active" ? (
             <>
-              <button onClick={doArchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><Archive className="h-3.5 w-3.5" /> Archive</button>
-              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><Trash2 className="h-3.5 w-3.5" /> Delete…</button>
+              <button onClick={doArchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap" title="Archive"><Archive className="h-3.5 w-3.5" /><span className="sr-only">Archive</span></button>
+              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap" title="Delete"><Trash2 className="h-3.5 w-3.5" /><span className="sr-only">Delete</span></button>
             </>
           ) : (
             <>
-              <button onClick={doUnarchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><ArchiveRestore className="h-3.5 w-3.5" /> Unarchive</button>
-              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap"><Trash2 className="h-3.5 w-3.5" /> Delete…</button>
+              <button onClick={doUnarchive} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap" title="Unarchive"><ArchiveRestore className="h-3.5 w-3.5" /><span className="sr-only">Unarchive</span></button>
+              <button onClick={doDelete} disabled={!anySelected} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap" title="Delete"><Trash2 className="h-3.5 w-3.5" /><span className="sr-only">Delete</span></button>
             </>
           )}
         </div>
+
+        {/* Mobile: search toggle */}
+        <button className="sm:hidden rounded-lg border px-2 py-1.5 text-xs" onClick={()=>setShowSearchMobile(s=>!s)} aria-label="Search">
+          <Search className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* Mobile: full page scroll; Desktop: contained */}
-      <div className="rounded-lg border sm:max-h-64 sm:overflow-auto">
-        <table className="w-full text-xs sm:text-sm">
+      {/* Mobile search input (collapsible) */}
+      {showSearchMobile && (
+        <div className="sm:hidden mb-2">
+          <div className="relative">
+            <Search className="absolute left-2 top-2 h-4 w-4 text-gray-400" />
+            <input value={q} onChange={e=>setQ(e.target.value)} onBlur={load} placeholder="Search titles"
+              className="w-full rounded-xl border border-gray-300 pl-7 pr-2 py-2 text-sm" />
+          </div>
+        </div>
+      )}
+
+      {/* Table wrapper: never overflow card horizontally; inner scroll only on ≥ sm */}
+      <div className="rounded-lg border overflow-x-auto sm:max-h-64 sm:overflow-y-auto">
+        <table className="w-full min-w-[720px] text-xs sm:text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
               <th className="py-1.5 px-2 w-8"><button onClick={()=>toggleAll(true)} title="Select all">□</button></th>
               <th className="py-1.5 px-2">Title</th>
               <th className="py-1.5 px-2">Start</th>
               <th className="py-1.5 px-2">Items</th>
-              <th className="py-1.5 px-2">Mode</th>
+              <th className="py-1.5 px-2 hidden sm:table-cell">Mode</th> {/* hide on mobile */}
               <th className="py-1.5 px-2">When</th>
               <th className="py-1.5 px-2 w-44 text-right">Actions</th>
             </tr>
@@ -1081,11 +1146,22 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
                 <td className="py-1.5 px-2">{r.title}</td>
                 <td className="py-1.5 px-2">{r.start_date}</td>
                 <td className="py-1.5 px-2">{r.items_count}</td>
-                <td className="py-1.5 px-2">{r.mode}</td>
+                <td className="py-1.5 px-2 hidden sm:table-cell">{r.mode}</td>
                 <td className="py-1.5 px-2">{format(new Date(r.pushed_at), "MMM d, yyyy")}</td>
                 <td className="py-1.5 px-2 text-right">
-                  <a className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" href={`/api/history/ics?planId=${r.id}`} target="_blank" rel="noreferrer"><Download className="h-3.5 w-3.5" /> .ics</a>
-                  <button onClick={()=>doRestore(r.id)} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 whitespace-nowrap">Restore</button>
+                  <a className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" href={`/api/history/ics?planId=${r.id}`} title=".ics" target="_blank" rel="noreferrer"><Download className="h-3.5 w-3.5" /><span className="sr-only">Download .ics</span></a>
+                  <button onClick={()=>doRestore(r.id)} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" title="Restore"><RotateCcw className="h-3.5 w-3.5" /><span className="sr-only">Restore</span></button>
+                  {tab==="active" ? (
+                    <>
+                      <button onClick={()=>{ setSel({[r.id]:true}); doArchive(); }} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" title="Archive"><Archive className="h-3.5 w-3.5" /><span className="sr-only">Archive</span></button>
+                      <button onClick={()=>{ setSel({[r.id]:true}); doDelete(); }} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50" title="Delete"><Trash2 className="h-3.5 w-3.5" /><span className="sr-only">Delete</span></button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={()=>{ setSel({[r.id]:true}); doUnarchive(); }} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" title="Unarchive"><ArchiveRestore className="h-3.5 w-3.5" /><span className="sr-only">Unarchive</span></button>
+                      <button onClick={()=>{ setSel({[r.id]:true}); doDelete(); }} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50" title="Delete"><Trash2 className="h-3.5 w-3.5" /><span className="sr-only">Delete</span></button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
