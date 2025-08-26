@@ -9,7 +9,7 @@ import {
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-/* utils */
+/* ───────────────────── utils ───────────────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
 function parseISODate(s){ if (!s) return null; const d=new Date(`${s}T00:00:00Z`); return Number.isNaN(d.getTime())?null:d; }
@@ -22,7 +22,7 @@ function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonth
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 
-/* ErrorBoundary */
+/* ───────────────── ErrorBoundary ───────────────── */
 class ErrorBoundary extends React.Component{
   constructor(p){ super(p); this.state={error:null}; }
   static getDerivedStateFromError(e){ return {error:e}; }
@@ -44,7 +44,7 @@ class ErrorBoundary extends React.Component{
   }
 }
 
-/* Toasts */
+/* ─────────────────── Toasts ─────────────────── */
 function Toasts({ items, dismiss }){
   return (
     <div className="fixed right-3 top-3 z-[60] flex flex-col gap-2">
@@ -66,7 +66,7 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* Auth */
+/* ───────────────────── Auth ───────────────────── */
 function AuthScreen({ onSignedIn }){
   const [mode,setMode]=useState("signin");
   const [email,setEmail]=useState(""); const [pw,setPw]=useState(""); const [msg,setMsg]=useState("");
@@ -122,7 +122,7 @@ function AuthScreen({ onSignedIn }){
   );
 }
 
-/* Root */
+/* ─────────────────── Root ─────────────────── */
 export default function App(){
   return (
     <ErrorBoundary>
@@ -141,7 +141,7 @@ function AppInner(){
   return <AppShell plannerEmail={plannerEmail} />;
 }
 
-/* Shell */
+/* ─────────────────── Shell ─────────────────── */
 function AppShell({ plannerEmail }){
   const [prefs, setPrefs] = useState({
     default_view: "users",
@@ -185,7 +185,7 @@ function AppShell({ plannerEmail }){
   useEffect(()=>{ if (prefs.show_inbox_badge) loadBadge(); },[plannerEmail, prefs.show_inbox_badge]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-3 sm:p-6">
+    <div className="min-h-screen overflow-x-hidden bg-gradient-to-b from-white to-gray-50 p-3 sm:p-6">
       <Toasts items={toasts} dismiss={dismissToast} />
       <div className="mx-auto max-w-6xl">
         <div className="mb-3 sm:mb-6 flex flex-wrap items-center justify-between gap-2">
@@ -248,7 +248,7 @@ function NavBtn({ active, onClick, icon, children }){
   );
 }
 
-/* Modal + calendar */
+/* ─────────────── Modal + calendar ─────────────── */
 function Modal({ title, children, onClose }){
   useEffect(()=>{ function onEsc(e){ if (e.key==="Escape") onClose?.(); } window.addEventListener("keydown", onEsc); return ()=>window.removeEventListener("keydown", onEsc); },[onClose]);
   return (
@@ -311,7 +311,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* Users (with pagination) */
+/* ─────────────────── Users (table) ─────────────────── */
 function UsersView({ plannerEmail, onManage }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
@@ -427,7 +427,7 @@ function UsersView({ plannerEmail, onManage }){
   );
 }
 
-/* Settings */
+/* ─────────────────── Settings ─────────────────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(prefs);
   useEffect(()=>setLocal(prefs),[prefs]);
@@ -476,6 +476,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
             Auto-archive bundles after assigning
             <span className="text-gray-400" title="If on, Inbox items are archived the moment you assign them to a user."><Info className="h-3.5 w-3.5" /></span>
           </div>
+          {/* custom toggle */}
           <button
             className={cn(
               "w-16 rounded-full p-0.5 border transition relative",
@@ -510,7 +511,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
   );
 }
 
-/* Inbox */
+/* ─────────────────── Inbox ─────────────────── */
 function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   const [bundles,setBundles]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -580,7 +581,7 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   );
 }
 
-/* Plan */
+/* ─────────────────── Plan ─────────────────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -634,7 +635,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
         </div>
       </div>
 
-      <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-3">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Task list title</div>
           <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
@@ -682,7 +683,36 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* Task editor (compact, consistent heights; time with chevron) */
+/* ─────────── Time dropdown (never overflows) ─────────── */
+function generateTimeOptions(step=15){
+  const arr=[];
+  for(let h=0; h<24; h++){
+    for(let m=0; m<60; m+=step){
+      const hh=String(h).padStart(2,"0");
+      const mm=String(m).padStart(2,"0");
+      arr.push(`${hh}:${mm}`);
+    }
+  }
+  return arr;
+}
+function SelectTime({ value, onChange }){
+  const opts = useMemo(()=>generateTimeOptions(15),[]);
+  return (
+    <div className="relative w-full">
+      <select
+        value={value || ""}
+        onChange={(e)=>onChange(e.target.value)}
+        className="block w-full h-10 appearance-none rounded-xl border border-gray-300 bg-white px-3 pr-8 text-sm"
+      >
+        <option value="">— No time —</option>
+        {opts.map(t=><option key={t} value={t}>{t}</option>)}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+    </div>
+  );
+}
+
+/* ────────────── Task editor (uses SelectTime) ────────────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -758,7 +788,7 @@ function TaskEditor({ planStartDate, onAdd }){
 
   return (
     <div className="rounded-xl border border-gray-200 p-3 sm:p-4">
-      <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-4">
+      <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-[repeat(4,minmax(0,1fr))]">
         <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Task title</div>
           <input value={title} onChange={(e)=>setTitle(e.target.value)} className="w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Strength training" />
@@ -771,18 +801,9 @@ function TaskEditor({ planStartDate, onAdd }){
           </button>
         </div>
 
-        {/* Time input with consistent height and chevron indicator */}
         <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
-          <div className="relative">
-            <input
-              type="time"
-              value={time}
-              onChange={(e)=>setTime(e.target.value)}
-              className="block w-full min-w-0 max-w-full rounded-xl border border-gray-300 h-10 px-3 pr-8 text-sm"
-            />
-            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          </div>
+          <SelectTime value={time} onChange={setTime} />
         </label>
 
         <label className="block min-w-0">
@@ -857,11 +878,21 @@ function TaskEditor({ planStartDate, onAdd }){
         <button onClick={()=>{ setTitle(""); setNotes(""); setTime(""); setDur(60); setRepeat("none"); setTaskDate(planStartDate); }}
           className="inline-flex items-center gap-2 rounded-xl border px-2.5 sm:px-3 py-2 text-[11px] sm:text-xs whitespace-nowrap"><RotateCcw className="h-3 w-3" /> Reset</button>
       </div>
+
+      {taskDateOpen && (
+        <Modal title="Choose Task Date" onClose={()=>setTaskDateOpen(false)}>
+          <CalendarGridFree
+            initialDate={taskDate || planStartDate}
+            selectedDate={taskDate || planStartDate}
+            onPick={(ymd)=>{ setTaskDate(ymd); setTaskDateOpen(false); }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
 
-/* Preview & push */
+/* ───────────── Preview & push ───────────── */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
   const total=tasks.length;
   async function pushNow(){
@@ -918,7 +949,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       {total===0 ? (
         <div className="text-sm text-gray-500">No tasks yet.</div>
       ) : (
-        <div className="mb-3 max-h-56 overflow-auto rounded-lg border">
+        <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border">
           <table className="w-full text-xs sm:text-sm">
             <thead className="bg-gray-50">
               <tr className="text-left text-gray-500">
@@ -958,7 +989,10 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   );
 }
 
-/* History */
+/* ─────────────────── History ───────────────────
+   Mobile: no inner scroll (page scroll only).
+   ≥ sm: contained table with its own scroll.
+─────────────────── */
 function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   const [tab,setTab]=useState("active");
   const [rows,setRows]=useState([]);
@@ -1023,7 +1057,8 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
         </div>
       </div>
 
-      <div className="max-h-64 overflow-auto rounded-lg border">
+      {/* Mobile: full page scroll; Desktop: contained */}
+      <div className="rounded-lg border sm:max-h-64 sm:overflow-auto">
         <table className="w-full text-xs sm:text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
