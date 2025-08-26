@@ -313,246 +313,292 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
 }
 
 /* ───────── Invite Modal ───────── */
-function InviteModal({ plannerEmail, userEmail, onClose, onToast }){
-  const [state,setState]=useState({ loading:true, link:"", emailed:false, canSend:false, sending:false, error:"" });
+function InviteModal({ plannerEmail, userEmail: presetEmail, onClose, onToast }) {
+  const [email, setEmail] = React.useState(presetEmail || "");
+  const [state, setState] = React.useState({
+    loading: false,
+    link: "",
+    emailed: false,
+    canSend: false,
+    sending: false,
+    error: "",
+    checked: false,
+    fromLabel: ""
+  });
 
-  useEffect(()=>{
-    (async ()=>{
-      try{
-        const qs=new URLSearchParams({ plannerEmail, userEmail });
-        const r=await fetch(`/api/invite/preview?${qs.toString()}`);
-        const j=await r.json();
-        if (!r.ok || j.error) throw new Error(j.error||"Failed to prepare invite");
-        setState(s=>({ ...s, loading:false, link:j.inviteUrl||"", emailed:!!j.emailed, canSend:true }));
-      }catch(e){
-        setState(s=>({ ...s, loading:false, error:String(e.message||e) }));
-      }
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch(`/api/invite/cansend`);
+        const j = await r.json();
+        setState(s => ({ ...s, canSend: !!j.emailEnabled, fromLabel: j.from || "" }));
+      } catch {}
     })();
-  },[plannerEmail,userEmail]);
+  }, []);
 
-  async function copy(){
-    try{
-      await navigator.clipboard.writeText(state.link);
-      onToast?.("ok","Invite link copied");
-    }catch(e){ onToast?.("error","Could not copy link"); }
+  async function prepare() {
+    setState(s => ({ ...s, loading: true, error: "", link: "", emailed: false }));
+    try {
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Enter a valid email address.");
+      const qs = new URLSearchParams({ plannerEmail, userEmail: email });
+      const r = await fetch(`/api/invite/preview?` + qs.toString());
+      const j = await r.json();
+      if (!r.ok || j.error || !j.inviteUrl) throw new Error(j.error || "Failed to prepare invite");
+      setState(s => ({ ...s, loading: false, link: j.inviteUrl, emailed: !!j.emailed, checked: true }));
+      onToast?.("ok", "Invite link created");
+    } catch (e) {
+      setState(s => ({ ...s, loading: false, error: String(e.message || e) }));
+    }
   }
-  async function send(){
-    setState(s=>({ ...s, sending:true }));
-    try{
-      const r=await fetch(`/api/invite/send`,{
-        method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ plannerEmail, userEmail })
+
+  async function copy() {
+    try {
+      if (!state.link) return;
+      await navigator.clipboard.writeText(state.link);
+      onToast?.("ok", "Invite link copied");
+    } catch {
+      onToast?.("error", "Could not copy link");
+    }
+  }
+
+  async function send() {
+    if (!state.canSend) return;
+    setState(s => ({ ...s, sending: true }));
+    try {
+      const r = await fetch(`/api/invite/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email })
       });
-      const j=await r.json();
-      if (!r.ok || j.error) throw new Error(j.error||"Send failed");
-      setState(s=>({ ...s, sending:false, emailed:true }));
-      onToast?.("ok","Invite email sent");
-    }catch(e){
-      setState(s=>({ ...s, sending:false }));
-      onToast?.("error", String(e.message||e));
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Send failed");
+      setState(s => ({ ...s, sending: false, emailed: true }));
+      onToast?.("ok", "Invite email sent");
+    } catch (e) {
+      setState(s => ({ ...s, sending: false }));
+      onToast?.("error", String(e.message || e));
     }
   }
 
   return (
     <Modal title="Invite user to connect Google Tasks" onClose={onClose}>
-      {state.loading ? (
-        <div className="text-sm text-gray-600">Preparing invite…</div>
-      ) : state.error ? (
-        <div className="text-sm text-red-600">Error: {state.error}</div>
-      ) : (
-        <div className="space-y-3">
-          <div className="text-xs text-gray-600">User</div>
-          <div className="rounded-xl border p-2 text-sm">{userEmail}</div>
+      <div className="space-y-3">
+        <label className="block">
+          <div className="mb-1 text-xs font-medium">User email</div>
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            placeholder="name@example.com"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
 
-          <div className="text-xs text-gray-600">Invite link</div>
-          <div className="flex items-center gap-2">
-            <input readOnly value={state.link} className="flex-1 rounded-xl border px-3 py-2 text-xs" />
-            <button onClick={copy} className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs hover:bg-gray-50 whitespace-nowrap"><LinkIcon className="h-3.5 w-3.5" /> Copy</button>
-          </div>
-
-          <div className="text-[11px] text-gray-500">Share this link with the user so they can authorize Plan2Tasks to create tasks in their Google Tasks.</div>
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Close</button>
-            <button onClick={send} disabled={!state.canSend || state.sending} className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap">
-              <Mail className="h-3.5 w-3.5" /> {state.emailed ? "Resend Email" : "Send Email"}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={prepare}
+            className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+          >
+            Create Invite Link
+          </button>
+          {state.link ? (
+            <button
+              onClick={copy}
+              className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50 whitespace-nowrap"
+            >
+              Copy Link
             </button>
-          </div>
+          ) : null}
         </div>
-      )}
+
+        {state.loading ? <div className="text-sm text-gray-600">Preparing invite…</div> : null}
+        {state.error ? <div className="text-sm text-red-600">Error: {state.error}</div> : null}
+
+        {state.link ? (
+          <>
+            <div className="text-xs text-gray-600">Invite link</div>
+            <div className="flex items-center gap-2">
+              <input readOnly value={state.link} className="flex-1 rounded-xl border px-3 py-2 text-xs" />
+              <button
+                onClick={copy}
+                className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs hover:bg-gray-50 whitespace-nowrap"
+              >
+                Copy
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        <div className="border-t pt-2">
+          {state.canSend ? (
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-gray-500">
+                From: <b>{state.fromLabel}</b>
+              </div>
+              <button
+                onClick={send}
+                disabled={!state.link || state.sending}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-black disabled:opacity-50 whitespace-nowrap"
+              >
+                {state.emailed ? "Resend Email" : "Send Email"}
+              </button>
+            </div>
+          ) : (
+            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+              Email sending is not configured. You can still copy and share the link.
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">
+            Close
+          </button>
+        </div>
+      </div>
     </Modal>
   );
 }
 
+
 /* ───────── Users (mobile-first) ───────── */
-function UsersView({ plannerEmail, onManage, onToast }){
-  const [rows,setRows]=useState([]);
-  const [q,setQ]=useState("");
-  const [loading,setLoading]=useState(true);
+// ---------- UsersView (REPLACE YOURS WITH THIS) ----------
+function UsersView({ plannerEmail, onManage, onToast }) {
+  const [users, setUsers] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [q, setQ] = React.useState("");
+  const [inviteUser, setInviteUser] = React.useState(""); // controls InviteModal
 
-  const [page,setPage]=useState(1);
-  const [pageSize,setPageSize]=useState(10);
+  React.useEffect(() => {
+    loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plannerEmail]);
 
-  const [inviteUser,setInviteUser]=useState("");
-
-  async function load(){
+  async function loadUsers() {
     setLoading(true);
     try {
-      const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all", q });
-      const r=await fetch(`/api/users?${qs.toString()}`);
-      const j=await r.json();
-      setRows(j.users||[]);
-    } catch(e){ console.error(e); }
-    setLoading(false);
+      // Support both api/users and api/users/list styles
+      const qs = new URLSearchParams({ plannerEmail });
+      let r = await fetch(`/api/users?` + qs.toString());
+      if (r.status === 404) {
+        r = await fetch(`/api/users/list?` + qs.toString());
+      }
+      const j = await r.json().catch(() => ({}));
+      // Accept either {users:[...]} or plain array
+      const arr = Array.isArray(j) ? j : (j.users || []);
+      setUsers(arr);
+    } catch (e) {
+      onToast?.("error", "Failed to load users");
+    } finally {
+      setLoading(false);
+    }
   }
-  useEffect(()=>{ load(); },[plannerEmail]);
 
-  const filtered = useMemo(()=>{
-    const s=q.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter(u=>{
-      const tags=(u.groups||[]).join(" ").toLowerCase();
-      return u.email.toLowerCase().includes(s) || (u.name||"").toLowerCase().includes(s) || tags.includes(s) || (u.status||"").toLowerCase().includes(s);
-    });
-  },[rows,q]);
-
-  useEffect(()=>{ setPage(1); },[q, pageSize, rows.length]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const startIdx = (page-1)*pageSize;
-  const paged = filtered.slice(startIdx, startIdx + pageSize);
-
-  function goto(p){ setPage(Math.min(totalPages, Math.max(1, p))); }
+  const filtered = users.filter(u => {
+    if (!q) return true;
+    const hay = `${u.email || ""} ${u.name || ""} ${u.group || ""} ${u.status || ""}`.toLowerCase();
+    return hay.includes(q.toLowerCase());
+  });
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-5 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <div className="text-base sm:text-lg font-semibold">Users</div>
-          <div className="text-[11px] sm:text-xs text-gray-500">Invite users and manage tasks.</div>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative w-40 sm:w-64">
-            <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-            <input
-              value={q}
-              onChange={e=>setQ(e.target.value)}
-              placeholder="Search email, name, group, status"
-              className="w-full rounded-xl border border-gray-300 pl-8 pr-3 py-2 text-xs sm:text-sm"
-            />
-          </div>
-          <select
-            value={pageSize}
-            onChange={(e)=>setPageSize(Number(e.target.value))}
-            className="rounded-xl border border-gray-300 px-2 py-2 text-xs sm:text-sm whitespace-nowrap"
-            title="Rows per page"
+    <div className="space-y-4">
+      {/* Header with title, search, and TOP-RIGHT Invite User */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 className="text-lg font-semibold">Users</h2>
+
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search users (name, email, group, status)"
+            className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-sm sm:w-64"
+          />
+          <button
+            onClick={() => setInviteUser("__new__")}
+            className="rounded-xl bg-cyan-600 px-3 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+            title="Invite a new user"
           >
-            {[10,20,50].map(n=><option key={n} value={n}>{n}/page</option>)}
-          </select>
+            Invite User
+          </button>
         </div>
       </div>
 
-      {/* Mobile list */}
-      <div className="sm:hidden space-y-2">
-        {loading && <div className="text-gray-500 text-sm">Loading…</div>}
-        {!loading && paged.length===0 && <div className="text-gray-500 text-sm">No users found.</div>}
-        {!loading && paged.map(u=>(
-          <div key={u.email} className="rounded-xl border p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-medium truncate">{u.email}</div>
-                <div className="text-[11px] text-gray-500 truncate">
-                  {(u.name||"—")} · {(u.status==="connected"?"Connected ✓":(u.status||"—"))}
-                </div>
-              </div>
-              <div className="shrink-0 flex gap-1">
-                <button
-                  onClick={()=>setInviteUser(u.email)}
-                  className="rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold hover:bg-gray-50 whitespace-nowrap"
-                  title="Invite / Get link"
-                >
-                  Invite
-                </button>
-                <button
-                  onClick={()=>onManage(u.email)}
-                  className="rounded-xl bg-cyan-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
-                >
-                  Manage
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop/tablet */}
-      <div className="hidden sm:block overflow-auto rounded-lg border mt-2 sm:mt-3">
-        <table className="w-full text-xs sm:text-sm">
-          <thead className="bg-gray-50 sticky top-0">
-            <tr className="text-left text-gray-500">
-              <th className="py-2 px-2">Email</th>
-              <th className="py-2 px-2">Name</th>
-              <th className="py-2 px-2">Groups</th>
-              <th className="py-2 px-2">Status</th>
-              <th className="py-2 px-2 w-[280px]">Actions</th>
+      {/* Users table (responsive) */}
+      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-left">
+            <tr className="text-gray-600">
+              <th className="px-3 py-2 font-medium">Name</th>
+              <th className="px-3 py-2 font-medium">Email</th>
+              <th className="px-3 py-2 font-medium">Groups</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="py-3 px-2 text-gray-500" colSpan={5}>Loading…</td></tr>}
-            {!loading && paged.length===0 && <tr><td className="py-3 px-2 text-gray-500" colSpan={5}>No users found.</td></tr>}
-            {paged.map(u=>(
-              <tr key={u.email} className="border-t">
-                <td className="py-2 px-2">{u.email}</td>
-                <td className="py-2 px-2 truncate max-w-[160px]">{u.name||"—"}</td>
-                <td className="py-2 px-2 truncate max-w-[260px]">{(u.groups||[]).join(", ")||"—"}</td>
-                <td className="py-2 px-2">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
-                <td className="py-2 px-2">
-                  <div className="flex flex-wrap gap-1.5">
-                    <button
-                      onClick={()=>setInviteUser(u.email)}
-                      className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50 whitespace-nowrap"
-                      title="Invite / Get link"
-                    >
-                      <LinkIcon className="h-3.5 w-3.5" /> Invite
-                    </button>
-                    <button
-                      onClick={()=>onManage(u.email)}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
-                    >
-                      Manage User
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {loading ? (
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Loading…</td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">No users yet.</td></tr>
+            ) : (
+              filtered.map((u) => (
+                <tr key={u.email} className="border-t">
+                  <td className="px-3 py-2">{u.name || "—"}</td>
+                  <td className="px-3 py-2">{u.email}</td>
+                  <td className="px-3 py-2">
+                    {Array.isArray(u.groups) ? u.groups.join(", ") : (u.group || "—")}
+                  </td>
+                  <td className="px-3 py-2">
+                    {u.status === "connected" ? (
+                      <span className="rounded-full bg-green-50 px-2 py-1 text-[11px] font-medium text-green-700 border border-green-200">
+                        Connected
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-yellow-50 px-2 py-1 text-[11px] font-medium text-yellow-800 border border-yellow-200">
+                        Not connected
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => setInviteUser(u.email)}
+                        className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"
+                        title="Invite this user"
+                      >
+                        Invite
+                      </button>
+                      <button
+                        onClick={() => onManage(u.email)}
+                        className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700"
+                        title="Go to Manage User"
+                      >
+                        Manage User
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
-        <div className="text-gray-600">
-          Showing <b>{filtered.length ? startIdx+1 : 0}</b>–<b>{Math.min(filtered.length, startIdx+paged.length)}</b> of <b>{filtered.length}</b>
-        </div>
-        <div className="flex items-center gap-1">
-          <button onClick={()=>goto(1)} disabled={page===1} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronsLeft className="h-3.5 w-3.5" /></button>
-          <button onClick={()=>goto(page-1)} disabled={page===1} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronLeft className="h-3.5 w-3.5" /></button>
-          <div className="px-2">Page <b>{page}</b> / {totalPages}</div>
-          <button onClick={()=>goto(page+1)} disabled={page===totalPages} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronRight className="h-3.5 w-3.5" /></button>
-          <button onClick={()=>goto(totalPages)} disabled={page===totalPages} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronsRight className="h-3.5 w-3.5" /></button>
-        </div>
-      </div>
-
-      {inviteUser && (
+      {/* Invite Modal (opens for top-right button or per-row Invite) */}
+      {inviteUser ? (
         <InviteModal
           plannerEmail={plannerEmail}
-          userEmail={inviteUser}
-          onClose={()=>setInviteUser("")}
+          userEmail={inviteUser === "__new__" ? "" : inviteUser}
+          onClose={() => setInviteUser("")}
           onToast={onToast}
         />
-      )}
+      ) : null}
     </div>
   );
 }
+// ---------- end UsersView ----------
+
+
 
 /* ───────── Settings ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
