@@ -1,10 +1,4 @@
-/* src/App.jsx — full file
-   - Fix: adds UsersView (prevents "UsersView is not defined")
-   - Dates: single “Choose … Date” button + compact calendar modal
-   - Recurrence: weekly pill buttons + monthly patterns + “No end” option
-   - History panel: uses /api/history_list (flat GET) and /api/history/ics for .ics
-*/
-
+// src/App.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
@@ -15,26 +9,20 @@ import {
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
 
-/* -------------------- tiny utils -------------------- */
+/* utils */
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function parseISODate(s){ if (!s) return null; const d=new Date(`${s}T00:00:00`); return Number.isNaN(d.getTime())?null:d; }
+function parseISODate(s){ if (!s) return null; const d=new Date(`${s}T00:00:00Z`); return Number.isNaN(d.getTime())?null:d; }
 function fmtDateYMD(d){ const y=d.getUTCFullYear(); const m=String(d.getUTCMonth()+1).padStart(2,"0"); const dd=String(d.getUTCDate()).padStart(2,"0"); return `${y}-${m}-${dd}`; }
 function daysBetweenUTC(a,b){ const ms=86400000; const da=Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),a.getUTCDate()); const db=Date.UTC(b.getUTCFullYear(),b.getUTCMonth(),b.getUTCDate()); return Math.round((db-da)/ms); }
-function addMonthsUTC(dateUTC, months){
-  const y=dateUTC.getUTCFullYear(), m=dateUTC.getUTCMonth(), d=dateUTC.getUTCDate();
-  const nm=m+months, ny=y+Math.floor(nm/12), nmo=((nm%12)+12)%12;
-  const last=new Date(Date.UTC(ny,nmo+1,0)).getUTCDate();
-  const nd=Math.min(d,last);
-  return new Date(Date.UTC(ny,nmo,nd));
-}
+function addMonthsUTC(dateUTC, months){ const y=dateUTC.getUTCFullYear(), m=dateUTC.getUTCMonth(), d=dateUTC.getUTCDate(); const nm=m+months, ny=y+Math.floor(nm/12), nmo=((nm%12)+12)%12; const last=new Date(Date.UTC(ny,nmo+1,0)).getUTCDate(); const nd=Math.min(d,last); return new Date(Date.UTC(ny,nmo,nd)); }
 function lastDayOfMonthUTC(y,m0){ return new Date(Date.UTC(y,m0+1,0)).getUTCDate(); }
 function firstWeekdayOfMonthUTC(y,m0,weekday){ const first=new Date(Date.UTC(y,m0,1)); const shift=(7+weekday-first.getUTCDay())%7; return new Date(Date.UTC(y,m0,1+shift)); }
 function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonthUTC(y,m0,weekday); const c=new Date(Date.UTC(y,m0, first.getUTCDate()+7*(nth-1))); return c.getUTCMonth()===m0?c:null; }
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
 const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
 
-/* -------------------- ErrorBoundary -------------------- */
+/* ErrorBoundary */
 class ErrorBoundary extends React.Component{
   constructor(p){ super(p); this.state={error:null}; }
   static getDerivedStateFromError(e){ return {error:e}; }
@@ -45,7 +33,9 @@ class ErrorBoundary extends React.Component{
         <div className="min-h-screen bg-red-50 p-4 sm:p-6">
           <div className="mx-auto max-w-3xl rounded-xl border border-red-200 bg-white p-4">
             <div className="text-red-700 font-bold mb-2">Something went wrong in the UI</div>
-            <pre className="bg-red-100 p-3 text-xs text-red-900 overflow-auto rounded">{String(this.state.error?.message || this.state.error)}</pre>
+            <pre className="bg-red-100 p-3 text-xs text-red-900 overflow-auto rounded">
+              {String(this.state.error?.message || this.state.error)}
+            </pre>
           </div>
         </div>
       );
@@ -54,7 +44,7 @@ class ErrorBoundary extends React.Component{
   }
 }
 
-/* -------------------- Toasts -------------------- */
+/* Toasts */
 function Toasts({ items, dismiss }){
   return (
     <div className="fixed right-3 top-3 z-[60] flex flex-col gap-2">
@@ -76,7 +66,7 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* -------------------- Auth -------------------- */
+/* Auth */
 function AuthScreen({ onSignedIn }){
   const [mode,setMode]=useState("signin");
   const [email,setEmail]=useState(""); const [pw,setPw]=useState(""); const [msg,setMsg]=useState("");
@@ -132,7 +122,7 @@ function AuthScreen({ onSignedIn }){
   );
 }
 
-/* -------------------- Root -------------------- */
+/* Root */
 export default function App(){
   return (
     <ErrorBoundary>
@@ -140,7 +130,6 @@ export default function App(){
     </ErrorBoundary>
   );
 }
-
 function AppInner(){
   const [session,setSession]=useState(null);
   useEffect(()=>{ supabaseClient.auth.getSession().then(({data})=>setSession(data.session||null));
@@ -152,7 +141,7 @@ function AppInner(){
   return <AppShell plannerEmail={plannerEmail} />;
 }
 
-/* -------------------- Shell -------------------- */
+/* Shell */
 function AppShell({ plannerEmail }){
   const [prefs, setPrefs] = useState({
     default_view: "users",
@@ -162,12 +151,10 @@ function AppShell({ plannerEmail }){
     show_inbox_badge: true,
     open_drawer_on_import: false
   });
-  const [view,setView]=useState("users"); // users | plan | settings
+  const [view,setView]=useState("users");
   const [inboxOpen,setInboxOpen]=useState(false);
   const [inboxBadge,setInboxBadge]=useState(0);
   const [selectedUserEmail, setSelectedUserEmail] = useState("");
-
-  /* toasts */
   const [toasts,setToasts]=useState([]);
   const toast = useCallback((type, message, title) => {
     const id=uid(); setToasts(ts=>[...ts,{id,type,message,title}]);
@@ -198,34 +185,20 @@ function AppShell({ plannerEmail }){
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-4 sm:p-6">
       <Toasts items={toasts} dismiss={dismissToast} />
       <div className="mx-auto max-w-6xl">
-        {/* Header */}
         <div className="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="text-xl sm:text-2xl font-bold">Plan2Tasks</div>
             <nav className="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
-              <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}>
-                <span className="hidden sm:inline">Users</span>
-              </NavBtn>
-              <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}>
-                <span className="hidden sm:inline">Plan</span>
-              </NavBtn>
-              <NavBtn active={view==="settings"} onClick={()=>setView("settings")} icon={<SettingsIcon className="h-4 w-4" />}>
-                <span className="hidden sm:inline">Settings</span>
-              </NavBtn>
+              <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}><span className="hidden sm:inline">Users</span></NavBtn>
+              <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}><span className="hidden sm:inline">Plan</span></NavBtn>
+              <NavBtn active={view==="settings"} onClick={()=>setView("settings")} icon={<SettingsIcon className="h-4 w-4" />}><span className="hidden sm:inline">Settings</span></NavBtn>
             </nav>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <button
-              onClick={()=>setInboxOpen(true)}
-              className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap"
-              title="Inbox (GPT imports)"
-            >
-              <InboxIcon className="inline h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">Inbox</span>
+            <button onClick={()=>setInboxOpen(true)} className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap" title="Inbox (GPT imports)">
+              <InboxIcon className="inline h-4 w-4 sm:mr-1" /><span className="hidden sm:inline">Inbox</span>
               {prefs.show_inbox_badge && inboxBadge>0 && (
-                <span className="absolute -top-2 -right-2 rounded-full bg-cyan-600 px-1.5 py-[2px] text-[10px] font-bold text-white">
-                  {inboxBadge}
-                </span>
+                <span className="absolute -top-2 -right-2 rounded-full bg-cyan-600 px-1.5 py-[2px] text-[10px] font-bold text-white">{inboxBadge}</span>
               )}
             </button>
             <span className="rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm whitespace-nowrap">
@@ -238,15 +211,15 @@ function AppShell({ plannerEmail }){
         {view==="users" && (
           <UsersView
             plannerEmail={plannerEmail}
-            onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
+            onManage={(email)=>{ /* go to plan view with user selected */ setView("plan"); }}
           />
         )}
 
         {view==="plan" && (
           <PlanView
             plannerEmail={plannerEmail}
-            selectedUserEmail={selectedUserEmail}
-            setSelectedUserEmail={(v)=>{ setSelectedUserEmail(v); }}
+            selectedUserEmailProp={null}
+            onToast={(t,m)=>toast(t,m)}
           />
         )}
 
@@ -266,16 +239,13 @@ function AppShell({ plannerEmail }){
 function NavBtn({ active, onClick, icon, children }){
   return (
     <button onClick={onClick}
-      className={cn(
-        "rounded-xl px-2.5 py-2 text-xs sm:text-sm font-semibold whitespace-nowrap",
-        active?"bg-cyan-600 text-white":"bg-white border border-gray-300 hover:bg-gray-50"
-      )}>
+      className={cn("rounded-xl px-2.5 py-2 text-xs sm:text-sm font-semibold whitespace-nowrap", active?"bg-cyan-600 text-white":"bg-white border border-gray-300 hover:bg-gray-50")}>
       <span className="inline-flex items-center gap-1">{icon}{children}</span>
     </button>
   );
 }
 
-/* -------------------- Modal + Calendar Grid -------------------- */
+/* Modal + calendar */
 function Modal({ title, children, onClose }){
   useEffect(()=>{ function onEsc(e){ if (e.key==="Escape") onClose?.(); } window.addEventListener("keydown", onEsc); return ()=>window.removeEventListener("keydown", onEsc); },[onClose]);
   return (
@@ -297,7 +267,6 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   const [vm,setVm]=useState(()=>new Date(Date.UTC(sel.getUTCFullYear(), sel.getUTCMonth(), 1)));
   function monthLabel(d){ return format(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)), "MMMM yyyy"); }
   function gotoMonth(delta){ const y=vm.getUTCFullYear(), m=vm.getUTCMonth(); setVm(new Date(Date.UTC(y, m+delta, 1))); }
-
   const year=vm.getUTCFullYear(), month=vm.getUTCMonth();
   const firstOfMonth=new Date(Date.UTC(year, month, 1));
   const startDow=firstOfMonth.getUTCDay();
@@ -308,7 +277,6 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
     const isSelected=fmtDateYMD(cell)===fmtDateYMD(sel);
     return {cell,isSameMonth,isSelected,label:String(cell.getUTCDate())};
   }));
-
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
@@ -319,10 +287,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(1)} title="Next month"><ChevronRight className="h-3 w-3" /></button>
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>gotoMonth(12)} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
         </div>
-        <button className="rounded-lg border px-2 py-1 text-xs"
-          onClick={()=>{ setVm(new Date(Date.UTC(init.getUTCFullYear(), init.getUTCMonth(), 1))); }}>
-          Jump to current
-        </button>
+        <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>{ setVm(new Date(Date.UTC(init.getUTCFullYear(), init.getUTCMonth(), 1))); }}>Jump to current</button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
         {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><div key={d}>{d}</div>)}
@@ -343,12 +308,11 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* -------------------- UsersView -------------------- */
+/* Users */
 function UsersView({ plannerEmail, onManage }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(true);
-
   async function load(){
     setLoading(true);
     try {
@@ -360,7 +324,6 @@ function UsersView({ plannerEmail, onManage }){
     setLoading(false);
   }
   useEffect(()=>{ load(); },[plannerEmail]);
-
   const filtered = useMemo(()=>{
     const s=q.trim().toLowerCase();
     if (!s) return rows;
@@ -369,7 +332,6 @@ function UsersView({ plannerEmail, onManage }){
       return u.email.toLowerCase().includes(s) || (u.name||"").toLowerCase().includes(s) || tags.includes(s) || (u.status||"").toLowerCase().includes(s);
     });
   },[rows,q]);
-
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -380,12 +342,10 @@ function UsersView({ plannerEmail, onManage }){
         <div className="w-full sm:w-72">
           <div className="relative">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search email, name, group, status"
-              className="w-full rounded-xl border border-gray-300 pl-8 pr-3 py-2 text-sm" />
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search email, name, group, status" className="w-full rounded-xl border border-gray-300 pl-8 pr-3 py-2 text-sm" />
           </div>
         </div>
       </div>
-
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -398,12 +358,8 @@ function UsersView({ plannerEmail, onManage }){
             </tr>
           </thead>
           <tbody>
-            {loading && (
-              <tr><td className="py-3 text-gray-500" colSpan={5}>Loading…</td></tr>
-            )}
-            {!loading && filtered.length===0 && (
-              <tr><td className="py-3 text-gray-500" colSpan={5}>No users yet.</td></tr>
-            )}
+            {loading && <tr><td className="py-3 text-gray-500" colSpan={5}>Loading…</td></tr>}
+            {!loading && filtered.length===0 && <tr><td className="py-3 text-gray-500" colSpan={5}>No users yet.</td></tr>}
             {filtered.map(u=>(
               <tr key={u.email} className="border-t">
                 <td className="py-2 pr-3">{u.email}</td>
@@ -411,24 +367,21 @@ function UsersView({ plannerEmail, onManage }){
                 <td className="py-2 pr-3">{(u.groups||[]).join(", ")||"—"}</td>
                 <td className="py-2 pr-3">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
                 <td className="py-2 pr-3">
-                  <button onClick={()=>onManage(u.email)}
-                    className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700">Manage User</button>
+                  <button onClick={()=>onManage(u.email)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700">Manage User</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
     </div>
   );
 }
 
-/* -------------------- SettingsView (simple) -------------------- */
+/* Settings */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(prefs);
   useEffect(()=>setLocal(prefs),[prefs]);
-
   async function save(){
     try{
       const r=await fetch(`/api/prefs/set`,{
@@ -442,41 +395,35 @@ function SettingsView({ plannerEmail, prefs, onChange }){
     <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
       <div className="text-base sm:text-lg font-semibold mb-2">Settings</div>
       <div className="text-[11px] sm:text-xs text-gray-500 mb-4">Tweak defaults and preferences.</div>
-
       <div className="grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Default view</div>
-          <select value={local.default_view} onChange={(e)=>setLocal({...local, default_view:e.target.value})}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select value={local.default_view} onChange={(e)=>setLocal({...local, default_view:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             <option value="users">Users</option>
             <option value="plan">Plan</option>
           </select>
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Default timezone</div>
-          <select value={local.default_timezone} onChange={(e)=>setLocal({...local, default_timezone:e.target.value})}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select value={local.default_timezone} onChange={(e)=>setLocal({...local, default_timezone:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
           </select>
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Default push mode</div>
-          <select value={local.default_push_mode} onChange={(e)=>setLocal({...local, default_push_mode:e.target.value})}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select value={local.default_push_mode} onChange={(e)=>setLocal({...local, default_push_mode:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             <option value="append">Append</option>
-            <option value="replace">Replace (overwrite target list)</option>
+            <option value="replace">Replace (overwrite)</option>
           </select>
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Inbox badge</div>
-          <select value={String(local.show_inbox_badge)} onChange={(e)=>setLocal({...local, show_inbox_badge:(e.target.value==="true")})}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select value={String(local.show_inbox_badge)} onChange={(e)=>setLocal({...local, show_inbox_badge:(e.target.value==="true")})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             <option value="true">Show</option>
             <option value="false">Hide</option>
           </select>
         </label>
       </div>
-
       <div className="mt-4">
         <button onClick={save} className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black">Save preferences</button>
       </div>
@@ -484,13 +431,12 @@ function SettingsView({ plannerEmail, prefs, onChange }){
   );
 }
 
-/* -------------------- Inbox Drawer (minimal; unchanged behavior) -------------------- */
+/* Inbox */
 function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   const [bundles,setBundles]=useState([]);
   const [loading,setLoading]=useState(true);
   const [users,setUsers]=useState([]);
   const [target,setTarget]=useState("");
-
   async function load(){
     setLoading(true);
     try{
@@ -504,7 +450,6 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
     setLoading(false);
   }
   useEffect(()=>{ load(); },[]);
-
   async function assign(b){
     if (!target) { alert("Pick a user first"); return; }
     try{
@@ -513,14 +458,10 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
         body: JSON.stringify({ plannerEmail, bundleId: b.id, userEmail: target, autoArchive })
       });
       const j=await r.json();
-      if (j.ok) {
-        setBundles(prev=>prev.filter(x=>x.id!==b.id));
-      } else {
-        alert(j.error || "Failed to assign");
-      }
+      if (j.ok) setBundles(prev=>prev.filter(x=>x.id!==b.id));
+      else alert(j.error || "Failed to assign");
     }catch(e){ alert(String(e.message||e)); }
   }
-
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -529,7 +470,6 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
           <div className="text-sm font-semibold">Inbox (from GPT)</div>
           <button className="rounded-lg p-1 hover:bg-gray-100" onClick={onClose}><X className="h-4 w-4" /></button>
         </div>
-
         <div className="p-3">
           <label className="block mb-2">
             <div className="mb-1 text-xs font-medium">Assign to user</div>
@@ -538,10 +478,8 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
               {users.map(u=><option key={u.email} value={u.email}>{u.email} {u.status==="connected"?"✓":""}</option>)}
             </select>
           </label>
-
           {loading && <div className="text-sm text-gray-500">Loading…</div>}
           {!loading && bundles.length===0 && <div className="text-sm text-gray-500">No new bundles.</div>}
-
           <div className="space-y-3">
             {bundles.map(b=>(
               <div key={b.id} className="rounded-xl border p-3">
@@ -557,43 +495,45 @@ function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   );
 }
 
-/* -------------------- Plan (composer + history) -------------------- */
-
-function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
+/* Plan */
+function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
-  const [plan,setPlan]=useState({
-    title: "Weekly Plan",
-    startDate: format(new Date(), "yyyy-MM-dd"),
-    timezone: "America/Chicago"
-  });
+  const [selectedUserEmail,setSelectedUserEmail]=useState("");
+  const [plan,setPlan]=useState({ title:"Weekly Plan", startDate: format(new Date(),"yyyy-MM-dd"), timezone:"America/Chicago" });
   const [tasks,setTasks]=useState([]);
   const [replaceMode,setReplaceMode]=useState(false);
   const [msg,setMsg]=useState("");
-  const [prefill, setPrefill] = useState(null);
   const [planDateOpen,setPlanDateOpen]=useState(false);
 
   useEffect(()=>{ (async ()=>{
     const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
     setUsers(j.users||[]);
-    if (!selectedUserEmail) {
-      const connected=(j.users||[]).find(u=>u.status==="connected")?.email;
-      setSelectedUserEmail(connected || (j.users?.[0]?.email || ""));
-    }
+    const connected=(j.users||[]).find(u=>u.status==="connected")?.email;
+    setSelectedUserEmail(selectedUserEmailProp || connected || (j.users?.[0]?.email || ""));
   })(); },[plannerEmail]);
-
-  useEffect(()=>{ try{
-    const raw=localStorage.getItem("p2t_last_prefill");
-    if (raw){ const p=JSON.parse(raw);
-      if (p && p.ok && p.plan && Array.isArray(p.tasks)) { setPrefill(p); }
-      localStorage.removeItem("p2t_last_prefill");
-    }
-  }catch{} },[]);
-  useEffect(()=>{ if (prefill){ setPlan(prefill.plan); setTasks(prefill.tasks.map(t=>({ id: uid(), ...t }))); } },[prefill]);
 
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
   const planDateText = format(parseISODate(plan.startDate)||new Date(),"EEE MMM d, yyyy");
+
+  /* FIX: define applyPrefill so History → Restore fills the composer immediately */
+  const applyPrefill = useCallback(({ plan: rp, tasks: rt, mode })=>{
+    try{
+      setPlan(p=>({
+        ...p,
+        title: rp?.title ?? p.title,
+        startDate: rp?.startDate ?? p.startDate,
+        timezone: rp?.timezone ?? p.timezone
+      }));
+      setReplaceMode(mode === "replace");
+      if (Array.isArray(rt)) {
+        setTasks(rt.map(t=>({ id: uid(), ...t })));
+        setMsg(`Restored ${rt.length} task(s) from history`);
+        onToast?.("ok", `Restored ${rt.length} task(s)`);
+      }
+    }catch(e){ console.error("applyPrefill error", e); }
+  },[onToast]);
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
@@ -603,32 +543,27 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
           <div className="text-[11px] sm:text-xs text-gray-500">Title becomes the Google Tasks list name. Add tasks, preview, then push.</div>
         </div>
         <div className="w-full sm:w-72">
-          <select value={selectedUserEmail || ""} onChange={(e)=>setSelectedUserEmail(e.target.value)}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select value={selectedUserEmail || ""} onChange={(e)=>setSelectedUserEmail(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             <option value="">— Choose user —</option>
             {users.map(u=><option key={u.email} value={u.email}>{u.email} {u.status==="connected"?"✓":""}</option>)}
           </select>
         </div>
       </div>
 
-      {/* Plan basics */}
       <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-3">
         <label className="block">
           <div className="mb-1 text-sm font-medium">Task list title</div>
-          <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
+          <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
         </label>
         <label className="block">
           <div className="mb-1 text-sm font-medium">Timezone</div>
-          <select value={plan.timezone} onChange={(e)=>setPlan({...plan, timezone:e.target.value})}
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select value={plan.timezone} onChange={(e)=>setPlan({...plan, timezone:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
             {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
           </select>
         </label>
         <div className="block">
           <div className="mb-1 text-sm font-medium">Plan start date</div>
-          <button type="button" onClick={()=>setPlanDateOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
+          <button type="button" onClick={()=>setPlanDateOpen(true)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
             <Calendar className="h-4 w-4" /> Choose Plan Start Date: {planDateText}
           </button>
         </div>
@@ -644,10 +579,7 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         </Modal>
       )}
 
-      <TaskEditor
-        planStartDate={plan.startDate}
-        onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])}
-      />
+      <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
       <ComposerPreview
         plannerEmail={plannerEmail}
@@ -661,21 +593,16 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         setMsg={(m)=>setMsg(m)}
       />
 
-      <HistoryPanel
-        plannerEmail={plannerEmail}
-        userEmail={selectedUserEmail}
-        onPrefill={applyPrefill}
-      />
-
+      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} onPrefill={applyPrefill} />
     </div>
   );
 }
 
-/* ---- Task editor ---- */
+/* Task editor */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
-  const [taskDate,setTaskDate]=useState(planStartDate); // YYYY-MM-DD
+  const [taskDate,setTaskDate]=useState(planStartDate);
   const [taskDateOpen,setTaskDateOpen]=useState(false);
   const [time,setTime]=useState("");
   const [dur,setDur]=useState(60);
@@ -743,7 +670,6 @@ function TaskEditor({ planStartDate, onAdd }){
   }
 
   const pill = (on)=>cn("rounded-full px-2.5 sm:px-3 py-1 text-[11px] sm:text-xs border whitespace-nowrap", on?"bg-cyan-600 text-white border-cyan-600":"bg-white text-gray-700 border-gray-300 hover:bg-gray-50");
-
   const taskDateText = format(parseISODate(taskDate)||new Date(),"EEE MMM d, yyyy");
 
   return (
@@ -755,8 +681,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </label>
         <div className="block">
           <div className="mb-1 text-sm font-medium">Task date</div>
-          <button type="button" onClick={()=>setTaskDateOpen(true)}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
+          <button type="button" onClick={()=>setTaskDateOpen(true)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
             <Calendar className="h-4 w-4" /> {taskDateText}
           </button>
         </div>
@@ -840,7 +765,7 @@ function TaskEditor({ planStartDate, onAdd }){
   );
 }
 
-/* ---- Preview & push ---- */
+/* Preview & push */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
   const total=tasks.length;
   async function pushNow(){
@@ -865,7 +790,6 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
-      // Snapshot to History
       await fetch("/api/history/snapshot",{
         method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -879,7 +803,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       });
 
       setMsg(`Success — ${j.created||total} task(s) created`);
-      setTasks([]); // clear composer
+      setTasks([]);
     } catch (e) {
       setMsg("Error: "+String(e.message||e));
     }
@@ -919,8 +843,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
                   <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
                   <td className="py-1.5 px-2 text-gray-500">{t.notes||"—"}</td>
                   <td className="py-1.5 px-2 text-right">
-                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))}
-                      className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
+                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Remove</button>
                   </td>
                 </tr>
               ))}
@@ -939,9 +862,9 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   );
 }
 
-/* ---- HistoryPanel ---- */
-function HistoryPanel({ plannerEmail, userEmail }){
-  const [tab,setTab]=useState("active"); // active | archived
+/* History */
+function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
+  const [tab,setTab]=useState("active");
   const [rows,setRows]=useState([]);
   const [sel,setSel]=useState({});
   const [q,setQ]=useState("");
@@ -950,7 +873,6 @@ function HistoryPanel({ plannerEmail, userEmail }){
     if (!plannerEmail || !userEmail) { setRows([]); return; }
     try{
       const qs=new URLSearchParams({ plannerEmail, userEmail, status: tab, q });
-      // use flat endpoint to avoid nested-route conflicts
       const r=await fetch(`/api/history_list?${qs.toString()}`);
       const j=await r.json();
       setRows(j.items||[]);
@@ -969,21 +891,14 @@ function HistoryPanel({ plannerEmail, userEmail }){
     if (!r.ok || j.error) throw new Error(j.error||"Server error");
     return j;
   }
-  async function doArchive(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return;
-    await post("/api/history/archive",{ plannerEmail, planIds: ids }); await load(); }
-  async function doUnarchive(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return;
-    await post("/api/history/unarchive",{ plannerEmail, planIds: ids }); setTab("active"); }
-  async function doDelete(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return;
-    if (!confirm(`Delete ${ids.length} plan(s)?`)) return;
-    await post("/api/history/delete",{ plannerEmail, planIds: ids }); await load(); }
+  async function doArchive(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return; await post("/api/history/archive",{ plannerEmail, planIds: ids }); await load(); }
+  async function doUnarchive(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return; await post("/api/history/unarchive",{ plannerEmail, planIds: ids }); setTab("active"); }
+  async function doDelete(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return; if (!confirm(`Delete ${ids.length} plan(s)?`)) return; await post("/api/history/delete",{ plannerEmail, planIds: ids }); await load(); }
+
   async function doRestore(id){
-    const r=await fetch("/api/history/restore",{ method:"POST", headers:{ "Content-Type":"application/json" },
-      body: JSON.stringify({ plannerEmail, planId: id })});
+    const r=await fetch("/api/history/restore",{ method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ plannerEmail, planId: id })});
     const j=await r.json();
-    if (j.ok) {
-      localStorage.setItem("p2t_last_prefill", JSON.stringify({ ok:true, plan:j.plan, tasks:j.tasks, mode:j.mode }));
-      alert("Restored to composer. Switch to Plan to edit.");
-    }
+    if (j.ok) onPrefill?.({ plan:j.plan, tasks:j.tasks, mode:j.mode });
   }
 
   return (
@@ -996,8 +911,7 @@ function HistoryPanel({ plannerEmail, userEmail }){
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="absolute left-2 top-2 h-4 w-4 text-gray-400" />
-            <input value={q} onChange={e=>setQ(e.target.value)} onBlur={load} placeholder="Search titles"
-              className="rounded-xl border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
+            <input value={q} onChange={e=>setQ(e.target.value)} onBlur={load} placeholder="Search titles" className="rounded-xl border border-gray-300 pl-7 pr-2 py-1.5 text-xs" />
           </div>
           {tab==="active" ? (
             <>
@@ -1017,9 +931,7 @@ function HistoryPanel({ plannerEmail, userEmail }){
         <table className="w-full text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
-              <th className="py-1.5 px-2 w-8">
-                <button onClick={()=>toggleAll(true)} title="Select all"><Square className="h-4 w-4" /></button>
-              </th>
+              <th className="py-1.5 px-2 w-8"><button onClick={()=>toggleAll(true)} title="Select all"><Square className="h-4 w-4" /></button></th>
               <th className="py-1.5 px-2">Title</th>
               <th className="py-1.5 px-2">Start</th>
               <th className="py-1.5 px-2">Items</th>
@@ -1029,9 +941,7 @@ function HistoryPanel({ plannerEmail, userEmail }){
             </tr>
           </thead>
           <tbody>
-            {rows.length===0 && (
-              <tr><td className="py-3 px-2 text-gray-500" colSpan={7}>No {tab} history.</td></tr>
-            )}
+            {rows.length===0 && <tr><td className="py-3 px-2 text-gray-500" colSpan={7}>No {tab} history.</td></tr>}
             {rows.map(r=>(
               <tr key={r.id} className="border-t">
                 <td className="py-1.5 px-2">
@@ -1043,8 +953,7 @@ function HistoryPanel({ plannerEmail, userEmail }){
                 <td className="py-1.5 px-2">{r.mode}</td>
                 <td className="py-1.5 px-2">{format(new Date(r.pushed_at), "MMM d, yyyy")}</td>
                 <td className="py-1.5 px-2 text-right">
-                  <a className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5"
-                     href={`/api/history/ics?planId=${r.id}`} target="_blank" rel="noreferrer"><Download className="h-3.5 w-3.5" /> .ics</a>
+                  <a className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50 mr-1.5" href={`/api/history/ics?planId=${r.id}`} target="_blank" rel="noreferrer"><Download className="h-3.5 w-3.5" /> .ics</a>
                   <button onClick={()=>doRestore(r.id)} className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs hover:bg-gray-50">Restore</button>
                 </td>
               </tr>
