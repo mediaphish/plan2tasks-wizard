@@ -313,38 +313,55 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
 }
 
 /* ───────── Invite Modal ───────── */
-function InviteModal({ plannerEmail, userEmail, onClose, onToast }){
-  const [state,setState]=useState({ loading:true, link:"", emailed:false, canSend:false, sending:false, error:"" });
+function InviteModal({ plannerEmail, userEmail: presetEmail, onClose, onToast }){
+  const [email, setEmail] = useState(presetEmail || "");
+  const [state,setState]=useState({
+    loading:false, link:"", emailed:false, canSend:false, sending:false, error:"", checked:false, fromLabel:""
+  });
 
   useEffect(()=>{
     (async ()=>{
       try{
-        const qs=new URLSearchParams({ plannerEmail, userEmail });
-        const r=await fetch(`/api/invite/preview?${qs.toString()}`);
+        const r=await fetch(`/api/invite/cansend`);
         const j=await r.json();
-        if (!r.ok || j.error) throw new Error(j.error||"Failed to prepare invite");
-        setState(s=>({ ...s, loading:false, link:j.inviteUrl||"", emailed:!!j.emailed, canSend:true }));
-      }catch(e){
-        setState(s=>({ ...s, loading:false, error:String(e.message||e) }));
-      }
+        setState(s=>({ ...s, canSend: !!j.emailEnabled, fromLabel: j.from || "" }));
+      }catch{}
     })();
-  },[plannerEmail,userEmail]);
+  },[]);
+
+  async function prepare(){
+    setState(s=>({ ...s, loading:true, error:"", link:"", emailed:false }));
+    try{
+      if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Enter a valid email address.");
+      const qs=new URLSearchParams({ plannerEmail, userEmail: email });
+      const r=await fetch(`/api/invite/preview?${qs.toString()}`);
+      const j=await r.json();
+      if (!r.ok || j.error || !j.inviteUrl) throw new Error(j.error || "Failed to prepare invite");
+      setState(s=>({ ...s, loading:false, link:j.inviteUrl, emailed: !!j.emailed, checked:true }));
+      onToast?.("ok","Invite link created");
+    }catch(e){
+      setState(s=>({ ...s, loading:false, error:String(e.message||e) }));
+    }
+  }
 
   async function copy(){
     try{
+      if (!state.link) return;
       await navigator.clipboard.writeText(state.link);
       onToast?.("ok","Invite link copied");
-    }catch(e){ onToast?.("error","Could not copy link"); }
+    }catch{ onToast?.("error","Could not copy link"); }
   }
+
   async function send(){
+    if (!state.canSend) return;
     setState(s=>({ ...s, sending:true }));
     try{
       const r=await fetch(`/api/invite/send`,{
         method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({ plannerEmail, userEmail })
+        body: JSON.stringify({ plannerEmail, userEmail: email })
       });
       const j=await r.json();
-      if (!r.ok || j.error) throw new Error(j.error||"Send failed");
+      if (!r.ok || j.error) throw new Error(j.error || "Send failed");
       setState(s=>({ ...s, sending:false, emailed:true }));
       onToast?.("ok","Invite email sent");
     }catch(e){
@@ -355,34 +372,77 @@ function InviteModal({ plannerEmail, userEmail, onClose, onToast }){
 
   return (
     <Modal title="Invite user to connect Google Tasks" onClose={onClose}>
-      {state.loading ? (
-        <div className="text-sm text-gray-600">Preparing invite…</div>
-      ) : state.error ? (
-        <div className="text-sm text-red-600">Error: {state.error}</div>
-      ) : (
-        <div className="space-y-3">
-          <div className="text-xs text-gray-600">User</div>
-          <div className="rounded-xl border p-2 text-sm">{userEmail}</div>
+      <div className="space-y-3">
+        <label className="block">
+          <div className="mb-1 text-xs font-medium">User email</div>
+          <input
+            value={email}
+            onChange={(e)=>setEmail(e.target.value)}
+            type="email"
+            placeholder="name@example.com"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
 
-          <div className="text-xs text-gray-600">Invite link</div>
-          <div className="flex items-center gap-2">
-            <input readOnly value={state.link} className="flex-1 rounded-xl border px-3 py-2 text-xs" />
-            <button onClick={copy} className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs hover:bg-gray-50 whitespace-nowrap"><LinkIcon className="h-3.5 w-3.5" /> Copy</button>
-          </div>
-
-          <div className="text-[11px] text-gray-500">Share this link with the user so they can authorize Plan2Tasks to create tasks in their Google Tasks.</div>
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Close</button>
-            <button onClick={send} disabled={!state.canSend || state.sending} className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap">
-              <Mail className="h-3.5 w-3.5" /> {state.emailed ? "Resend Email" : "Send Email"}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={prepare}
+            className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+          >
+            Create Invite Link
+          </button>
+          {!!state.link && (
+            <button
+              onClick={copy}
+              className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50 whitespace-nowrap"
+            >
+              Copy Link
             </button>
-          </div>
+          )}
         </div>
-      )}
+
+        {!!state.loading && <div className="text-sm text-gray-600">Preparing invite…</div>}
+        {!!state.error && <div className="text-sm text-red-600">Error: {state.error}</div>}
+
+        {!!state.link && (
+          <>
+            <div className="text-xs text-gray-600">Invite link</div>
+            <div className="flex items-center gap-2">
+              <input readOnly value={state.link} className="flex-1 rounded-xl border px-3 py-2 text-xs" />
+              <button onClick={copy} className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs hover:bg-gray-50 whitespace-nowrap">Copy</button>
+            </div>
+          </>
+        )}
+
+        <div className="border-t pt-2">
+          {state.canSend ? (
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] text-gray-500">
+                From: <b>{state.fromLabel}</b>
+              </div>
+              <button
+                onClick={send}
+                disabled={!state.link || state.sending}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-black disabled:opacity-50 whitespace-nowrap"
+              >
+                {state.emailed ? "Resend Email" : "Send Email"}
+              </button>
+            </div>
+          ) : (
+            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+              Email sending is not configured. You can still copy and share the link.
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Close</button>
+        </div>
+      </div>
     </Modal>
   );
 }
+
 
 /* ───────── Users (mobile-first) ───────── */
 function UsersView({ plannerEmail, onManage, onToast }){
@@ -467,10 +527,13 @@ function UsersView({ plannerEmail, onManage, onToast }){
               </div>
               <div className="shrink-0 flex gap-1">
                 <button
-                  onClick={()=>setInviteUser(u.email)}
-                  className="rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold hover:bg-gray-50 whitespace-nowrap"
-                  title="Invite / Get link"
+                  onClick={()=>setInviteUser("__new__")}
+                  className="rounded-xl bg-cyan-600 px-3 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+                  title="Invite a new user"
                 >
+  Invite User
+</button>
+
                   Invite
                 </button>
                 <button
@@ -545,11 +608,12 @@ function UsersView({ plannerEmail, onManage, onToast }){
       {inviteUser && (
         <InviteModal
           plannerEmail={plannerEmail}
-          userEmail={inviteUser}
+          userEmail={inviteUser === "__new__" ? "" : inviteUser}
           onClose={()=>setInviteUser("")}
           onToast={onToast}
-        />
+      />
       )}
+
     </div>
   );
 }
