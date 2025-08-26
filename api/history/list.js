@@ -1,43 +1,50 @@
-// api/history/list.js
+// api/history/snapshot.js
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
 export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
-    const full = `https://${req.headers.host}${req.url || ""}`;
-    const url = new URL(full);
-    const plannerEmail = url.searchParams.get("plannerEmail") || "";
-    const userEmail = url.searchParams.get("userEmail") || "";
-    const q = (url.searchParams.get("q") || "").trim();
-    const status = (url.searchParams.get("status") || "active").toLowerCase(); // active | archived
-    const page = Math.max(1, Number(url.searchParams.get("page") || "1"));
-    const pageSize = 50;
-    const from = (page-1)*pageSize;
-    const to = from + pageSize - 1;
+    const { plannerEmail, userEmail, plan, tasks, mode, listTitle } = req.body || {};
+    if (!plannerEmail || !userEmail || !plan || !Array.isArray(tasks)) {
+      return res.status(400).json({ error: "Missing plannerEmail, userEmail, plan, tasks" });
+    }
+    const title = listTitle || plan.title || "Untitled";
+    const start_date = plan.startDate;
+    const timezone = plan.timezone || "America/Chicago";
+    const items_count = tasks.length;
+    const modeSafe = mode === "replace" ? "replace" : "append";
 
-    if (!plannerEmail || !userEmail) {
-      return res.status(400).json({ error: "Missing plannerEmail or userEmail" });
+    const { data: planRow, error: planErr } = await supabaseAdmin
+      .from("history_plans")
+      .insert({
+        planner_email: plannerEmail,
+        user_email: userEmail,
+        title,
+        start_date,
+        timezone,
+        mode: modeSafe,
+        items_count,
+      })
+      .select()
+      .single();
+    if (planErr) throw planErr;
+
+    if (items_count) {
+      const rows = tasks.map((t) => ({
+        plan_id: planRow.id,
+        title: t.title,
+        day_offset: Number(t.dayOffset || 0),
+        time: t.time || null,
+        duration_mins: t.durationMins || null,
+        notes: t.notes || null,
+      }));
+      const { error: itemsErr } = await supabaseAdmin.from("history_items").insert(rows);
+      if (itemsErr) throw itemsErr;
     }
 
-    let sel = supabaseAdmin.from("plans")
-      .select("id, title, start_date, timezone, list_title, mode, items_count, pushed_at, archived_at, deleted_at",
-        { count: "exact" })
-      .eq("planner_email", plannerEmail.toLowerCase())
-      .eq("user_email", userEmail.toLowerCase())
-      .is("deleted_at", null);
-
-    if (status === "archived") sel = sel.not("archived_at", "is", null);
-    else sel = sel.is("archived_at", null);
-
-    if (q) sel = sel.ilike("title", `%${q}%`);
-
-    sel = sel.order("pushed_at", { ascending: false }).range(from, to);
-
-    const { data, error, count } = await sel;
-    if (error) throw error;
-
-    res.json({ items: data || [], total: count || 0, page, pageSize });
+    return res.json({ ok: true, planId: planRow.id });
   } catch (e) {
-    console.error("GET /api/history/list", e);
-    res.status(500).json({ error: "Server error" });
+    console.error("history/snapshot error", e);
+    return res.status(500).json({ error: e.message || "Server error" });
   }
 }
