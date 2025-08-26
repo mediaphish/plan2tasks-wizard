@@ -4,7 +4,7 @@ import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Plus, RotateCcw, Info, Clock
+  Plus, RotateCcw, Info, Clock, Link as LinkIcon, Mail
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
@@ -215,6 +215,7 @@ function AppShell({ plannerEmail }){
           <UsersView
             plannerEmail={plannerEmail}
             onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
+            onToast={(t,m)=>toast(t,m)}
           />
         )}
 
@@ -311,14 +312,88 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
+/* ───────── Invite Modal ───────── */
+function InviteModal({ plannerEmail, userEmail, onClose, onToast }){
+  const [state,setState]=useState({ loading:true, link:"", emailed:false, canSend:false, sending:false, error:"" });
+
+  useEffect(()=>{
+    (async ()=>{
+      try{
+        const qs=new URLSearchParams({ plannerEmail, userEmail });
+        const r=await fetch(`/api/invite/preview?${qs.toString()}`);
+        const j=await r.json();
+        if (!r.ok || j.error) throw new Error(j.error||"Failed to prepare invite");
+        setState(s=>({ ...s, loading:false, link:j.inviteUrl||"", emailed:!!j.emailed, canSend:true }));
+      }catch(e){
+        setState(s=>({ ...s, loading:false, error:String(e.message||e) }));
+      }
+    })();
+  },[plannerEmail,userEmail]);
+
+  async function copy(){
+    try{
+      await navigator.clipboard.writeText(state.link);
+      onToast?.("ok","Invite link copied");
+    }catch(e){ onToast?.("error","Could not copy link"); }
+  }
+  async function send(){
+    setState(s=>({ ...s, sending:true }));
+    try{
+      const r=await fetch(`/api/invite/send`,{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail })
+      });
+      const j=await r.json();
+      if (!r.ok || j.error) throw new Error(j.error||"Send failed");
+      setState(s=>({ ...s, sending:false, emailed:true }));
+      onToast?.("ok","Invite email sent");
+    }catch(e){
+      setState(s=>({ ...s, sending:false }));
+      onToast?.("error", String(e.message||e));
+    }
+  }
+
+  return (
+    <Modal title="Invite user to connect Google Tasks" onClose={onClose}>
+      {state.loading ? (
+        <div className="text-sm text-gray-600">Preparing invite…</div>
+      ) : state.error ? (
+        <div className="text-sm text-red-600">Error: {state.error}</div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-xs text-gray-600">User</div>
+          <div className="rounded-xl border p-2 text-sm">{userEmail}</div>
+
+          <div className="text-xs text-gray-600">Invite link</div>
+          <div className="flex items-center gap-2">
+            <input readOnly value={state.link} className="flex-1 rounded-xl border px-3 py-2 text-xs" />
+            <button onClick={copy} className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-2 text-xs hover:bg-gray-50 whitespace-nowrap"><LinkIcon className="h-3.5 w-3.5" /> Copy</button>
+          </div>
+
+          <div className="text-[11px] text-gray-500">Share this link with the user so they can authorize Plan2Tasks to create tasks in their Google Tasks.</div>
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Close</button>
+            <button onClick={send} disabled={!state.canSend || state.sending} className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap">
+              <Mail className="h-3.5 w-3.5" /> {state.emailed ? "Resend Email" : "Send Email"}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /* ───────── Users (mobile-first) ───────── */
-function UsersView({ plannerEmail, onManage }){
+function UsersView({ plannerEmail, onManage, onToast }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(true);
 
   const [page,setPage]=useState(1);
   const [pageSize,setPageSize]=useState(10);
+
+  const [inviteUser,setInviteUser]=useState("");
 
   async function load(){
     setLoading(true);
@@ -354,7 +429,7 @@ function UsersView({ plannerEmail, onManage }){
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-base sm:text-lg font-semibold">Users</div>
-          <div className="text-[11px] sm:text-xs text-gray-500">Pick a user to manage tasks or invite a new one.</div>
+          <div className="text-[11px] sm:text-xs text-gray-500">Invite users and manage tasks.</div>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative w-40 sm:w-64">
@@ -382,19 +457,30 @@ function UsersView({ plannerEmail, onManage }){
         {loading && <div className="text-gray-500 text-sm">Loading…</div>}
         {!loading && paged.length===0 && <div className="text-gray-500 text-sm">No users found.</div>}
         {!loading && paged.map(u=>(
-          <div key={u.email} className="rounded-xl border p-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium truncate">{u.email}</div>
-              <div className="text-[11px] text-gray-500 truncate">
-                {(u.name||"—")} · {(u.status==="connected"?"Connected ✓":(u.status||"—"))}
+          <div key={u.email} className="rounded-xl border p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-sm font-medium truncate">{u.email}</div>
+                <div className="text-[11px] text-gray-500 truncate">
+                  {(u.name||"—")} · {(u.status==="connected"?"Connected ✓":(u.status||"—"))}
+                </div>
+              </div>
+              <div className="shrink-0 flex gap-1">
+                <button
+                  onClick={()=>setInviteUser(u.email)}
+                  className="rounded-xl border px-2.5 py-1.5 text-[11px] font-semibold hover:bg-gray-50 whitespace-nowrap"
+                  title="Invite / Get link"
+                >
+                  Invite
+                </button>
+                <button
+                  onClick={()=>onManage(u.email)}
+                  className="rounded-xl bg-cyan-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+                >
+                  Manage
+                </button>
               </div>
             </div>
-            <button
-              onClick={()=>onManage(u.email)}
-              className="shrink-0 rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
-            >
-              Manage User
-            </button>
           </div>
         ))}
       </div>
@@ -408,7 +494,7 @@ function UsersView({ plannerEmail, onManage }){
               <th className="py-2 px-2">Name</th>
               <th className="py-2 px-2">Groups</th>
               <th className="py-2 px-2">Status</th>
-              <th className="py-2 px-2 w-40">Action</th>
+              <th className="py-2 px-2 w-[280px]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -421,12 +507,21 @@ function UsersView({ plannerEmail, onManage }){
                 <td className="py-2 px-2 truncate max-w-[260px]">{(u.groups||[]).join(", ")||"—"}</td>
                 <td className="py-2 px-2">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
                 <td className="py-2 px-2">
-                  <button
-                    onClick={()=>onManage(u.email)}
-                    className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
-                  >
-                    Manage User
-                  </button>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={()=>setInviteUser(u.email)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50 whitespace-nowrap"
+                      title="Invite / Get link"
+                    >
+                      <LinkIcon className="h-3.5 w-3.5" /> Invite
+                    </button>
+                    <button
+                      onClick={()=>onManage(u.email)}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+                    >
+                      Manage User
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -446,6 +541,15 @@ function UsersView({ plannerEmail, onManage }){
           <button onClick={()=>goto(totalPages)} disabled={page===totalPages} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronsRight className="h-3.5 w-3.5" /></button>
         </div>
       </div>
+
+      {inviteUser && (
+        <InviteModal
+          plannerEmail={plannerEmail}
+          userEmail={inviteUser}
+          onClose={()=>setInviteUser("")}
+          onToast={onToast}
+        />
+      )}
     </div>
   );
 }
@@ -680,6 +784,8 @@ function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
 }
 
 /* ───────── Plan view ───────── */
+function AppShellDivider(){ return <div className="h-3" />; } // tiny helper so search finds a clean boundary
+
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -764,7 +870,6 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      {/* Completely hidden until at least one task exists */}
       {tasks.length>0 && (
         <ComposerPreview
           plannerEmail={plannerEmail}
@@ -954,7 +1059,7 @@ function TaskEditor({ planStartDate, onAdd }){
   );
 }
 
-/* ───────── Preview & push (shows actual dates) ───────── */
+/* ───────── Preview & push (actual dates) ───────── */
 function dateFromOffsetYMD(startYMD, off){
   const base=parseISODate(startYMD)||new Date();
   const d=new Date(Date.UTC(base.getUTCFullYear(), base.getUTCMonth(), base.getUTCDate() + Number(off||0)));
