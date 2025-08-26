@@ -762,23 +762,33 @@ function TaskEditor({ planStartDate, onAdd }){
   return (
     <div className="rounded-xl border border-gray-200 p-3 sm:p-4">
       <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-4">
-        <label className="block">
+        <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Task title</div>
-          <input value={title} onChange={(e)=>setTitle(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Strength training" />
+          <input value={title} onChange={(e)=>setTitle(e.target.value)} className="w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Strength training" />
         </label>
-        <div className="block">
+
+        <div className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Task date</div>
-          <button type="button" onClick={()=>setTaskDateOpen(true)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">
-            <Calendar className="h-4 w-4" /> {taskDateText}
+          <button type="button" onClick={()=>setTaskDateOpen(true)} className="inline-flex w-full min-w-0 max-w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap overflow-hidden">
+            <Calendar className="h-4 w-4 shrink-0" /> <span className="truncate">{taskDateText}</span>
           </button>
         </div>
-        <label className="block">
+
+        {/* >>> Fix: ensure time input can shrink and never overflow on small screens */}
+        <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
-          <input type="time" value={time} onChange={(e)=>setTime(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <input
+            type="time"
+            value={time}
+            onChange={(e)=>setTime(e.target.value)}
+            className="block w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-2 py-2 text-sm overflow-hidden"
+            style={{ WebkitAppearance: "none", MozAppearance: "textfield" }}
+          />
         </label>
-        <label className="block">
+
+        <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Duration (mins)</div>
-          <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)} className="w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
         </label>
       </div>
 
@@ -851,6 +861,7 @@ function TaskEditor({ planStartDate, onAdd }){
     </div>
   );
 }
+
 
 /* Preview & push */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
