@@ -87,13 +87,13 @@ function AuthScreen({ onSignedIn }){
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-white to-gray-50 p-4 sm:p-6">
       <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
-        <h1 className="text-lg sm:text-xl font-bold mb-1">Plan2Tasks – Planner</h1>
+        <h1 className="text-lg sm:text-xl font-bold mb-1 whitespace-nowrap">Plan2Tasks – Planner</h1>
         <p className="text-xs sm:text-sm text-gray-500 mb-4">Sign in to manage users and deliver task lists.</p>
 
         <button onClick={handleGoogle}
-          className="w-full mb-3 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50">
+          className="w-full mb-3 inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-semibold hover:bg-gray-50 whitespace-nowrap">
           <img alt="" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="h-4 w-4" />
-          <span className="whitespace-nowrap">Continue with Google</span>
+          <span>Continue with Google</span>
         </button>
         <div className="my-2 text-center text-[11px] text-gray-400">or</div>
 
@@ -104,9 +104,9 @@ function AuthScreen({ onSignedIn }){
         <input value={pw} onChange={(e)=>setPw(e.target.value)} type="password"
           className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-cyan-500" />
         {mode==="signup" ? (
-          <button onClick={handleSignup} className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Create account</button>
+          <button onClick={handleSignup} className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 whitespace-nowrap">Create account</button>
         ) : (
-          <button onClick={handleSignin} className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700">Sign in</button>
+          <button onClick={handleSignin} className="w-full rounded-xl bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 whitespace-nowrap">Sign in</button>
         )}
         <div className="mt-3 text-xs text-gray-600">{msg}</div>
         <div className="mt-4 text-xs">
@@ -153,7 +153,7 @@ function AppShell({ plannerEmail }){
   const [view,setView]=useState("users");
   const [inboxOpen,setInboxOpen]=useState(false);
   const [inboxBadge,setInboxBadge]=useState(0);
-  const [selectedUserEmail, setSelectedUserEmail] = useState(""); // NEW: lift user to shell
+  const [selectedUserEmail, setSelectedUserEmail] = useState("");
   const [toasts,setToasts]=useState([]);
   const toast = useCallback((type, message, title) => {
     const id=uid(); setToasts(ts=>[...ts,{id,type,message,title}]);
@@ -184,12 +184,12 @@ function AppShell({ plannerEmail }){
   useEffect(()=>{ if (prefs.show_inbox_badge) loadBadge(); },[plannerEmail, prefs.show_inbox_badge]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 p-3 sm:p-6">
       <Toasts items={toasts} dismiss={dismissToast} />
       <div className="mx-auto max-w-6xl">
-        <div className="mb-4 sm:mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="mb-3 sm:mb-6 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="text-xl sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
+            <div className="text-lg sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
             <nav className="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
               <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}><span className="hidden sm:inline">Users</span></NavBtn>
               <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}><span className="hidden sm:inline">Plan</span></NavBtn>
@@ -197,7 +197,7 @@ function AppShell({ plannerEmail }){
             </nav>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            <button onClick={()=>setInboxOpen(true)} className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap" title="Inbox (GPT imports)">
+            <button onClick={()=>setInboxOpen(true)} className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap">
               <InboxIcon className="inline h-4 w-4 sm:mr-1" /><span className="hidden sm:inline">Inbox</span>
               {prefs.show_inbox_badge && inboxBadge>0 && (
                 <span className="absolute -top-2 -right-2 rounded-full bg-cyan-600 px-1.5 py-[2px] text-[10px] font-bold text-white">{inboxBadge}</span>
@@ -310,11 +310,16 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* Users */
+/* Users (now with pagination + tighter responsive) */
 function UsersView({ plannerEmail, onManage }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(true);
+
+  // pagination state
+  const [page,setPage]=useState(1);
+  const [pageSize,setPageSize]=useState(10);
+
   async function load(){
     setLoading(true);
     try {
@@ -326,6 +331,7 @@ function UsersView({ plannerEmail, onManage }){
     setLoading(false);
   }
   useEffect(()=>{ load(); },[plannerEmail]);
+
   const filtered = useMemo(()=>{
     const s=q.trim().toLowerCase();
     if (!s) return rows;
@@ -334,47 +340,90 @@ function UsersView({ plannerEmail, onManage }){
       return u.email.toLowerCase().includes(s) || (u.name||"").toLowerCase().includes(s) || tags.includes(s) || (u.status||"").toLowerCase().includes(s);
     });
   },[rows,q]);
+
+  // reset to page 1 when filtering or changing page size
+  useEffect(()=>{ setPage(1); },[q, pageSize, rows.length]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const startIdx = (page-1)*pageSize;
+  const paged = filtered.slice(startIdx, startIdx + pageSize);
+
+  function goto(p){ setPage(Math.min(totalPages, Math.max(1, p))); }
+
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-5 shadow-sm">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-base sm:text-lg font-semibold">Users</div>
           <div className="text-[11px] sm:text-xs text-gray-500">Pick a user to manage tasks or invite a new one.</div>
         </div>
-        <div className="w-full sm:w-72">
-          <div className="relative">
+        <div className="flex items-center gap-2">
+          <div className="relative w-40 sm:w-64">
             <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search email, name, group, status" className="w-full rounded-xl border border-gray-300 pl-8 pr-3 py-2 text-sm" />
+            <input
+              value={q}
+              onChange={e=>setQ(e.target.value)}
+              placeholder="Search email, name, group, status"
+              className="w-full rounded-xl border border-gray-300 pl-8 pr-3 py-2 text-xs sm:text-sm"
+            />
           </div>
+          <select
+            value={pageSize}
+            onChange={(e)=>setPageSize(Number(e.target.value))}
+            className="rounded-xl border border-gray-300 px-2 py-2 text-xs sm:text-sm whitespace-nowrap"
+            title="Rows per page"
+          >
+            {[10,20,50].map(n=><option key={n} value={n}>{n}/page</option>)}
+          </select>
         </div>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
+
+      <div className="overflow-auto rounded-lg border">
+        <table className="w-full text-xs sm:text-sm">
+          <thead className="bg-gray-50 sticky top-0">
             <tr className="text-left text-gray-500">
-              <th className="py-2 pr-3">Email</th>
-              <th className="py-2 pr-3">Name</th>
-              <th className="py-2 pr-3">Groups</th>
-              <th className="py-2 pr-3">Status</th>
-              <th className="py-2 pr-3 w-40">Action</th>
+              <th className="py-2 px-2 min-w-[180px]">Email</th>
+              <th className="py-2 px-2 min-w-[120px]" title="Name">Name</th>
+              <th className="py-2 px-2 min-w-[140px]" title="Groups">Groups</th>
+              <th className="py-2 px-2 min-w-[100px]" title="Connection status">Status</th>
+              <th className="py-2 px-2 w-32 sm:w-40">Action</th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td className="py-3 text-gray-500" colSpan={5}>Loading…</td></tr>}
-            {!loading && filtered.length===0 && <tr><td className="py-3 text-gray-500" colSpan={5}>No users yet.</td></tr>}
-            {filtered.map(u=>(
+            {loading && <tr><td className="py-3 px-2 text-gray-500" colSpan={5}>Loading…</td></tr>}
+            {!loading && paged.length===0 && <tr><td className="py-3 px-2 text-gray-500" colSpan={5}>No users found.</td></tr>}
+            {paged.map(u=>(
               <tr key={u.email} className="border-t">
-                <td className="py-2 pr-3">{u.email}</td>
-                <td className="py-2 pr-3">{u.name||"—"}</td>
-                <td className="py-2 pr-3">{(u.groups||[]).join(", ")||"—"}</td>
-                <td className="py-2 pr-3">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
-                <td className="py-2 pr-3">
-                  <button onClick={()=>onManage(u.email)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap">Manage User</button>
+                <td className="py-2 px-2">{u.email}</td>
+                <td className="py-2 px-2 truncate max-w-[160px]">{u.name||"—"}</td>
+                <td className="py-2 px-2 truncate max-w-[220px]">{(u.groups||[]).join(", ")||"—"}</td>
+                <td className="py-2 px-2">{u.status==="connected" ? "Connected ✓" : (u.status||"—")}</td>
+                <td className="py-2 px-2">
+                  <button
+                    onClick={()=>onManage(u.email)}
+                    className="rounded-xl bg-cyan-600 px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs font-semibold text-white hover:bg-cyan-700 whitespace-nowrap"
+                  >
+                    Manage User
+                  </button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* pagination controls */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
+        <div className="text-gray-600">
+          Showing <b>{filtered.length ? startIdx+1 : 0}</b>–<b>{Math.min(filtered.length, startIdx+paged.length)}</b> of <b>{filtered.length}</b>
+        </div>
+        <div className="flex items-center gap-1">
+          <button onClick={()=>goto(1)} disabled={page===1} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronsLeft className="h-3.5 w-3.5" /></button>
+          <button onClick={()=>goto(page-1)} disabled={page===1} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronLeft className="h-3.5 w-3.5" /></button>
+          <div className="px-2">Page <b>{page}</b> / {totalPages}</div>
+          <button onClick={()=>goto(page+1)} disabled={page===totalPages} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronRight className="h-3.5 w-3.5" /></button>
+          <button onClick={()=>goto(totalPages)} disabled={page===totalPages} className="rounded-lg border px-2 py-1 disabled:opacity-50 whitespace-nowrap"><ChevronsRight className="h-3.5 w-3.5" /></button>
+        </div>
       </div>
     </div>
   );
@@ -424,7 +473,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
           </select>
         </label>
 
-        {/* NEW: Auto-archive after assign (toggle) */}
+        {/* Auto-archive toggle */}
         <div className="block">
           <div className="mb-1 text-sm font-medium flex items-center gap-1">
             Auto-archive bundles after assigning
@@ -574,7 +623,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   },[onToast]);
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-5 shadow-sm">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-base sm:text-lg font-semibold">Plan (create & deliver tasks)</div>
@@ -636,7 +685,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* Task editor */
+/* Task editor (keeps your recurrence + compact mobile) */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -861,7 +910,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
         <div className="text-sm text-gray-500">No tasks yet.</div>
       ) : (
         <div className="mb-3 max-h-56 overflow-auto rounded-lg border">
-          <table className="w-full text-sm">
+          <table className="w-full text-xs sm:text-sm">
             <thead className="bg-gray-50">
               <tr className="text-left text-gray-500">
                 <th className="py-1.5 px-2">Title</th>
@@ -879,9 +928,9 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
                   <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
                   <td className="py-1.5 px-2">{t.time||"—"}</td>
                   <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
-                  <td className="py-1.5 px-2 text-gray-500">{t.notes||"—"}</td>
+                  <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
                   <td className="py-1.5 px-2 text-right">
-                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50 whitespace-nowrap">Remove</button>
+                    <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="rounded-lg border px-2 py-1 text-[11px] sm:text-xs hover:bg-gray-50 whitespace-nowrap">Remove</button>
                   </td>
                 </tr>
               ))}
@@ -891,7 +940,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       )}
 
       <div className="flex items-center justify-between">
-        <div className="text-xs text-gray-500">{msg}</div>
+        <div className="text-[11px] sm:text-xs text-gray-500">{msg}</div>
         <button onClick={pushNow} className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-60 whitespace-nowrap" disabled={total===0}>
           <ArrowRight className="h-4 w-4" /> Push to Google Tasks
         </button>
@@ -966,7 +1015,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
       </div>
 
       <div className="max-h-64 overflow-auto rounded-lg border">
-        <table className="w-full text-sm">
+        <table className="w-full text-xs sm:text-sm">
           <thead className="bg-gray-50">
             <tr className="text-left text-gray-500">
               <th className="py-1.5 px-2 w-8"><button onClick={()=>toggleAll(true)} title="Select all">□</button></th>
