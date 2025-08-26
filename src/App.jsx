@@ -661,7 +661,12 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         setMsg={(m)=>setMsg(m)}
       />
 
-      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} />
+      <HistoryPanel
+        plannerEmail={plannerEmail}
+        userEmail={selectedUserEmail}
+        onPrefill={applyPrefill}
+      />
+
     </div>
   );
 }
