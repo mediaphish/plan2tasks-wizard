@@ -3,7 +3,8 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Plus, RotateCcw, Info
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
+  Plus, RotateCcw, Info
 } from "lucide-react";
 import { format } from "date-fns";
 import { supabaseClient } from "../lib/supabase-client.js";
@@ -310,13 +311,12 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* Users (now with pagination + tighter responsive) */
+/* Users (with pagination) */
 function UsersView({ plannerEmail, onManage }){
   const [rows,setRows]=useState([]);
   const [q,setQ]=useState("");
   const [loading,setLoading]=useState(true);
 
-  // pagination state
   const [page,setPage]=useState(1);
   const [pageSize,setPageSize]=useState(10);
 
@@ -341,7 +341,6 @@ function UsersView({ plannerEmail, onManage }){
     });
   },[rows,q]);
 
-  // reset to page 1 when filtering or changing page size
   useEffect(()=>{ setPage(1); },[q, pageSize, rows.length]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -412,7 +411,6 @@ function UsersView({ plannerEmail, onManage }){
         </table>
       </div>
 
-      {/* pagination controls */}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs sm:text-sm">
         <div className="text-gray-600">
           Showing <b>{filtered.length ? startIdx+1 : 0}</b>–<b>{Math.min(filtered.length, startIdx+paged.length)}</b> of <b>{filtered.length}</b>
@@ -473,7 +471,6 @@ function SettingsView({ plannerEmail, prefs, onChange }){
           </select>
         </label>
 
-        {/* Auto-archive toggle */}
         <div className="block">
           <div className="mb-1 text-sm font-medium flex items-center gap-1">
             Auto-archive bundles after assigning
@@ -685,7 +682,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* Task editor (keeps your recurrence + compact mobile) */
+/* Task editor (compact, consistent heights; time with chevron) */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -769,26 +766,28 @@ function TaskEditor({ planStartDate, onAdd }){
 
         <div className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Task date</div>
-          <button type="button" onClick={()=>setTaskDateOpen(true)} className="inline-flex w-full min-w-0 max-w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap overflow-hidden">
+          <button type="button" onClick={()=>setTaskDateOpen(true)} className="inline-flex w-full min-w-0 max-w-full items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap overflow-hidden h-10">
             <Calendar className="h-4 w-4 shrink-0" /> <span className="truncate">{taskDateText}</span>
           </button>
         </div>
 
-        {/* >>> Fix: ensure time input can shrink and never overflow on small screens */}
+        {/* Time input with consistent height and chevron indicator */}
         <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
-          <input
-            type="time"
-            value={time}
-            onChange={(e)=>setTime(e.target.value)}
-            className="block w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-2 py-2 text-sm overflow-hidden"
-            style={{ WebkitAppearance: "none", MozAppearance: "textfield" }}
-          />
+          <div className="relative">
+            <input
+              type="time"
+              value={time}
+              onChange={(e)=>setTime(e.target.value)}
+              className="block w-full min-w-0 max-w-full rounded-xl border border-gray-300 h-10 px-3 pr-8 text-sm"
+            />
+            <ChevronDown className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          </div>
         </label>
 
         <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Duration (mins)</div>
-          <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)} className="w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <input type="number" min={15} step={15} value={dur} onChange={(e)=>setDur(e.target.value)} className="w-full min-w-0 max-w-full rounded-xl border border-gray-300 px-3 py-2 text-sm h-10" />
         </label>
       </div>
 
@@ -861,7 +860,6 @@ function TaskEditor({ planStartDate, onAdd }){
     </div>
   );
 }
-
 
 /* Preview & push */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
