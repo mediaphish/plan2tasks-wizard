@@ -1,104 +1,102 @@
 // api/google/callback.js
-import { supabaseAdmin } from "../../lib/supabase-admin.js";
+import { supabaseAdmin } from "../lib/supabase-admin.js";
 
-const SITE =
-  process.env.PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
-
-async function exchangeCodeForTokens(code) {
-  const body = new URLSearchParams({
-    code,
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    redirect_uri: REDIRECT_URI,
-    grant_type: "authorization_code"
-  });
-  const r = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error_description || j.error || "Token exchange failed");
-  return j;
-}
-
-function b64json(s) {
-  try { return JSON.parse(Buffer.from(s, "base64url").toString("utf8")); }
-  catch { return null; }
+// Simple HTML success page with marketing CTA
+function successHTML() {
+  return `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Plan2Tasks – Connected</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f8fafc; color:#0f172a; }
+    .card { max-width:560px; margin: 12vh auto; background:#fff; border:1px solid #e5e7eb; border-radius:16px; padding:24px; box-shadow: 0 8px 24px rgba(15, 23, 42, .06); }
+    .btn { display:inline-block; padding:10px 14px; border-radius:10px; text-decoration:none; font-weight:600; }
+    .btn-primary { background:#06b6d4; color:#fff; }
+    .muted { color:#475569; font-size:13px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 style="margin:0 0 10px">You're connected ✅</h1>
+    <p>Your Google Tasks is now linked to <b>Plan2Tasks</b>. You can close this tab.</p>
+    <div style="height:10px"></div>
+    <p class="muted">Want to assign tasks to others?</p>
+    <p><a class="btn btn-primary" href="https://www.plan2tasks.com/#become-a-planner">Become a Planner</a></p>
+    <div style="height:6px"></div>
+    <p class="muted">This page is just a confirmation. You don’t need to visit the app.</p>
+  </div>
+</body>
+</html>
+`;
 }
 
 export default async function handler(req, res) {
   try {
-    const url = new URL(`https://${req.headers.host}${req.url}`);
-    const code = url.searchParams.get("code") || "";
-    const stateRaw = url.searchParams.get("state") || "";
-    const err = url.searchParams.get("error") || "";
+    const { code, state } = req.query || {};
+    if (!code) {
+      return res.status(400).send("Missing code");
+    }
+    const parsedState = (()=>{ try{ return JSON.parse(Buffer.from((state||"").toString(), "base64").toString("utf8")); }catch{ return {}; }})();
 
-    if (err) throw new Error(`Google error: ${err}`);
-    if (!code) throw new Error("Missing code");
-    if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
-      throw new Error("Missing Google env (client id/secret or redirect uri)");
+    // Exchange code for tokens
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type":"application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code,
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI, // should be https://www.plan2tasks.com/api/google/callback
+        grant_type: "authorization_code",
+      })
+    });
+    const tok = await r.json();
+    if (!r.ok || tok.error) {
+      return res.status(400).send("OAuth error: "+(tok.error_description || tok.error || "unknown"));
     }
 
-    const state = b64json(stateRaw);
-    const inviteId = state?.inviteId || "";
-
-    // Retrieve invite for context (planner/user)
-    const { data: inv, error: invErr } = await supabaseAdmin
-      .from("invites")
-      .select("id, planner_email, user_email")
-      .eq("id", inviteId)
-      .single();
-    if (invErr || !inv) throw new Error("Invite not found in callback");
-
-    // Exchange code
-    const tok = await exchangeCodeForTokens(code);
-    const expiresAt = new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString();
+    // Resolve invite → planner/user emails (your /start built state with inviteId)
+    const inviteId = parsedState?.inviteId || parsedState?.invite || null;
+    let plannerEmail = null, userEmail = null;
+    if (inviteId) {
+      const { data, error } = await supabaseAdmin
+        .from("invites")
+        .select("planner_email,user_email")
+        .eq("id", inviteId)
+        .maybeSingle();
+      if (!error && data) {
+        plannerEmail = data.planner_email;
+        userEmail = data.user_email;
+      }
+    }
 
     // Upsert connection
-    const row = {
-      planner_email: inv.planner_email.toLowerCase(),
-      user_email: inv.user_email.toLowerCase(),
-      google_access_token: tok.access_token || null,
-      google_refresh_token: tok.refresh_token || null,
-      google_scope: tok.scope || null,
-      google_token_type: tok.token_type || null,
-      google_expires_at: expiresAt,
-      updated_at: new Date().toISOString()
-    };
+    if (userEmail && plannerEmail) {
+      await supabaseAdmin
+        .from("user_connections")
+        .upsert({
+          planner_email: plannerEmail,
+          user_email: userEmail,
+          provider: "google",
+          google_access_token: tok.access_token,
+          google_refresh_token: tok.refresh_token || null,
+          google_scope: tok.scope || null,
+          google_expires_at: tok.expires_in ? Math.floor(Date.now()/1000) + Number(tok.expires_in) : null,
+          updated_at: new Date().toISOString(),
+          status: "connected",
+        }, { onConflict: "planner_email,user_email" });
 
-    // Try upsert on composite key; if your schema differs, this still works on unique constraint if present.
-    const up = await supabaseAdmin
-      .from("user_connections")
-      .upsert(row, { onConflict: "planner_email,user_email" })
-      .select("*")
-      .single();
+      // Mark invite as used (optional)
+      await supabaseAdmin.from("invites").update({ used_at: new Date().toISOString() }).eq("id", inviteId);
+    }
 
-    if (up.error) throw up.error;
-
-    // Mark invite accepted
-    await supabaseAdmin
-      .from("invites")
-      .update({ accepted_at: new Date().toISOString() })
-      .eq("id", inv.id);
-
-    // Friendly success page
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.end(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Connected</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px}</style>
-</head><body>
-<h2>You're connected!</h2>
-<p>You can close this tab.</p>
-<p><a href="${SITE}">Return to Plan2Tasks</a></p>
-</body></html>`);
+    // Show confirmation/marketing page (no app link)
+    res.setHeader("Content-Type","text/html; charset=utf-8");
+    return res.status(200).send(successHTML());
   } catch (e) {
-    console.error("callback error", e);
-    res.status(400).end(`Error: ${e.message}`);
+    return res.status(500).send("Server error: "+String(e?.message||e));
   }
 }
