@@ -1,8 +1,5 @@
 /* src/App.jsx — full file
-   - Fix: adds UsersView (prevents "UsersView is not defined")
-   - Dates: single “Choose … Date” button + compact calendar modal
-   - Recurrence: weekly pill buttons + monthly patterns + “No end” option
-   - History panel: uses /api/history_list (flat GET) and /api/history/ics for .ics
+   Key change: HistoryPanel → onPrefill callback; PlanView applies restore immediately.
 */
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
@@ -424,7 +421,7 @@ function UsersView({ plannerEmail, onManage }){
   );
 }
 
-/* -------------------- SettingsView (simple) -------------------- */
+/* -------------------- SettingsView -------------------- */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(prefs);
   useEffect(()=>setLocal(prefs),[prefs]);
@@ -484,7 +481,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
   );
 }
 
-/* -------------------- Inbox Drawer (minimal; unchanged behavior) -------------------- */
+/* -------------------- Inbox Drawer -------------------- */
 function InboxDrawer({ plannerEmail, autoArchive, onClose }){
   const [bundles,setBundles]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -569,7 +566,6 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
   const [tasks,setTasks]=useState([]);
   const [replaceMode,setReplaceMode]=useState(false);
   const [msg,setMsg]=useState("");
-  const [prefill, setPrefill] = useState(null);
   const [planDateOpen,setPlanDateOpen]=useState(false);
 
   useEffect(()=>{ (async ()=>{
@@ -582,18 +578,24 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
     }
   })(); },[plannerEmail]);
 
-  useEffect(()=>{ try{
-    const raw=localStorage.getItem("p2t_last_prefill");
-    if (raw){ const p=JSON.parse(raw);
-      if (p && p.ok && p.plan && Array.isArray(p.tasks)) { setPrefill(p); }
-      localStorage.removeItem("p2t_last_prefill");
-    }
-  }catch{} },[]);
-  useEffect(()=>{ if (prefill){ setPlan(prefill.plan); setTasks(prefill.tasks.map(t=>({ id: uid(), ...t }))); } },[prefill]);
-
+  // When user changes, clear current composition
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
   const planDateText = format(parseISODate(plan.startDate)||new Date(),"EEE MMM d, yyyy");
+
+  // >>> NEW: apply restored plan/items immediately
+  const applyPrefill = useCallback(({ plan: rp, tasks: rt, mode })=>{
+    try{
+      if (rp?.title) setPlan(p=>({ ...p, title: rp.title }));
+      if (rp?.startDate) setPlan(p=>({ ...p, startDate: rp.startDate }));
+      if (rp?.timezone) setPlan(p=>({ ...p, timezone: rp.timezone }));
+      if (mode) setReplaceMode(mode === "replace");
+      if (Array.isArray(rt)) {
+        setTasks(rt.map(t=>({ id: uid(), ...t })));
+        setMsg(`Restored ${rt.length} task(s) from history`);
+      }
+    }catch(e){ console.error("applyPrefill error", e); }
+  },[]);
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm">
@@ -661,7 +663,11 @@ function PlanView({ plannerEmail, selectedUserEmail, setSelectedUserEmail }){
         setMsg={(m)=>setMsg(m)}
       />
 
-      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} />
+      <HistoryPanel
+        plannerEmail={plannerEmail}
+        userEmail={selectedUserEmail}
+        onPrefill={applyPrefill}   {/* <<< NEW: live restore */}
+      />
     </div>
   );
 }
@@ -935,7 +941,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
 }
 
 /* ---- HistoryPanel ---- */
-function HistoryPanel({ plannerEmail, userEmail }){
+function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   const [tab,setTab]=useState("active"); // active | archived
   const [rows,setRows]=useState([]);
   const [sel,setSel]=useState({});
@@ -945,7 +951,6 @@ function HistoryPanel({ plannerEmail, userEmail }){
     if (!plannerEmail || !userEmail) { setRows([]); return; }
     try{
       const qs=new URLSearchParams({ plannerEmail, userEmail, status: tab, q });
-      // use flat endpoint to avoid nested-route conflicts
       const r=await fetch(`/api/history_list?${qs.toString()}`);
       const j=await r.json();
       setRows(j.items||[]);
@@ -971,13 +976,13 @@ function HistoryPanel({ plannerEmail, userEmail }){
   async function doDelete(){ const ids=Object.keys(sel).filter(k=>sel[k]); if (!ids.length) return;
     if (!confirm(`Delete ${ids.length} plan(s)?`)) return;
     await post("/api/history/delete",{ plannerEmail, planIds: ids }); await load(); }
+
   async function doRestore(id){
     const r=await fetch("/api/history/restore",{ method:"POST", headers:{ "Content-Type":"application/json" },
       body: JSON.stringify({ plannerEmail, planId: id })});
     const j=await r.json();
     if (j.ok) {
-      localStorage.setItem("p2t_last_prefill", JSON.stringify({ ok:true, plan:j.plan, tasks:j.tasks, mode:j.mode }));
-      alert("Restored to composer. Switch to Plan to edit.");
+      onPrefill?.({ plan:j.plan, tasks:j.tasks, mode:j.mode }); // <<< immediate
     }
   }
 
