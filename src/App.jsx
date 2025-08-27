@@ -3,17 +3,16 @@ import { addDays, format, parseISO, isValid as isValidDate } from "date-fns";
 import { supabase } from "../lib/supabase.js";
 import { Calendar, Users as UsersIcon, Send, LogOut, Settings as SettingsIcon, Tag, ChevronDown } from "lucide-react";
 
-/* ----------------------- tiny helpers ----------------------- */
+/* ---------- utils ---------- */
 function clsx(...xs) { return xs.filter(Boolean).join(" "); }
 function toast(msg, type="ok"){ alert((type==="error"?"Error: ":"")+msg); }
 
-/* ----------------------- brand ----------------------- */
+/* ---------- brand ---------- */
 function BrandLogo() {
-  // Your logo path—ensure file exists at /public/brand/logo-dark.svg
   return <img src="/brand/logo-dark.svg" alt="Plan2Tasks" className="h-6 w-auto" />;
 }
 
-/* ----------------------- shells ----------------------- */
+/* ---------- shells ---------- */
 function Section({ title, right, children }) {
   return (
     <div className="space-y-3">
@@ -40,7 +39,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-/* ----------------------- Invite Modal (top-right only) ----------------------- */
+/* ---------- Invite (only in header) ---------- */
 function InviteModal({ plannerEmail, userEmail: presetEmail, onClose }) {
   const [email, setEmail] = React.useState(presetEmail || "");
   const [state, setState] = React.useState({ loading:false, link:"", emailed:false, canSend:false, sending:false, error:"", fromLabel:"" });
@@ -121,7 +120,7 @@ function InviteModal({ plannerEmail, userEmail: presetEmail, onClose }) {
   );
 }
 
-/* ----------------------- Settings (modal) ----------------------- */
+/* ---------- Settings ---------- */
 function SettingsModal({ onClose }) {
   const key = "p2t.autoArchive";
   const [autoArchive, setAutoArchive] = React.useState(() => localStorage.getItem(key) === "1");
@@ -146,7 +145,7 @@ function SettingsModal({ onClose }) {
   );
 }
 
-/* ----------------------- date & time ----------------------- */
+/* ---------- date & time ---------- */
 function parseUserTimeTo24h(input){
   if(!input) return null;
   let s = String(input).trim().toLowerCase().replace(/\s+/g,"");
@@ -210,12 +209,12 @@ function CalendarGrid({ initialDate, onPick }){
   );
 }
 
-/* ----------------------- Time input (picker or custom) ----------------------- */
+/* ---------- Time input (picker or custom) ---------- */
 function TimeInput({ value, onChange }) {
   const [mode, setMode] = React.useState("picker"); // "picker" | "custom"
   const times = React.useMemo(()=>{
     const result=[];
-    const start=6*60, end=21*60+30; // 6:00 to 21:30
+    const start=6*60, end=21*60+30;
     for(let m=start;m<=end;m+=30){
       const H=Math.floor(m/60), M=m%60;
       const dt = new Date(); dt.setHours(H,M,0,0);
@@ -232,7 +231,7 @@ function TimeInput({ value, onChange }) {
         <input
           value={value}
           onChange={(e)=>onChange(e.target.value)}
-          placeholder="e.g., 1:30pm"
+          placeholder="e.g., 1:30pm or 1330"
           className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
         />
         <div className="mt-1 flex items-center justify-between">
@@ -261,7 +260,7 @@ function TimeInput({ value, onChange }) {
   );
 }
 
-/* ----------------------- Users: edit categories ----------------------- */
+/* ---------- Users: edit categories ---------- */
 function CategoriesModal({ plannerEmail, user, onClose, onSaved }) {
   const [input, setInput] = React.useState("");
   const [chips, setChips] = React.useState(Array.isArray(user.groups) ? user.groups : (user.group ? [user.group] : []));
@@ -310,7 +309,7 @@ function CategoriesModal({ plannerEmail, user, onClose, onSaved }) {
   );
 }
 
-/* ----------------------- Users view ----------------------- */
+/* ---------- Users view ---------- */
 function UsersView({ plannerEmail, onManage }) {
   const [users, setUsers] = React.useState([]);
   const [loading, setLoading] = React.useState(true);
@@ -408,7 +407,7 @@ function UsersView({ plannerEmail, onManage }) {
   );
 }
 
-/* ----------------------- Plan view (includes History section inside) ----------------------- */
+/* ---------- Plan view (includes History) ---------- */
 
 function DayPills({ value, onChange }) {
   const days = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -442,8 +441,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
   const [newTime, setNewTime] = React.useState("");
   const [recurring, setRecurring] = React.useState({ type:"none", weeklyDays:[], monthlyDay:null, end:"none", count:5, until:null });
 
-  // History embedded
-  const [histTab, setHistTab] = React.useState("active"); // active | archived
+  const [histTab, setHistTab] = React.useState("active");
   const [historyRows, setHistoryRows] = React.useState([]);
   const [histLoading, setHistLoading] = React.useState(false);
 
@@ -454,10 +452,9 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
       if(r.status===404) r = await fetch(`/api/users/list?`+qs.toString());
       const j = await r.json().catch(()=>({}));
       const arr = Array.isArray(j) ? j : j.users || [];
-      // Prefer connected first
       arr.sort((a,b)=> (a.status==="connected"?0:1) - (b.status==="connected"?0:1));
       setUsers(arr);
-    }catch{ /* ignore */ }
+    }catch{}
   })(); },[plannerEmail]);
 
   React.useEffect(()=>{ loadHistory(); /* eslint-disable-next-line */ },[plannerEmail, selectedUserEmail, histTab]);
@@ -506,7 +503,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
   function addItem(){
     if(!newTitle.trim()) return toast("Add a task title","error");
     const batch=[]; const baseDate = newDate || planDate || new Date();
-    const time24 = newTime ? newTime : null; // picker already returns HH:mm, custom validated later
+    const time24 = newTime ? newTime : null;
     const timeParsed = time24 || parseUserTimeTo24h(newTime);
     function withTime(d){ if(!d) return null; if(!timeParsed) return d; const [hh,mm]=timeParsed.split(":").map(n=>parseInt(n,10)); const dt=new Date(d); dt.setHours(hh,mm,0,0); return dt; }
 
@@ -596,7 +593,6 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
 
   return (
     <div className="space-y-4">
-      {/* Deliver-to user + timezone */}
       <Section
         title="Plan"
         right={
@@ -654,7 +650,6 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
             <TimeInput value={newTime} onChange={setNewTime} />
           </label>
 
-          {/* Recurrence */}
           <div className="col-span-full rounded-xl border border-gray-200 bg-white p-3">
             <div className="mb-2 text-xs font-medium">Recurrence</div>
             <div className="flex flex-wrap gap-2">
@@ -708,7 +703,6 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
         </div>
       </Section>
 
-      {/* History embedded */}
       <Section
         title={`History ${selectedUserEmail ? `for ${selectedUserEmail}` : ""}`}
         right={
@@ -764,7 +758,6 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
         </div>
       </Section>
 
-      {/* Preview & Deliver */}
       {items.length>0 ? (
         <Section
           title="Preview & Deliver"
@@ -812,7 +805,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
   );
 }
 
-/* ----------------------- App Shell ----------------------- */
+/* ---------- App Shell ---------- */
 function AppShell() {
   const [sessionEmail, setSessionEmail] = React.useState("");
   const [tab, setTab] = React.useState("users");
@@ -821,47 +814,37 @@ function AppShell() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
   React.useEffect(()=>{
-    (async()=>{
-      try{
-        const { data } = await supabase.auth.getUser();
-        setSessionEmail(data?.user?.email || "");
-      }catch{}
-    })();
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionEmail(session?.user?.email || "");
+      if (!session) window.location.replace("/");
+    });
+    return () => { try { sub.subscription.unsubscribe(); } catch {} };
   },[]);
 
-  async function logout(){ try{ await supabase.auth.signOut(); window.location.href="/"; }catch{ window.location.href="/"; } }
+  React.useEffect(()=>{
+    (async()=>{ try{ const { data } = await supabase.auth.getUser(); setSessionEmail(data?.user?.email || ""); }catch{} })();
+  },[]);
+
+  async function logout(){
+    try { await supabase.auth.signOut(); } catch { window.location.replace("/"); }
+  }
 
   return (
     <div className="mx-auto max-w-6xl p-3 sm:p-6">
-      {/* Top bar */}
       <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2"><BrandLogo /></div>
         <div className="flex items-center gap-2">
-          <BrandLogo />
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={()=>setInviteOpen(true)} className="hidden sm:inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">
-            Invite User
-          </button>
-          <button onClick={()=>setSettingsOpen(true)} className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">
-            <SettingsIcon size={14}/> Settings
-          </button>
-          <button onClick={logout} className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">
-            <LogOut size={14}/> Logout
-          </button>
+          <button onClick={()=>setInviteOpen(true)} className="hidden sm:inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Invite User</button>
+          <button onClick={()=>setSettingsOpen(true)} className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"><SettingsIcon size={14}/> Settings</button>
+          <button onClick={logout} className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"><LogOut size={14}/> Logout</button>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="mb-4 flex items-center gap-2">
-        <button onClick={()=>setTab("users")} className={clsx("inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-sm", tab==="users"?"bg-gray-900 text-white border-gray-900":"hover:bg-gray-50")}>
-          <UsersIcon size={16}/> Users
-        </button>
-        <button onClick={()=>setTab("plan")} className={clsx("inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-sm", tab==="plan"?"bg-gray-900 text-white border-gray-900":"hover:bg-gray-50")}>
-          <Calendar size={16}/> Plan
-        </button>
+        <button onClick={()=>setTab("users")} className={clsx("inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-sm", tab==="users"?"bg-gray-900 text-white border-gray-900":"hover:bg-gray-50")}><UsersIcon size={16}/> Users</button>
+        <button onClick={()=>setTab("plan")} className={clsx("inline-flex items-center gap-1 rounded-xl border px-3 py-1.5 text-sm", tab==="plan"?"bg-gray-900 text-white border-gray-900":"hover:bg-gray-50")}><Calendar size={16}/> Plan</button>
       </div>
 
-      {/* Views */}
       {tab==="users" ? (
         <UsersView plannerEmail={sessionEmail} onManage={(email)=>{ setSelectedUserEmail(email); setTab("plan"); }}/>
       ) : (
@@ -869,7 +852,7 @@ function AppShell() {
           plannerEmail={sessionEmail}
           selectedUserEmail={selectedUserEmail}
           onChangeUserEmail={setSelectedUserEmail}
-          onPushed={()=>{/* after push we stay here; history is embedded */}}
+          onPushed={()=>{}}
         />
       )}
 
