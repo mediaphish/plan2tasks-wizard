@@ -2,26 +2,18 @@
 import * as React from "react";
 import { format, parseISO, addDays, isValid as isValidDate } from "date-fns";
 import { supabase } from "../lib/supabase.js";
-import {
-  Calendar,
-  Users as UsersIcon,
-  Settings as SettingsIcon,
-  LogOut,
-  Send,
-  Tag,
-  ChevronDown,
-} from "lucide-react";
+import { Calendar, Users as UsersIcon, Settings as SettingsIcon, LogOut, Send } from "lucide-react";
 
-/* ----------------- utils ----------------- */
+/* ---------- helpers ---------- */
 const clsx = (...xs) => xs.filter(Boolean).join(" ");
 const toast = (m, t = "ok") => alert((t === "error" ? "Error: " : "") + m);
 
-/* ----------------- brand ----------------- */
+/* ---------- brand ---------- */
 function BrandLogo() {
   return <img src="/brand/logo-dark.svg" alt="Plan2Tasks" className="h-6 w-auto" />;
 }
 
-/* ----------------- shells ----------------- */
+/* ---------- layout ---------- */
 function Section({ title, right, children }) {
   return (
     <div className="space-y-3">
@@ -48,33 +40,7 @@ function Modal({ title, onClose, children }) {
   );
 }
 
-/* ----------------- date/time helpers ----------------- */
-function parseUserTimeTo24h(input) {
-  if (!input) return "";
-  let s = String(input).trim().toLowerCase();
-  s = s.replace(/\s+/g, "");
-  const ampm = s.endsWith("am") ? "am" : s.endsWith("pm") ? "pm" : "";
-  if (ampm) s = s.slice(0, -2);
-  // plain "1330" or "930"
-  if (/^\d{3,4}$/.test(s)) {
-    const hh = s.length === 3 ? "0" + s[0] : s.slice(0, 2);
-    const mm = s.slice(-2);
-    const H = parseInt(hh, 10);
-    const M = parseInt(mm, 10);
-    if (Number.isNaN(H) || Number.isNaN(M) || H > 23 || M > 59) return "";
-    return `${String(H).padStart(2, "0")}:${String(M).padStart(2, "0")}`;
-  }
-  // "h(:mm)?"
-  const m = s.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
-  if (!m) return "";
-  let H = parseInt(m[1], 10);
-  let M = m[2] ? parseInt(m[2], 10) : 0;
-  if (ampm === "am") { if (H === 12) H = 0; }
-  else if (ampm === "pm") { if (H !== 12) H += 12; }
-  if (H > 23 || M > 59) return "";
-  return `${String(H).padStart(2, "0")}:${String(M).padStart(2, "0")}`;
-}
-
+/* ---------- date UI ---------- */
 function DateButton({ value, onChange, labelWhenEmpty = "Pick date" }) {
   const [open, setOpen] = React.useState(false);
   const d = value ? (typeof value === "string" ? parseISO(value) : value) : null;
@@ -93,10 +59,7 @@ function DateButton({ value, onChange, labelWhenEmpty = "Pick date" }) {
         <div className="absolute z-10 mt-2 w-72 rounded-xl border border-gray-200 bg-white p-2 shadow-lg">
           <CalendarGrid
             initialDate={d || new Date()}
-            onPick={(picked) => {
-              setOpen(false);
-              onChange(picked);
-            }}
+            onPick={(picked) => { setOpen(false); onChange(picked); }}
           />
         </div>
       ) : null}
@@ -112,44 +75,55 @@ function CalendarGrid({ initialDate, onPick }) {
   const cells = [];
   for (let i = 0; i < firstDay; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(base.getFullYear(), base.getMonth(), d));
-
   return (
     <div className="text-sm">
       <div className="mb-2 flex items-center justify-between px-1">
         <button className="rounded-lg px-2 py-1 hover:bg-gray-50"
-          onClick={() => setBase((b) => new Date(b.getFullYear(), b.getMonth() - 1, 1))}
-        >‹</button>
+          onClick={() => setBase((b) => new Date(b.getFullYear(), b.getMonth() - 1, 1))}>‹</button>
         <div className="font-semibold">{monthLabel}</div>
         <button className="rounded-lg px-2 py-1 hover:bg-gray-50"
-          onClick={() => setBase((b) => new Date(b.getFullYear(), b.getMonth() + 1, 1))}
-        >›</button>
+          onClick={() => setBase((b) => new Date(b.getFullYear(), b.getMonth() + 1, 1))}>›</button>
       </div>
       <div className="grid grid-cols-7 gap-1">
         {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((w) => (
           <div key={w} className="pb-1 text-center text-[11px] text-gray-500">{w}</div>
         ))}
-        {cells.map((c, idx) =>
-          c ? (
-            <button
-              key={idx}
-              onClick={() => onPick(c)}
-              className="rounded-lg px-0.5 py-1.5 text-center hover:bg-gray-50"
-            >
-              {c.getDate()}
-            </button>
-          ) : (
-            <div key={idx} />
-          )
-        )}
+        {cells.map((c, idx) => c ? (
+          <button key={idx} onClick={() => onPick(c)} className="rounded-lg px-0.5 py-1.5 text-center hover:bg-gray-50">
+            {c.getDate()}
+          </button>
+        ) : <div key={idx} />)}
       </div>
     </div>
   );
 }
 
-/* ----------------- Invite modal ----------------- */
+/* ---------- small utils ---------- */
+function parseUserTimeTo24h(input) {
+  if (!input) return "";
+  let s = String(input).trim().toLowerCase().replace(/\s+/g, "");
+  const ampm = s.endsWith("am") ? "am" : s.endsWith("pm") ? "pm" : "";
+  if (ampm) s = s.slice(0, -2);
+  if (/^\d{3,4}$/.test(s)) {
+    const hh = s.length === 3 ? "0" + s[0] : s.slice(0, 2);
+    const mm = s.slice(-2);
+    const H = parseInt(hh, 10), M = parseInt(mm, 10);
+    if (Number.isNaN(H) || Number.isNaN(M) || H > 23 || M > 59) return "";
+    return `${String(H).padStart(2, "0")}:${String(M).padStart(2, "0")}`;
+  }
+  const m = s.match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if (!m) return "";
+  let H = parseInt(m[1], 10);
+  let M = m[2] ? parseInt(m[2], 10) : 0;
+  if (ampm === "am") { if (H === 12) H = 0; }
+  else if (ampm === "pm") { if (H !== 12) H += 12; }
+  if (H > 23 || M > 59) return "";
+  return `${String(H).padStart(2, "0")}:${String(M).padStart(2, "0")}`;
+}
+
+/* ---------- Invite modal (unchanged UX, fixes "Send Email" w/o link first) ---------- */
 function InviteModal({ plannerEmail, onClose, presetEmail = "" }) {
   const [email, setEmail] = React.useState(presetEmail);
-  const [link, setLink] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [canSend, setCanSend] = React.useState(false);
   const [fromLabel, setFromLabel] = React.useState("");
@@ -166,12 +140,10 @@ function InviteModal({ plannerEmail, onClose, presetEmail = "" }) {
   }, []);
 
   async function ensureLink() {
-    if (link) return link;
     const qs = new URLSearchParams({ plannerEmail, userEmail: email });
     const r = await fetch(`/api/invite/preview?` + qs.toString());
     const j = await r.json();
     if (!r.ok || j.error || !j.inviteUrl) throw new Error(j.error || "Failed to prepare invite");
-    setLink(j.inviteUrl);
     return j.inviteUrl;
   }
 
@@ -179,32 +151,16 @@ function InviteModal({ plannerEmail, onClose, presetEmail = "" }) {
     try {
       if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error("Enter a valid email address.");
       setSending(true);
-      // make sure there is a link first
-      await ensureLink();
-
+      await ensureLink(); // auto-create if needed
       const r = await fetch(`/api/invite/send`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plannerEmail, userEmail: email }),
       });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Send failed");
       toast("Invite email sent");
-    } catch (e) {
-      toast(String(e.message || e), "error");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function onCreateLink() {
-    try {
-      const u = await ensureLink();
-      await navigator.clipboard.writeText(u);
-      toast("Invite link copied");
-    } catch (e) {
-      toast(String(e.message || e), "error");
-    }
+    } catch (e) { toast(String(e.message || e), "error"); }
+    finally { setSending(false); }
   }
 
   return (
@@ -222,7 +178,13 @@ function InviteModal({ plannerEmail, onClose, presetEmail = "" }) {
         </label>
         <div className="flex items-center gap-2">
           <button
-            onClick={onCreateLink}
+            onClick={async () => {
+              try {
+                const u = await ensureLink();
+                await navigator.clipboard.writeText(u);
+                toast("Invite link copied");
+              } catch (e) { toast(String(e.message || e), "error"); }
+            }}
             className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50"
           >
             Create & Copy Invite Link
@@ -237,7 +199,7 @@ function InviteModal({ plannerEmail, onClose, presetEmail = "" }) {
         </div>
         {!canSend ? (
           <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
-            Email sending isn’t configured; you can still share the invite link manually.
+            Email isn’t configured; share the link manually instead.
           </div>
         ) : null}
       </div>
@@ -245,108 +207,44 @@ function InviteModal({ plannerEmail, onClose, presetEmail = "" }) {
   );
 }
 
-/* ----------------- Users (with Categories editor) ----------------- */
-function CategoriesModal({ plannerEmail, user, onClose, onSaved }) {
-  const [chips, setChips] = React.useState(Array.isArray(user.groups) ? user.groups : (user.group ? [user.group] : []));
-  const [input, setInput] = React.useState("");
-
-  function addChip() {
-    const v = input.trim();
-    if (!v) return;
-    if (!chips.includes(v)) setChips([...chips, v]);
-    setInput("");
-  }
-  function removeChip(v) {
-    setChips(chips.filter((c) => c !== v));
-  }
-  async function save() {
-    try {
-      const r = await fetch("/api/users/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail, userEmail: user.email, groups: chips }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || j.error) throw new Error(j.error || "Save failed");
-      toast("Categories saved");
-      onSaved?.(chips);
-      onClose();
-    } catch (e) {
-      toast(String(e.message || e), "error");
-    }
-  }
-
-  return (
-    <Modal title={`Edit categories – ${user.email}`} onClose={onClose}>
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Add category (e.g., Mentoring)"
-            className="flex-1 rounded-xl border px-3 py-2 text-sm"
-          />
-          <button onClick={addChip} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">
-            Add
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {chips.length === 0 ? (
-            <div className="text-sm text-gray-500">No categories yet.</div>
-          ) : (
-            chips.map((c) => (
-              <span key={c} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs">
-                <Tag size={12} /> {c}
-                <button onClick={() => removeChip(c)} className="rounded px-1 text-[10px] hover:bg-gray-100">×</button>
-              </span>
-            ))
-          )}
-        </div>
-        <div className="flex items-center justify-end gap-2 pt-2">
-          <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Cancel</button>
-          <button onClick={save} className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700">Save</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
+/* ---------- Users ---------- */
 function UsersView({ plannerEmail, onManage }) {
   const [inviteOpen, setInviteOpen] = React.useState(false);
-  const [editUser, setEditUser] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [users, setUsers] = React.useState([]);
   const [q, setQ] = React.useState("");
+  const [editUser, setEditUser] = React.useState(null);
+  const [newCat, setNewCat] = React.useState("");
 
-  React.useEffect(() => {
-    load();
-    // eslint-disable-next-line
-  }, [plannerEmail]);
+  React.useEffect(() => { load(); /* eslint-disable-next-line */ }, [plannerEmail]);
 
   async function load() {
     setLoading(true);
     try {
-      const qs = new URLSearchParams({ plannerEmail });
-      let r = await fetch(`/api/users?` + qs.toString());
-      if (r.status === 404) r = await fetch(`/api/users/list?` + qs.toString());
+      let r = await fetch(`/api/users?plannerEmail=${encodeURIComponent(plannerEmail)}`);
+      if (r.status === 404) r = await fetch(`/api/users/list?plannerEmail=${encodeURIComponent(plannerEmail)}`);
       const j = await r.json().catch(() => ({}));
       const arr = Array.isArray(j) ? j : j.users || [];
       arr.sort((a, b) => (a.status === "connected" ? 0 : 1) - (b.status === "connected" ? 0 : 1));
       setUsers(arr);
-    } catch {
-      toast("Failed to load users", "error");
-    } finally { setLoading(false); }
+    } catch { toast("Failed to load users", "error"); }
+    finally { setLoading(false); }
+  }
+
+  async function saveCats(u, cats) {
+    const r = await fetch("/api/users", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plannerEmail, userEmail: u.email, groups: cats }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j.error) throw new Error(j.error || "Save failed");
   }
 
   const filtered = users.filter((u) => {
     if (!q) return true;
-    const hay = `${u.email || ""} ${(Array.isArray(u.groups) ? u.groups.join(" ") : u.group || "")} ${u.status || ""}`.toLowerCase();
+    const hay = `${u.email || ""} ${(Array.isArray(u.groups) ? u.groups.join(" ") : "")} ${u.status || ""}`.toLowerCase();
     return hay.includes(q.toLowerCase());
   });
-
-  function applySavedGroups(userEmail, groups) {
-    setUsers((prev) => prev.map((u) => (u.email === userEmail ? { ...u, groups } : u)));
-  }
 
   return (
     <div className="space-y-4">
@@ -388,7 +286,17 @@ function UsersView({ plannerEmail, onManage }) {
                 <tr key={u.email} className="border-t">
                   <td className="px-3 py-2">{u.email}</td>
                   <td className="px-3 py-2">
-                    {Array.isArray(u.groups) && u.groups.length ? u.groups.join(", ") : (u.group || "—")}
+                    <div className="flex flex-wrap items-center gap-1">
+                      {(u.groups || []).map((g) => (
+                        <span key={g} className="rounded-full border px-2 py-0.5 text-[11px]">{g}</span>
+                      ))}
+                      <button
+                        onClick={() => setEditUser(u)}
+                        className="rounded-full border px-2 py-0.5 text-[11px] hover:bg-gray-50"
+                      >
+                        Edit
+                      </button>
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     {u.status === "connected" ? (
@@ -399,8 +307,12 @@ function UsersView({ plannerEmail, onManage }) {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => setEditUser(u)} className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Edit Categories</button>
-                      <button onClick={() => onManage(u.email)} className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700">Manage User</button>
+                      <button
+                        onClick={() => onManage(u.email)}
+                        className="rounded-xl bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-cyan-700"
+                      >
+                        Manage User
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -412,18 +324,64 @@ function UsersView({ plannerEmail, onManage }) {
 
       {inviteOpen ? <InviteModal plannerEmail={plannerEmail} onClose={() => setInviteOpen(false)} /> : null}
       {editUser ? (
-        <CategoriesModal
+        <EditCats
           plannerEmail={plannerEmail}
           user={editUser}
           onClose={() => setEditUser(null)}
-          onSaved={(groups) => applySavedGroups(editUser.email, groups)}
+          onSave={async (cats) => {
+            try {
+              await saveCats(editUser, cats);
+              // update local
+              udate(setUsers, editUser.email, cats);
+              toast("Categories saved");
+              setEditUser(null);
+            } catch (e) { toast(String(e.message || e), "error"); }
+          }}
         />
       ) : null}
     </div>
   );
+
+  function udate(setter, email, cats) {
+    setter((prev) => prev.map((x) => (x.email === email ? { ...x, groups: cats } : x)));
+  }
 }
 
-/* ----------------- Recurrence chips ----------------- */
+function EditCats({ plannerEmail, user, onClose, onSave }) {
+  const [chips, setChips] = React.useState(Array.isArray(user.groups) ? user.groups : []);
+  const [input, setInput] = React.useState("");
+  function add() {
+    const v = input.trim();
+    if (!v) return;
+    if (!chips.includes(v)) setChips([...chips, v]);
+    setInput("");
+  }
+  function remove(v) { setChips(chips.filter((c) => c !== v)); }
+  return (
+    <Modal title={`Edit categories – ${user.email}`} onClose={onClose}>
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <input value={input} onChange={(e) => setInput(e.target.value)} className="flex-1 rounded-xl border px-3 py-2 text-sm" placeholder="Add category…" />
+          <button onClick={add} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Add</button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {chips.length ? chips.map((c) => (
+            <span key={c} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs">
+              {c}
+              <button onClick={() => remove(c)} className="rounded px-1 text-[10px] hover:bg-gray-100">×</button>
+            </span>
+          )) : <div className="text-sm text-gray-500">No categories yet.</div>}
+        </div>
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <button onClick={onClose} className="rounded-xl border px-3 py-2 text-xs hover:bg-gray-50">Cancel</button>
+          <button onClick={() => onSave(chips)} className="rounded-xl bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-700">Save</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ---------- Recurrence chips ---------- */
 function DayPills({ value, onChange }) {
   const days = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
   return (
@@ -435,9 +393,9 @@ function DayPills({ value, onChange }) {
             key={d}
             type="button"
             onClick={() => {
-              const set = new Set(value);
-              if (on) set.delete(idx); else set.add(idx);
-              onChange(Array.from(set).sort((a, b) => a - b));
+              const s = new Set(value);
+              if (on) s.delete(idx); else s.add(idx);
+              onChange(Array.from(s).sort((a, b) => a - b));
             }}
             className={clsx(
               "rounded-full px-2.5 py-1 text-xs border",
@@ -452,7 +410,7 @@ function DayPills({ value, onChange }) {
   );
 }
 
-/* ----------------- Plan view + History ----------------- */
+/* ---------- Plan + History ---------- */
 function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed }) {
   const [users, setUsers] = React.useState([]);
   const [planTitle, setPlanTitle] = React.useState("");
@@ -492,6 +450,10 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
   }, [plannerEmail]);
 
   React.useEffect(() => {
+    if (!selectedUserEmail) {
+      setHistoryRows([]);
+      return;
+    }
     loadHistory();
     // eslint-disable-next-line
   }, [plannerEmail, selectedUserEmail, histTab]);
@@ -499,7 +461,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
   async function loadHistory() {
     setHistLoading(true);
     try {
-      const body = { plannerEmail, userEmail: selectedUserEmail || undefined, status: histTab };
+      const body = { plannerEmail, userEmail: selectedUserEmail, status: histTab };
       const r = await fetch("/api/history/list", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -517,44 +479,6 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
   function pageRows() {
     const start = (page - 1) * pageSize;
     return historyRows.slice(start, start + pageSize);
-  }
-
-  function applyPrefill(block) {
-    if (!block) return;
-    setPlanTitle(block.title || "");
-    setPlanDate(block.start_date ? parseISO(block.start_date) : null);
-    setItems(
-      (block.items || []).map((it) => ({
-        title: it.title || "",
-        notes: it.notes || "",
-        date: it.due ? parseISO(it.due) : null,
-        time: it.due && it.due.includes("T") ? format(parseISO(it.due), "HH:mm") : "",
-      }))
-    );
-  }
-
-  async function restoreHistory(id) {
-    try {
-      const r = await fetch("/api/history/restore", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail, historyId: id }),
-      });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "Restore failed");
-      applyPrefill(j.planBlock);
-      toast("Restored into Plan");
-    } catch (e) { toast(String(e.message || e), "error"); }
-  }
-  async function setArchived(id, archived) {
-    try {
-      const r = await fetch("/api/history/archive", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail, historyId: id, archived }),
-      });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.error || "Update failed");
-      await loadHistory();
-    } catch (e) { toast(String(e.message || e), "error"); }
   }
 
   function addTask() {
@@ -575,22 +499,15 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
     } else if (recurring.type === "daily") {
       const n = recurring.end === "count" ? Math.max(1, Number(recurring.count || 1)) : 10;
       let cur = new Date(baseDate);
-      for (let i = 0; i < n; i++) {
-        out.push(pushItem(cur));
-        cur = addDays(cur, 1);
-      }
+      for (let i = 0; i < n; i++) { out.push(pushItem(cur)); cur = addDays(cur, 1); }
     } else if (recurring.type === "weekly") {
       if (!recurring.weeklyDays.length) return toast("Pick days of week", "error");
       const n = recurring.end === "count" ? Math.max(1, Number(recurring.count || 1)) : 10;
       const until = recurring.until ? new Date(recurring.until) : null;
-      let added = 0;
-      let cur = new Date(baseDate);
+      let added = 0; let cur = new Date(baseDate);
       while (added < n) {
         if (until && cur > until) break;
-        if (recurring.weeklyDays.includes(cur.getDay())) {
-          out.push(pushItem(cur));
-          added++;
-        }
+        if (recurring.weeklyDays.includes(cur.getDay())) { out.push(pushItem(cur)); added++; }
         cur = addDays(cur, 1);
       }
     } else if (recurring.type === "monthly") {
@@ -609,36 +526,25 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
     setRecurring({ type: "none", weeklyDays: [], monthlyDay: null, end: "none", count: 5, until: null });
   }
 
-  function removeTask(idx) {
-    setItems((prev) => prev.filter((_, i) => i !== idx));
-  }
+  function removeTask(idx) { setItems((prev) => prev.filter((_, i) => i !== idx)); }
 
   function exportICS() {
-    const lines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//Plan2Tasks//EN",
-      "CALSCALE:GREGORIAN",
-    ];
+    const lines = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Plan2Tasks//EN","CALSCALE:GREGORIAN"];
     items.forEach((it, i) => {
       lines.push("BEGIN:VTODO");
       lines.push(`UID:p2t-${i}-${Date.now()}@plan2tasks`);
       lines.push(`SUMMARY:${it.title}`);
       if (it.notes) lines.push(`DESCRIPTION:${it.notes.replace(/\n/g, "\\n")}`);
       if (it.date) {
-        const due = it.time
-          ? format(it.date, "yyyyMMdd'T'HHmmss'Z'")
-          : format(it.date, "yyyyMMdd");
+        const due = it.time ? format(it.date, "yyyyMMdd'T'HHmmss'Z'") : format(it.date, "yyyyMMdd");
         lines.push(`DUE:${due}`);
       }
       lines.push("END:VTODO");
     });
     lines.push("END:VCALENDAR");
     const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${(planTitle || "plan2tasks").replace(/\s+/g, "-").toLowerCase()}.ics`;
-    a.click();
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+    a.download = `${(planTitle || "plan2tasks").replace(/\s+/g, "-").toLowerCase()}.ics`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 800);
   }
 
@@ -648,26 +554,28 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
     if (items.length === 0) return toast("No tasks to push", "error");
 
     const startISO = planDate ? format(planDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd");
-    const planBlock = {
-      title: planTitle.trim(),
-      start_date: startISO,
-      timezone,
-      items: items.map((it) => {
-        const due = it.date ? format(it.date, "yyyy-MM-dd") + (it.time ? `T${it.time}:00.000Z` : "") : null;
-        return { title: it.title, notes: it.notes, due };
-      }),
-    };
+    const itemsPayload = items.map((it) => {
+      const due = it.date ? format(it.date, "yyyy-MM-dd") + (it.time ? `T${it.time}:00.000Z` : "") : null;
+      return { title: it.title, notes: it.notes, due };
+    });
+    const planBlock = { title: planTitle.trim(), start_date: startISO, timezone, items: itemsPayload };
 
     try {
       const r = await fetch("/api/push", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plannerEmail, userEmail: selectedUserEmail, planBlock, mode: "append" }),
+        // send BOTH forms to satisfy older/newer server handlers
+        body: JSON.stringify({
+          plannerEmail, userEmail: selectedUserEmail,
+          items: itemsPayload, planBlock, mode: "append"
+        }),
       });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Push failed");
       toast("Pushed to Google Tasks");
       setItems([]);
       onPushed?.();
+      // reload history
+      await loadHistory();
     } catch (e) {
       toast(String(e.message || e), "error");
     }
@@ -678,23 +586,20 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
       <Section
         title="Plan"
         right={
-          <div className="flex items-center gap-3">
-            {/* Deliver to user (top-right) */}
-            <div className="text-right">
-              <div className="mb-1 text-xs font-medium">Deliver to user</div>
-              <select
-                value={selectedUserEmail || ""}
-                onChange={(e) => onChangeUserEmail(e.target.value)}
-                className="w-64 rounded-xl border border-gray-300 px-3 py-2 text-sm"
-              >
-                <option value="">— Select user —</option>
-                {users.map((u) => (
-                  <option key={u.email} value={u.email}>
-                    {u.email}{u.status === "connected" ? "" : " (not connected)"}
-                  </option>
-                ))}
-              </select>
-            </div>
+          <div className="text-right">
+            <div className="mb-1 text-xs font-medium">Deliver to user</div>
+            <select
+              value={selectedUserEmail || ""}
+              onChange={(e) => onChangeUserEmail(e.target.value)}
+              className="w-64 rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="">— Select user —</option>
+              {users.map((u) => (
+                <option key={u.email} value={u.email}>
+                  {u.email}{u.status === "connected" ? "" : " (not connected)"}
+                </option>
+              ))}
+            </select>
           </div>
         }
       >
@@ -710,11 +615,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
           </label>
           <div className="block">
             <div className="mb-1 text-xs font-medium">Choose Plan Start Date</div>
-            <DateButton
-              value={planDate}
-              onChange={(d) => setPlanDate(d)}
-              labelWhenEmpty="Pick date"
-            />
+            <DateButton value={planDate} onChange={(d) => setPlanDate(d)} labelWhenEmpty="Pick date" />
           </div>
         </div>
 
@@ -740,11 +641,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
 
           <div className="block">
             <div className="mb-1 text-xs font-medium">Task date</div>
-            <DateButton
-              value={taskDate}
-              onChange={(d) => setTaskDate(d)}
-              labelWhenEmpty="Pick date"
-            />
+            <DateButton value={taskDate} onChange={(d) => setTaskDate(d)} labelWhenEmpty="Pick date" />
           </div>
           <label className="block">
             <div className="mb-1 text-xs font-medium">Time (optional)</div>
@@ -789,9 +686,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
               <div className="mt-2">
                 <div className="mb-1 text-xs text-gray-600">Day of month</div>
                 <input
-                  type="number"
-                  min={1}
-                  max={31}
+                  type="number" min={1} max={31}
                   value={recurring.monthlyDay || ""}
                   onChange={(e) => setRecurring((r) => ({ ...r, monthlyDay: Number(e.target.value || 1) }))}
                   className="w-24 rounded-xl border border-gray-300 px-2 py-1 text-sm"
@@ -803,8 +698,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <label className="flex items-center gap-2 text-sm">
                   <input
-                    type="radio"
-                    name="rec-end"
+                    type="radio" name="rec-end"
                     checked={recurring.end === "none"}
                     onChange={() => setRecurring((r) => ({ ...r, end: "none", until: null }))}
                   />
@@ -812,28 +706,23 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
                 </label>
                 <label className="flex items-center gap-2 text-sm">
                   <input
-                    type="radio"
-                    name="rec-end"
+                    type="radio" name="rec-end"
                     checked={recurring.end === "count"}
                     onChange={() => setRecurring((r) => ({ ...r, end: "count", until: null }))}
                   />
                   <span>
                     Generate{" "}
                     <input
-                      type="number"
-                      min={1}
-                      value={recurring.count}
+                      type="number" min={1} value={recurring.count}
                       onChange={(e) => setRecurring((r) => ({ ...r, count: Number(e.target.value || 1) }))}
                       className="mx-1 w-16 rounded-lg border px-2 py-1 text-sm"
-                    />{" "}
-                    items
+                    /> items
                   </span>
                 </label>
                 <div className="flex items-center gap-2">
                   <label className="flex items-center gap-2 text-sm">
                     <input
-                      type="radio"
-                      name="rec-end"
+                      type="radio" name="rec-end"
                       checked={recurring.end === "until"}
                       onChange={() => setRecurring((r) => ({ ...r, end: "until" }))}
                     />
@@ -858,92 +747,7 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
         </div>
       </Section>
 
-      <Section
-        title={`History ${selectedUserEmail ? `for ${selectedUserEmail}` : ""}`}
-        right={
-          <div className="flex items-center gap-2">
-            <div className="rounded-xl border">
-              <div className="flex overflow-hidden rounded-xl">
-                {["active", "archived"].map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setHistTab(t)}
-                    className={clsx(
-                      "px-3 py-1.5 text-xs",
-                      histTab === t ? "bg-gray-900 text-white" : "hover:bg-gray-50"
-                    )}
-                  >
-                    {t[0].toUpperCase() + t.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        }
-      >
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50">
-              <tr className="text-left text-gray-600">
-                <th className="px-3 py-2 font-medium">Title</th>
-                <th className="px-3 py-2 font-medium">Start date</th>
-                <th className="px-3 py-2 font-medium">Items</th>
-                <th className="px-3 py-2 font-medium">Mode</th>
-                <th className="px-3 py-2 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {histLoading ? (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Loading…</td></tr>
-              ) : pageRows().length === 0 ? (
-                <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Nothing here yet.</td></tr>
-              ) : (
-                pageRows().map((r) => (
-                  <tr key={r.id} className="border-t">
-                    <td className="px-3 py-2">{r.title}</td>
-                    <td className="px-3 py-2">{r.start_date}</td>
-                    <td className="px-3 py-2">{r.items_count}</td>
-                    <td className="px-3 py-2">{r.mode}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => restoreHistory(r.id)} className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Restore</button>
-                        {histTab === "active" ? (
-                          <button onClick={() => setArchived(r.id, true)} className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Archive</button>
-                        ) : (
-                          <button onClick={() => setArchived(r.id, false)} className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Unarchive</button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          {/* simple pagination */}
-          <div className="mt-2 flex items-center justify-end gap-2">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded-xl border px-3 py-1.5 text-xs hover:bg-gray-50"
-              disabled={page === 1}
-            >
-              Prev
-            </button>
-            <div className="text-xs text-gray-600">
-              Page {page} of {Math.max(1, Math.ceil(historyRows.length / pageSize))}
-            </div>
-            <button
-              onClick={() =>
-                setPage((p) => (p < Math.ceil(historyRows.length / pageSize) ? p + 1 : p))
-              }
-              className="rounded-xl border px-3 py-1.5 text-xs hover:bg-gray-50"
-              disabled={page >= Math.ceil(historyRows.length / pageSize)}
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      </Section>
-
+      {/* PREVIEW ABOVE HISTORY */}
       {items.length > 0 ? (
         <Section
           title="Preview & Deliver"
@@ -961,44 +765,185 @@ function PlanView({ plannerEmail, selectedUserEmail, onChangeUserEmail, onPushed
             </div>
           }
         >
-          <div className="space-y-2">
-            <div className="text-sm text-gray-600">
-              Delivering to: <b>{selectedUserEmail || "—"}</b>
-            </div>
-            <div className="rounded-xl border border-gray-100">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr className="text-left text-gray-600">
-                    <th className="px-3 py-2 font-medium">Task</th>
-                    <th className="px-3 py-2 font-medium">Date</th>
-                    <th className="px-3 py-2 font-medium">Time</th>
-                    <th className="px-3 py-2 font-medium">Notes</th>
-                    <th className="px-3 py-2 font-medium text-right">Remove</th>
+          <div className="rounded-xl border border-gray-100 overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-gray-600">
+                  <th className="px-3 py-2 font-medium">Task</th>
+                  <th className="px-3 py-2 font-medium">Date</th>
+                  <th className="px-3 py-2 font-medium">Time</th>
+                  <th className="px-3 py-2 font-medium">Notes</th>
+                  <th className="px-3 py-2 font-medium text-right">Remove</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, idx) => (
+                  <tr key={idx} className="border-t">
+                    <td className="px-3 py-2">{it.title}</td>
+                    <td className="px-3 py-2">{it.date ? format(it.date, "yyyy-MM-dd") : "—"}</td>
+                    <td className="px-3 py-2">{it.time || "—"}</td>
+                    <td className="px-3 py-2">{it.notes || "—"}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => removeTask(idx)} className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Delete</button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {items.map((it, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{it.title}</td>
-                      <td className="px-3 py-2">{it.date ? format(it.date, "yyyy-MM-dd") : "—"}</td>
-                      <td className="px-3 py-2">{it.time || "—"}</td>
-                      <td className="px-3 py-2">{it.notes || "—"}</td>
-                      <td className="px-3 py-2 text-right">
-                        <button onClick={() => removeTask(idx)} className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50">Delete</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Section>
       ) : null}
+
+      <Section
+        title={`History ${selectedUserEmail ? `for ${selectedUserEmail}` : ""}`}
+        right={
+          <div className="rounded-xl border">
+            <div className="flex overflow-hidden rounded-xl">
+              {["active", "archived"].map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setHistTab(t)}
+                  className={clsx("px-3 py-1.5 text-xs", histTab === t ? "bg-gray-900 text-white" : "hover:bg-gray-50")}
+                >
+                  {t[0].toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+        }
+      >
+        {!selectedUserEmail ? (
+          <div className="text-sm text-gray-600">Select a user (top-right) to view their history.</div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50">
+                  <tr className="text-left text-gray-600">
+                    <th className="px-3 py-2 font-medium">Title</th>
+                    <th className="px-3 py-2 font-medium">Start date</th>
+                    <th className="px-3 py-2 font-medium">Items</th>
+                    <th className="px-3 py-2 font-medium">Mode</th>
+                    <th className="px-3 py-2 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {histLoading ? (
+                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Loading…</td></tr>
+                  ) : pageRows().length === 0 ? (
+                    <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-500">Nothing here yet.</td></tr>
+                  ) : (
+                    pageRows().map((r) => (
+                      <tr key={r.id} className="border-t">
+                        <td className="px-3 py-2">{r.title}</td>
+                        <td className="px-3 py-2">{r.start_date}</td>
+                        <td className="px-3 py-2">{r.items_count}</td>
+                        <td className="px-3 py-2">{r.mode}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const rr = await fetch("/api/history/restore", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ plannerEmail, historyId: r.id }),
+                                  });
+                                  const jj = await rr.json();
+                                  if (!rr.ok || jj.error) throw new Error(jj.error || "Restore failed");
+                                  // prefill
+                                  const block = jj.planBlock;
+                                  setPlanTitle(block?.title || "");
+                                  setPlanDate(block?.start_date ? parseISO(block.start_date) : null);
+                                  setItems(
+                                    (block?.items || []).map((it) => ({
+                                      title: it.title || "",
+                                      notes: it.notes || "",
+                                      date: it.due ? parseISO(it.due) : null,
+                                      time: it.due && it.due.includes("T") ? format(parseISO(it.due), "HH:mm") : "",
+                                    }))
+                                  );
+                                  toast("Restored into Plan");
+                                } catch (e) { toast(String(e.message || e), "error"); }
+                              }}
+                              className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"
+                            >
+                              Restore
+                            </button>
+                            {histTab === "active" ? (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const rr = await fetch("/api/history/archive", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ plannerEmail, historyId: r.id, archived: true }),
+                                    });
+                                    const jj = await rr.json();
+                                    if (!rr.ok || jj.error) throw new Error(jj.error || "Archive failed");
+                                    await loadHistory();
+                                  } catch (e) { toast(String(e.message || e), "error"); }
+                                }}
+                                className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"
+                              >
+                                Archive
+                              </button>
+                            ) : (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const rr = await fetch("/api/history/archive", {
+                                      method: "POST",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ plannerEmail, historyId: r.id, archived: false }),
+                                    });
+                                    const jj = await rr.json();
+                                    if (!rr.ok || jj.error) throw new Error(jj.error || "Unarchive failed");
+                                    await loadHistory();
+                                  } catch (e) { toast(String(e.message || e), "error"); }
+                                }}
+                                className="rounded-xl border px-2.5 py-1.5 text-xs hover:bg-gray-50"
+                              >
+                                Unarchive
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* simple pagination */}
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-xl border px-3 py-1.5 text-xs hover:bg-gray-50"
+                disabled={page === 1}
+              >
+                Prev
+              </button>
+              <div className="text-xs text-gray-600">
+                Page {page} of {Math.max(1, Math.ceil(historyRows.length / pageSize))}
+              </div>
+              <button
+                onClick={() => setPage((p) => (p < Math.ceil(historyRows.length / pageSize) ? p + 1 : p))}
+                className="rounded-xl border px-3 py-1.5 text-xs hover:bg-gray-50"
+                disabled={page >= Math.ceil(historyRows.length / pageSize)}
+              >
+                Next
+              </button>
+            </div>
+          </>
+        )}
+      </Section>
     </div>
   );
 }
 
-/* ----------------- Settings view ----------------- */
+/* ---------- Settings ---------- */
 function SettingsView() {
   const keyTz = "p2t.defaultTz";
   const keyAA = "p2t.autoArchive";
@@ -1006,13 +951,11 @@ function SettingsView() {
     localStorage.getItem(keyTz) || Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago"
   );
   const [aa, setAa] = React.useState(localStorage.getItem(keyAA) === "1");
-
   function save() {
     localStorage.setItem(keyTz, tz);
     localStorage.setItem(keyAA, aa ? "1" : "0");
     toast("Settings saved");
   }
-
   return (
     <div className="space-y-4">
       <Section title="Settings">
@@ -1053,7 +996,7 @@ function SettingsView() {
   );
 }
 
-/* ----------------- App shell ----------------- */
+/* ---------- App shell ---------- */
 function AppShell() {
   const [session, setSession] = React.useState(null);
   const [ready, setReady] = React.useState(false);
@@ -1079,11 +1022,8 @@ function AppShell() {
 
   const plannerEmail = session?.user?.email || "";
 
-  async function logout() {
-    try { await supabase.auth.signOut(); } catch {}
-  }
+  async function logout() { try { await supabase.auth.signOut(); } catch {} }
 
-  // Gate
   if (ready && !session) {
     return (
       <div className="mx-auto max-w-md p-6">
@@ -1161,10 +1101,7 @@ function AppShell() {
       {tab === "users" ? (
         <UsersView
           plannerEmail={plannerEmail}
-          onManage={(email) => {
-            setSelectedUserEmail(email);
-            setTab("plan");
-          }}
+          onManage={(email) => { setSelectedUserEmail(email); setTab("plan"); }}
         />
       ) : tab === "plan" ? (
         <PlanView
@@ -1184,6 +1121,4 @@ function AppShell() {
   );
 }
 
-export default function Plan2TasksApp() {
-  return <AppShell />;
-}
+export default function Plan2TasksApp() { return <AppShell />; }
