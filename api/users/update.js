@@ -1,7 +1,5 @@
 // api/users/update.js
-// Updates a user's categories (groups) for a planner.
-// Expects JSON: { plannerEmail, userEmail, groups: [] }
-
+// POST { plannerEmail, userEmail, groups: [] }
 import { createClient } from "@supabase/supabase-js";
 
 export default async function handler(req, res) {
@@ -22,15 +20,17 @@ export default async function handler(req, res) {
       res.status(500).json({ error: "Server misconfigured (missing Supabase envs)" });
       return;
     }
-    const supabase = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
 
-    // Update or upsert into your existing users table keyed by (planner_email, email).
-    // If your table/columns differ, tell me and I’ll adjust.
+    const supabase = createClient(url, service, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    // expects: table "users" with columns planner_email, email, groups (jsonb)
     const { data, error } = await supabase
       .from("users")
       .upsert(
         { planner_email: plannerEmail, email: userEmail, groups },
-        { onConflict: "planner_email,email" } // requires a unique constraint on (planner_email, email)
+        { onConflict: "planner_email,email" }
       )
       .select("*")
       .single();
