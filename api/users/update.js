@@ -1,46 +1,53 @@
-// api/users/update.js
-// POST { plannerEmail, userEmail, groups: [] }
-import { createClient } from "@supabase/supabase-js";
+// /api/users/update.js
+import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "POST only" });
+  }
+
   try {
-    if (req.method !== "POST") {
-      res.status(405).json({ error: "POST only" });
-      return;
-    }
-    const { plannerEmail, userEmail, groups } = req.body || {};
-    if (!plannerEmail || !userEmail || !Array.isArray(groups)) {
-      res.status(400).json({ error: "Missing plannerEmail, userEmail, or groups[]" });
-      return;
+    const { plannerEmail, userEmail, groups = [] } = req.body || {};
+    if (!plannerEmail || !userEmail) {
+      return res.status(400).json({ error: "Missing plannerEmail or userEmail" });
     }
 
-    const url = process.env.SUPABASE_URL;
-    const service = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !service) {
-      res.status(500).json({ error: "Server misconfigured (missing Supabase envs)" });
-      return;
+    // We store categories per (planner,user) pair on user_connections.groups
+    // 1) Does a connection already exist?
+    const { data: existing, error: selErr } = await supabaseAdmin
+      .from("user_connections")
+      .select("planner_email,user_email")
+      .eq("planner_email", plannerEmail)
+      .eq("user_email", userEmail)
+      .maybeSingle();
+
+    if (selErr) return res.status(500).json({ error: selErr.message });
+
+    if (existing) {
+      const { error: upErr } = await supabaseAdmin
+        .from("user_connections")
+        .update({ groups, updated_at: new Date().toISOString() })
+        .eq("planner_email", plannerEmail)
+        .eq("user_email", userEmail);
+
+      if (upErr) return res.status(500).json({ error: upErr.message });
+      return res.json({ ok: true, mode: "updated" });
     }
 
-    const supabase = createClient(url, service, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    // If connection doesn’t exist, create a minimal row so categories can save
+    const { error: insErr } = await supabaseAdmin.from("user_connections").insert([
+      {
+        planner_email: plannerEmail,
+        user_email: userEmail,
+        groups,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    ]);
+    if (insErr) return res.status(500).json({ error: insErr.message });
 
-    // expects: table "users" with columns planner_email, email, groups (jsonb)
-    const { data, error } = await supabase
-      .from("users")
-      .upsert(
-        { planner_email: plannerEmail, email: userEmail, groups },
-        { onConflict: "planner_email,email" }
-      )
-      .select("*")
-      .single();
-
-    if (error) {
-      res.status(500).json({ error: error.message });
-      return;
-    }
-    res.status(200).json({ ok: true, user: data });
+    return res.json({ ok: true, mode: "inserted" });
   } catch (e) {
-    res.status(500).json({ error: String(e.message || e) });
+    return res.status(500).json({ error: e?.message || "Server error" });
   }
 }
