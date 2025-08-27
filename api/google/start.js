@@ -1,77 +1,80 @@
-// api/google/start.js
+// /api/google/start.js
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
-const SITE =
-  process.env.PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
+const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const REDIRECT_URI =
+  process.env.GOOGLE_REDIRECT_URI ||
+  (process.env.SITE_URL?.replace(/\/$/, "") + "/api/google/callback");
 
-function b64url(json) {
-  return Buffer.from(JSON.stringify(json)).toString("base64url");
+function siteBase(req) {
+  const envSite = (process.env.SITE_URL || "").replace(/\/$/, "");
+  if (envSite) return envSite;
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+function b64url(obj) {
+  const b64 = Buffer.from(JSON.stringify(obj)).toString("base64");
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 export default async function handler(req, res) {
   try {
-    const url = new URL(`https://${req.headers.host}${req.url}`);
-    const inviteId = url.searchParams.get("invite") || "";
-    const dry = url.searchParams.get("dry") === "1";
-
-    if (!SITE || !CLIENT_ID || !REDIRECT_URI) {
-      return res.status(500).json({
-        error: "Missing env",
-        needed: {
-          PUBLIC_SITE_URL: !!SITE,
-          GOOGLE_CLIENT_ID: !!CLIENT_ID,
-          GOOGLE_REDIRECT_URI: !!REDIRECT_URI
-        }
-      });
+    const site = siteBase(req);
+    if (!CLIENT_ID || !REDIRECT_URI) {
+      return res.status(500).send("Missing GOOGLE_CLIENT_ID or GOOGLE_REDIRECT_URI");
     }
-    if (!inviteId) return res.status(400).json({ error: "Missing invite" });
 
-    // Ensure invite exists (so we know planner/user emails later)
-    const { data: inv, error: invErr } = await supabaseAdmin
-      .from("invites")
-      .select("id, planner_email, user_email, accepted_at, deleted_at")
-      .eq("id", inviteId)
-      .single();
-    if (invErr || !inv) return res.status(404).json({ error: "Invite not found" });
-    if (inv.deleted_at) return res.status(410).json({ error: "Invite deleted" });
+    const inviteId = (req.query.invite || "").trim();
+    let planner = (req.query.plannerEmail || "").trim();
+    let user = (req.query.userEmail || "").trim();
 
-    const state = b64url({ v: 1, inviteId });
+    if (inviteId && (!planner || !user)) {
+      const { data: inv, error } = await supabaseAdmin
+        .from("invites")
+        .select("planner_email,user_email")
+        .eq("id", inviteId)
+        .maybeSingle();
+      if (error) return res.status(500).send(error.message);
+      if (inv) {
+        planner = inv.planner_email;
+        user = inv.user_email;
+      }
+    }
+
+    if (!planner || !user) {
+      return res.status(400).send("Missing plannerEmail or userEmail (or invalid invite)");
+    }
+
+    // Seed a pending connection row (handy for dashboards)
+    await supabaseAdmin
+      .from("user_connections")
+      .upsert(
+        { planner_email: planner, user_email: user, status: "pending", updated_at: new Date().toISOString() },
+        { onConflict: "planner_email,user_email" }
+      );
+
     const scope = [
       "openid",
       "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/tasks"
+      "https://www.googleapis.com/auth/tasks",
     ].join(" ");
 
-    const params = new URLSearchParams({
-      client_id: CLIENT_ID,
-      redirect_uri: REDIRECT_URI,
-      response_type: "code",
-      access_type: "offline",
-      include_granted_scopes: "true",
-      prompt: "consent",
-      scope,
-      state
-    });
+    const state = b64url({ v: 1, inviteId: inviteId || null, planner, user });
 
-    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+    const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authUrl.searchParams.set("client_id", CLIENT_ID);
+    authUrl.searchParams.set("redirect_uri", REDIRECT_URI);
+    authUrl.searchParams.set("response_type", "code");
+    authUrl.searchParams.set("access_type", "offline");
+    authUrl.searchParams.set("include_granted_scopes", "true");
+    authUrl.searchParams.set("prompt", "consent");
+    authUrl.searchParams.set("scope", scope);
+    authUrl.searchParams.set("state", state);
 
-    if (dry) {
-      return res.json({
-        ok: true,
-        invite: { id: inv.id, planner: inv.planner_email, user: inv.user_email },
-        using: { site: SITE, clientId: CLIENT_ID, redirectUri: REDIRECT_URI },
-        authUrl
-      });
-    }
-
-    res.setHeader("Cache-Control", "no-store");
-    res.writeHead(302, { Location: authUrl });
-    res.end();
+    return res.redirect(302, authUrl.toString());
   } catch (e) {
-    console.error("start error", e);
-    res.status(500).json({ error: e.message || "Server error" });
+    return res.status(500).send(e?.message || "Server error");
   }
 }
