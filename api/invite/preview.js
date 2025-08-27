@@ -17,20 +17,34 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Missing plannerEmail or userEmail" });
     }
 
-    // Reuse an existing unused invite if present; otherwise create a new one
-    let inviteId = null;
-    const { data: existing } = await supabaseAdmin
+    // 1) Look for ANY existing invite for this pair (used or not)
+    const { data: existing, error: selErr } = await supabaseAdmin
       .from("invites")
       .select("id, used_at")
       .eq("planner_email", plannerEmail)
       .eq("user_email", userEmail)
-      .is("used_at", null)
-      .limit(1)
       .maybeSingle();
 
+    if (selErr) return res.status(500).json({ error: selErr.message });
+
+    let inviteId;
+
     if (existing?.id) {
-      inviteId = existing.id;
+      // If it was already used, "reset" it so it's reusable
+      if (existing.used_at) {
+        const { data: upd, error: upErr } = await supabaseAdmin
+          .from("invites")
+          .update({ used_at: null })
+          .eq("id", existing.id)
+          .select("id")
+          .single();
+        if (upErr) return res.status(500).json({ error: upErr.message });
+        inviteId = upd.id;
+      } else {
+        inviteId = existing.id;
+      }
     } else {
+      // No row yet → create one
       const { data: created, error: insErr } = await supabaseAdmin
         .from("invites")
         .insert({ planner_email: plannerEmail, user_email: userEmail })
@@ -42,6 +56,7 @@ export default async function handler(req, res) {
 
     const site = siteBase(req);
     const inviteUrl = `${site}/api/google/start?invite=${inviteId}`;
+
     return res.json({
       ok: true,
       emailed: false,
