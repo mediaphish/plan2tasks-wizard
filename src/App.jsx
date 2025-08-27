@@ -1,4 +1,4 @@
-// src/App.jsx
+// src/App.jsx Re-deployment
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
