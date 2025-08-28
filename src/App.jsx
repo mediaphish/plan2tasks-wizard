@@ -142,14 +142,12 @@ function AppInner(){
   const [toasts,setToasts]=useState([]);
 
   useEffect(()=>{ (async ()=>{
-    try{
-      const qs=new URLSearchParams({ plannerEmail });
-      const r=await fetch(`/api/prefs/get?${qs.toString()}`);
-      if (r.ok){ const j=await r.json(); const p=j.prefs||j;
-        setPrefs(p);
-        setView(p.default_view || "users");
-      }
-    }catch(e){}
+    const qs=new URLSearchParams({ plannerEmail });
+    const r=await fetch(`/api/prefs/get?${qs.toString()}`);
+    if (r.ok){ const j=await r.json(); const p=j.prefs||j;
+      setPrefs(p);
+      setView(p.default_view || "users");
+    }
   })(); },[plannerEmail]);
 
   async function loadBadge(){
@@ -326,7 +324,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ───────── Plan view (baseline visuals; two tiny tweaks) ───────── */
+/* ───────── Plan view (baseline visuals; tiny tweaks noted inline) ───────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -382,6 +380,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
         <label className="block">
+          {/* Change #1: label text */}
           <div className="mb-1 text-sm font-medium">Plan Name</div>
           <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
         </label>
@@ -411,7 +410,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      {/* ▶ Change: Hide Preview & Deliver until there is at least one task */}
+      {/* Change #2: hide Preview & Deliver until at least one task exists */}
       {tasks.length>0 && (
         <ComposerPreview
           plannerEmail={plannerEmail}
@@ -591,7 +590,7 @@ function TaskEditor({ planStartDate, onAdd }){
             <option value="horizon">Over horizon</option>
           </select>
 
-        {endMode==="count" && (
+          {endMode==="count" && (
             <>
               <input type="number" min={1} value={count} onChange={(e)=>setCount(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
               <span className="text-sm">occurrence(s)</span>
@@ -739,7 +738,4 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
 // (keep your baseline HistoryPanel, UsersView, SettingsView code here)
 
 /* ───────── Timezones (baseline) ───────── */
-const TIMEZONES = [
-  "America/Chicago","America/New_York","America/Denver","America/Los_Angeles",
-  "UTC","Europe/ London","Europe/Berlin","Asia/Tokyo","Australia/Sydney"
-];
+const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
