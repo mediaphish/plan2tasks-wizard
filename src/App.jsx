@@ -1,3 +1,10 @@
+/* App.jsx — Issue B follow-up: fix End → “Until date” calendar wiring.
+   Changes vs the last file I gave you:
+   - TaskEditor: adds `untilOpen` state
+   - “Until date” button now opens `untilOpen` modal (not taskDateOpen)
+   - New Modal renders CalendarGridFree that sets `untilDate`
+   Everything else is identical to keep your approved UI as-is.
+*/
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
@@ -123,7 +130,6 @@ export default function App(){
 }
 
 function MainApp(){
-  // Planner email: from URL (?plannerEmail=...), else your provided test email
   const urlPE = new URLSearchParams(typeof window!=="undefined" ? window.location.search : "").get("plannerEmail");
   const plannerEmail = urlPE || "bartpaden@gmail.com";
 
@@ -134,7 +140,6 @@ function MainApp(){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [toasts,setToasts]=useState([]);
 
-  // Load prefs for the planner so the default tab/flags match your baseline
   useEffect(()=>{ (async ()=>{
     try{
       const qs=new URLSearchParams({ plannerEmail });
@@ -146,7 +151,6 @@ function MainApp(){
     }catch(e){}
   })(); },[plannerEmail]);
 
-  // inbox badge (if your app uses it)
   async function loadBadge(){
     try{
       const qs=new URLSearchParams({ plannerEmail, status:"new" });
@@ -355,7 +359,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear()-1, v.getUTCMonth(), 1)))} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth()-1, 1)))} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
           <div className="px-2 text-sm font-semibold">{monthLabel(vm)}</div>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth()+1, 1)))} title="Next month"><ChevronRight className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth()+1, 1)))} title="Next month"><ChevronRight className="h-3 w-4" /></button>
           <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear()+1, v.getUTCMonth(), 1)))} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
         </div>
         <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(new Date(Date.UTC(init.getUTCFullYear(), init.getUTCMonth(), 1)))}>Jump to current</button>
@@ -381,7 +385,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ───────── Plan view (B-only tweaks) ───────── */
+/* ───────── Plan view ───────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -499,6 +503,7 @@ function TaskEditor({ planStartDate, onAdd }){
   const [endMode,setEndMode]=useState("count");
   const [count,setCount]=useState(4);
   const [untilDate,setUntilDate]=useState("");
+  const [untilOpen,setUntilOpen]=useState(false); /* ← NEW: dedicated modal for “until” */
   const [horizonMonths,setHorizonMonths]=useState(6);
   const [weeklyDays,setWeeklyDays]=useState([false,true,false,true,false,false,false]);
   const [monthlyMode,setMonthlyMode]=useState("dom");
@@ -655,7 +660,7 @@ function TaskEditor({ planStartDate, onAdd }){
           {endMode==="until" && (
             <>
               <span className="text-sm">Date</span>
-              <button type="button" onClick={()=>setTaskDateOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+              <button type="button" onClick={()=>setUntilOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
                 <Calendar className="h-4 w-4" /> {untilDate ? format(parseISODate(untilDate)||new Date(),"MMM d, yyyy") : "Pick date"}
               </button>
             </>
@@ -678,6 +683,16 @@ function TaskEditor({ planStartDate, onAdd }){
           )}
         </div>
       </div>
+
+      {untilOpen && (
+        <Modal title="Choose Until Date" onClose={()=>setUntilOpen(false)}>
+          <CalendarGridFree
+            initialDate={untilDate || planStartDate}
+            selectedDate={untilDate || planStartDate}
+            onPick={(ymd)=>{ setUntilDate(ymd); setUntilOpen(false); }}
+          />
+        </Modal>
+      )}
 
       <div className="mt-3 flex items-center justify-between">
         <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-black">
@@ -718,7 +733,6 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
-      // Optional: snapshot to history if your API supports it
       try{
         await fetch("/api/history/snapshot",{
           method:"POST", headers:{ "Content-Type":"application/json" },
@@ -948,7 +962,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* ───────── Settings (same shell) ───────── */
+/* ───────── Settings ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(()=>{
     return {
