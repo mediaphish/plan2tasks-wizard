@@ -1,4 +1,4 @@
-# Plan2Tasks Wizard (One-Click Deploy Guide)
+# Plan2Tasks Wizard (One-Click Deploy Guide )
 
 This folder contains the **Plan2Tasks Wizard** — a small website that helps you create your weekly plan, copy a “Plan2Tasks block”, and export an `.ics` calendar file.
 
@@ -51,7 +51,7 @@ If you prefer to see the site on your own computer:
    npm install
    npm run dev
    ```
-3. Open the URL it prints (usually `http://localhost:5173`).
+3. Open the URL it prints (usually `http://localhost:5173`). 
 
 To build a static site locally:
 ```bash
