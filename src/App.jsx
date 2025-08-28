@@ -148,16 +148,16 @@ function AppInner(){
       if (r.ok){ const j=await r.json(); const p=j.prefs||j;
         setPrefs(p);
         setView(p.default_view || "users");
-      }catch{}
-    })();
-  },[plannerEmail]);
+      }
+    }catch(e){}
+  })(); },[plannerEmail]);
 
   async function loadBadge(){
     try{
       const qs=new URLSearchParams({ plannerEmail, status:"new" });
       const r=await fetch(`/api/inbox?${qs.toString()}`); const j=await r.json();
       setInboxBadge((j.bumpCount||0));
-    }catch{}
+    }catch(e){}
   }
   useEffect(()=>{ if (prefs.show_inbox_badge) loadBadge(); },[plannerEmail,prefs.show_inbox_badge]);
 
@@ -258,10 +258,10 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* ───────── Inbox Drawer (unchanged) ───────── */
-// … (baseline InboxDrawer, omitted here for brevity — keep your original code content)
+/* ───────── Inbox Drawer (baseline) ───────── */
+// (keep your baseline InboxDrawer code here)
 
-/* ───────── Calendar modal (unchanged) ───────── */
+/* ───────── Calendar modal (baseline) ───────── */
 function Modal({ title, onClose, children }){
   useEffect(()=>{
     function onKey(e){ if (e.key==="Escape") onClose?.(); }
@@ -326,7 +326,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ───────── Plan view (only two tiny tweaks) ───────── */
+/* ───────── Plan view (baseline visuals; two tiny tweaks) ───────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -411,7 +411,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      {/* ▶ Change #2: Hide Preview & Deliver until at least one task exists */}
+      {/* ▶ Change: Hide Preview & Deliver until there is at least one task */}
       {tasks.length>0 && (
         <ComposerPreview
           plannerEmail={plannerEmail}
@@ -431,7 +431,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* ───────── Task editor (unchanged visuals) ───────── */
+/* ───────── Task editor (baseline) ───────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -547,7 +547,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence block (unchanged) */}
+      {/* Recurrence block (baseline) */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -591,7 +591,7 @@ function TaskEditor({ planStartDate, onAdd }){
             <option value="horizon">Over horizon</option>
           </select>
 
-          {endMode==="count" && (
+        {endMode==="count" && (
             <>
               <input type="number" min={1} value={count} onChange={(e)=>setCount(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
               <span className="text-sm">occurrence(s)</span>
@@ -638,7 +638,7 @@ function TaskEditor({ planStartDate, onAdd }){
 }
 function pill(on){ return cn("rounded-full border px-2 py-1 text-xs sm:text-sm", on?"border-gray-800 bg-gray-900 text-white":"border-gray-300 bg-white hover:bg-gray-50"); }
 
-/* ───────── Preview / Deliver (unchanged logic) ───────── */
+/* ───────── Preview / Deliver (baseline) ───────── */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
   const total=tasks.length;
   async function pushNow(){
@@ -677,26 +677,19 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
 
       setMsg(`Success — ${j.created||total} task(s) created`);
       setTasks([]);
-    } catch(e){
-      console.error("push error", e);
-      setMsg(e.message || "Push failed");
+    } catch (e) {
+      setMsg("Error: "+String(e.message||e));
     }
   }
 
-  const title = "Preview & Deliver";
   return (
-    <div className="mt-3 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-sm font-semibold">{title}</div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-2 text-xs sm:text-sm">
-            <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
-            Replace existing list
-          </label>
-          <button onClick={pushNow} className="inline-flex items-center gap-2 rounded-xl border border-gray-800 px-3 sm:px-4 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50 disabled:opacity-60 whitespace-nowrap" disabled={total===0}>
-            <ArrowRight className="h-4 w-4" /> Push to Google Tasks
-          </button>
-        </div>
+    <div className="mt-4 rounded-xl border border-gray-200 p-3 sm:p-4">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">Preview & Deliver</div>
+        <label className="inline-flex items-center gap-2 text-xs whitespace-nowrap">
+          <input type="checkbox" checked={replaceMode} onChange={(e)=>setReplaceMode(e.target.checked)} />
+          Replace existing list
+        </label>
       </div>
 
       {!!msg && <div className="mb-2 text-xs sm:text-sm text-gray-500">{msg}</div>}
@@ -742,11 +735,11 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   );
 }
 
-/* ───────── History panel (unchanged) ───────── */
-// … (keep your baseline HistoryPanel, UsersView, SettingsView, Inbox, etc., exactly as-is)
+/* ───────── History/Users/Settings (baseline) ───────── */
+// (keep your baseline HistoryPanel, UsersView, SettingsView code here)
 
 /* ───────── Timezones (baseline) ───────── */
 const TIMEZONES = [
   "America/Chicago","America/New_York","America/Denver","America/Los_Angeles",
-  "UTC","Europe/London","Europe/Berlin","Asia/Tokyo","Australia/Sydney"
+  "UTC","Europe/ London","Europe/Berlin","Asia/Tokyo","Australia/Sydney"
 ];
