@@ -5,7 +5,6 @@ import {
   Plus, RotateCcw, Info
 } from "lucide-react";
 import { format } from "date-fns";
-import { supabaseClient } from "./lib/supabase-client.js";
 
 /* ───────────── utils ───────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
@@ -92,69 +91,6 @@ function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
   );
 }
 
-/* ───────── Auth Screen (in-file) ───────── */
-function AuthScreen({ onSignedIn }){
-  const [mode,setMode]=useState("signin");
-  const [email,setEmail]=useState("");
-  const [pw,setPw]=useState("");
-  const [msg,setMsg]=useState("");
-
-  async function handleSignup(){
-    setMsg("Creating account...");
-    const { data, error } = await supabaseClient.auth.signUp({ email, password: pw });
-    if (error) return setMsg("Error: "+error.message);
-    if (!data.session) { setMsg("Check your email to confirm, then sign in."); return; }
-    onSignedIn(data.session);
-  }
-  async function handleSignin(){
-    setMsg("Signing in...");
-    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
-    if (error) return setMsg("Error: "+error.message);
-    onSignedIn(data.session);
-  }
-  async function handleGoogle(){
-    setMsg("Redirecting…");
-    const { error } = await supabaseClient.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin }});
-    if (error) setMsg("Error: "+error.message);
-  }
-
-  return (
-    <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
-      <div className="mx-auto max-w-md rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm">
-        <div className="mb-4 text-center">
-          <div className="text-2xl font-bold">Plan2Tasks</div>
-          <div className="text-xs text-gray-500">Sign in to continue</div>
-        </div>
-
-        <div className="mb-2 flex justify-center gap-2">
-          <button className={cn("rounded-lg border px-3 py-1.5 text-xs", mode==="signin"?"bg-gray-900 text-white border-gray-900":"bg-white")} onClick={()=>setMode("signin")}>Sign in</button>
-          <button className={cn("rounded-lg border px-3 py-1.5 text-xs", mode==="signup"?"bg-gray-900 text-white border-gray-900":"bg-white")} onClick={()=>setMode("signup")}>Sign up</button>
-        </div>
-
-        <label className="block mb-2">
-          <div className="mb-1 text-sm font-medium">Email</div>
-          <input value={email} onChange={(e)=>setEmail(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-        </label>
-        <label className="block mb-3">
-          <div className="mb-1 text-sm font-medium">Password</div>
-          <input type="password" value={pw} onChange={(e)=>setPw(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-        </label>
-
-        <div className="flex items-center justify-between gap-2">
-          {mode==="signin" ? (
-            <button onClick={handleSignin} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Sign in</button>
-          ) : (
-            <button onClick={handleSignup} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Create account</button>
-          )}
-          <button onClick={handleGoogle} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Sign in with Google</button>
-        </div>
-
-        {!!msg && <div className="mt-3 text-xs text-gray-600">{msg}</div>}
-      </div>
-    </div>
-  );
-}
-
 /* ───────── Error boundary ───────── */
 class ErrorBoundary extends React.Component{
   constructor(p){ super(p); this.state={error:null}; }
@@ -177,30 +113,20 @@ class ErrorBoundary extends React.Component{
   }
 }
 
-/* ───────── App shell ───────── */
+/* ───────── App shell (no auth, no new deps) ───────── */
 export default function App(){
   return (
     <ErrorBoundary>
-      <AuthGate />
+      <MainApp />
     </ErrorBoundary>
   );
 }
 
-/** Only responsible for auth state. Keeps hooks count stable. */
-function AuthGate(){
-  const [session,setSession]=useState(null);
-  useEffect(()=>{
-    supabaseClient.auth.getSession().then(({data})=>setSession(data.session||null));
-    const { data:{ subscription } } = supabaseClient.auth.onAuthStateChange((_e,s)=>setSession(s));
-    return ()=>subscription?.unsubscribe();
-  },[]);
-  if (!session) return <AuthScreen onSignedIn={(s)=>setSession(s)} />;
-  const plannerEmail = session.user?.email || "";
-  return <MainApp plannerEmail={plannerEmail} />;
-}
+function MainApp(){
+  // Planner email: from URL (?plannerEmail=...), else your provided test email
+  const urlPE = new URLSearchParams(typeof window!=="undefined" ? window.location.search : "").get("plannerEmail");
+  const plannerEmail = urlPE || "bartpaden@gmail.com";
 
-/** Everything else lives here. */
-function MainApp({ plannerEmail }){
   const [view,setView]=useState("users");
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
   const [prefs,setPrefs]=useState({});
@@ -208,15 +134,19 @@ function MainApp({ plannerEmail }){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [toasts,setToasts]=useState([]);
 
+  // Load prefs for the planner so the default tab/flags match your baseline
   useEffect(()=>{ (async ()=>{
-    const qs=new URLSearchParams({ plannerEmail });
-    const r=await fetch(`/api/prefs/get?${qs.toString()}`);
-    if (r.ok){ const j=await r.json(); const p=j.prefs||j;
-      setPrefs(p);
-      setView(p.default_view || "users");
-    }
+    try{
+      const qs=new URLSearchParams({ plannerEmail });
+      const r=await fetch(`/api/prefs/get?${qs.toString()}`);
+      if (r.ok){ const j=await r.json(); const p=j.prefs||j;
+        setPrefs(p||{});
+        setView((p&&p.default_view) || "users");
+      }
+    }catch(e){}
   })(); },[plannerEmail]);
 
+  // inbox badge (if your app uses it)
   async function loadBadge(){
     try{
       const qs=new URLSearchParams({ plannerEmail, status:"new" });
@@ -250,9 +180,8 @@ function MainApp({ plannerEmail }){
               )}
             </button>
             <span className="rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm whitespace-nowrap">
-              <span className="hidden sm:inline">Signed in:&nbsp;</span><b className="truncate inline-block max-w-[140px] align-bottom">{plannerEmail}</b>
+              <span className="hidden sm:inline">Signed in:&nbsp;</span><b className="truncate inline-block max-w-[160px] align-bottom">{plannerEmail}</b>
             </span>
-            <button onClick={()=>supabaseClient.auth.signOut()} className="rounded-xl bg-gray-900 px-3 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-black whitespace-nowrap">Sign out</button>
           </div>
         </div>
 
@@ -278,7 +207,6 @@ function MainApp({ plannerEmail }){
           <InboxDrawer
             plannerEmail={plannerEmail}
             onClose={()=>setInboxOpen(false)}
-            onToast={(t,m)=>toast(t,m)}
           />
         )}
       </div>
@@ -286,7 +214,7 @@ function MainApp({ plannerEmail }){
   );
 }
 
-/* ───────── nav & common ───────── */
+/* ───────── nav & toasts ───────── */
 function NavBtn({ active, onClick, icon, children }){
   return (
     <button
@@ -323,7 +251,7 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* ───────── Inbox Drawer ───────── */
+/* ───────── Inbox Drawer (baseline) ───────── */
 function InboxDrawer({ plannerEmail, onClose }){
   const [query,setQuery]=useState("");
   const [items,setItems]=useState([]);
@@ -453,7 +381,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ───────── Plan view ───────── */
+/* ───────── Plan view (B-only tweaks) ───────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -600,10 +528,10 @@ function TaskEditor({ planStartDate, onAdd }){
       const baseWeekday=base.getUTCDay();
       const baseStartOfWeek=new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate()-baseWeekday);
       const emitWeek=(weekIndex)=>{ for(const dow of checked){ const d=new Date(baseStartOfWeek); d.setUTCDate(d.getUTCDate()+dow+weekIndex*7*step); if (d>=base) push(d); } };
-      if (endMode==="count"){ const n=Math.max(1, Number(count)||1); let week=0; while (added.length<n){ const before=added.length; emitWeek(week); if (added.length===before){ week++; continue; } week++; } if (added.length>n) added.length=n; }
-      else if (endMode==="until"){ const until=parseISODate(untilDate)||new Date(addMonthsUTC(base, 3)); let week=0; while (week<520){ const before=added.length; emitWeek(week);
-        if (added.length>before){ const lastIdx=added.length-1; const last=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added[lastIdx]?.dayOffset??0; last.setUTCDate(last.getUTCDate()+lastOff);
-          if (last>until){ while (added.length){ const test=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const testOff=added[added.length-1]?.dayOffset??0; test.setUTCDate(test.getUTCDate()+testOff); if (test<=until) break; added.pop(); } break; } } week++; } }
+      if (endMode==="count"){ const n=Math.max(1, Number(count)||1); let week=0; while (added.length<n){ emitWeek(week); week++; } if (added.length>n) added.length=n; }
+      else if (endMode==="until"){ const until=parseISODate(untilDate)||new Date(addMonthsUTC(base, 3)); let week=0; while (week<520){ emitWeek(week);
+        const lastDate=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added.length? (added[added.length-1].dayOffset||0):0; lastDate.setUTCDate(lastDate.getUTCDate()+lastOff);
+        if (lastDate>until) break; week++; } }
       else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let week=0; while (week<520){ emitWeek(week);
         const lastDate=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added.length? (added[added.length-1].dayOffset||0):0; lastDate.setUTCDate(lastDate.getUTCDate()+lastOff);
         if (lastDate>end) break; week++; } }
@@ -790,18 +718,20 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
-      // Snapshot to history (if your API supports it)
-      await fetch("/api/history/snapshot",{
-        method:"POST", headers:{ "Content-Type":"application/json" },
-        body: JSON.stringify({
-          plannerEmail,
-          userEmail: selectedUserEmail,
-          listTitle: plan.title,
-          plan: { title: plan.title, startDate: plan.startDate, timezone: plan.timezone },
-          tasks: tasks.map(t=>({ title:t.title, dayOffset:t.dayOffset, time:t.time, durationMins:t.durationMins, notes:t.notes })),
-          mode: replaceMode ? "replace" : "append",
-        })
-      });
+      // Optional: snapshot to history if your API supports it
+      try{
+        await fetch("/api/history/snapshot",{
+          method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            plannerEmail,
+            userEmail: selectedUserEmail,
+            listTitle: plan.title,
+            plan: { title: plan.title, startDate: plan.startDate, timezone: plan.timezone },
+            tasks: tasks.map(t=>({ title:t.title, dayOffset:t.dayOffset, time:t.time, durationMins:t.durationMins, notes:t.notes })),
+            mode: replaceMode ? "replace" : "append",
+          })
+        });
+      }catch(_e){}
 
       setMsg(`Success — ${j.created||total} task(s) created`);
       setTasks([]);
@@ -1018,7 +948,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* ───────── Settings ───────── */
+/* ───────── Settings (same shell) ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(()=>{
     return {
