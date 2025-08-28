@@ -1,10 +1,3 @@
-/* App.jsx — Issue B follow-up: fix End → “Until date” calendar wiring.
-   Changes vs the last file I gave you:
-   - TaskEditor: adds `untilOpen` state
-   - “Until date” button now opens `untilOpen` modal (not taskDateOpen)
-   - New Modal renders CalendarGridFree that sets `untilDate`
-   Everything else is identical to keep your approved UI as-is.
-*/
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
@@ -25,7 +18,7 @@ function firstWeekdayOfMonthUTC(y,m0,weekday){ const first=new Date(Date.UTC(y,m
 function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonthUTC(y,m0,weekday); const c=new Date(Date.UTC(y,m0, first.getUTCDate()+7*(nth-1))); return c.getUTCMonth()===m0?c:null; }
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
 
-/* time parsing/formatting */
+/* time parsing/formatting (kept as-is for now) */
 function parseTimeHuman(str){
   if (!str) return "";
   let s = String(str).trim().toLowerCase();
@@ -140,6 +133,7 @@ function MainApp(){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [toasts,setToasts]=useState([]);
 
+  // load prefs (kept)
   useEffect(()=>{ (async ()=>{
     try{
       const qs=new URLSearchParams({ plannerEmail });
@@ -193,14 +187,17 @@ function MainApp(){
           <UsersView
             plannerEmail={plannerEmail}
             onToast={(t,m)=>toast(t,m)}
-            onManage={(email)=>{ setSelectedUserEmail(email); setView("plan"); }}
+            onManage={(email)=>{ 
+              setSelectedUserEmail(email);          // ← set selected user
+              setView("plan");                      // ← go to Plan
+            }}
           />
         )}
 
         {view==="plan" && (
           <PlanView
             plannerEmail={plannerEmail}
-            selectedUserEmailProp={selectedUserEmail}
+            selectedUserEmailProp={selectedUserEmail}  // ← pass through
             onToast={(t,m)=>toast(t,m)}
           />
         )}
@@ -395,13 +392,28 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [msg,setMsg]=useState("");
   const [planDateOpen,setPlanDateOpen]=useState(false);
 
+  // 1) If MainApp passed us a chosen user (from Users → Manage), adopt it immediately.
+  useEffect(()=>{ 
+    if (selectedUserEmailProp) setSelectedUserEmail(selectedUserEmailProp);
+  },[selectedUserEmailProp]);
+
+  // 2) Load users; normalize email field; if nothing selected yet, pick connected → first
   useEffect(()=>{ (async ()=>{
     const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
-    setUsers(j.users||[]);
-    const initial = selectedUserEmailProp || (j.users||[]).find(u=>u.status==="connected")?.email || (j.users?.[0]?.email || "");
-    setSelectedUserEmail(initial);
-  })(); },[plannerEmail, selectedUserEmailProp]);
+
+    // normalize email field (email | userEmail | user_email)
+    const arr = (j.users||[]).map(u => ({ ...u, email: u.email || u.userEmail || u.user_email || "" }));
+    setUsers(arr);
+
+    // Only set a default if we *still* don't have a selection
+    if (!selectedUserEmail) {
+      const fromProp = selectedUserEmailProp && arr.find(a=>a.email===selectedUserEmailProp)?.email;
+      const connected = arr.find(u=>u.status==="connected")?.email;
+      const fallback = arr[0]?.email || "";
+      setSelectedUserEmail(fromProp || connected || fallback || "");
+    }
+  })(); },[plannerEmail]); // ← do not include selectedUserEmailProp here to avoid re-overwrites
 
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
@@ -432,9 +444,20 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           <div className="text-[11px] sm:text-xs text-gray-500">Set the <b>Plan Name</b> (list title), timezone, and start date. Add tasks, preview, then push.</div>
         </div>
         <div className="w-full sm:w-72">
-          <select value={selectedUserEmail || ""} onChange={(e)=>setSelectedUserEmail(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+          <select
+            value={selectedUserEmail || ""}
+            onChange={(e)=>setSelectedUserEmail(e.target.value)}
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            title={selectedUserEmail || "— Choose user —"}
+          >
             <option value="">— Choose user —</option>
-            {users.map(u=><option key={u.email} value={u.email}>{u.email} {u.status==="connected"?"✓":""}</option>)}
+            {users.map(u=>(
+              <option key={u.email || u.userEmail || u.user_email}
+                      value={u.email}
+                      title={u.email}>
+                {u.email || "Unknown"} {u.status==="connected" ? "✓" : ""}
+              </option>
+            ))}
           </select>
         </div>
       </div>
@@ -489,7 +512,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* ───────── Task editor ───────── */
+/* ───────── Task editor (unchanged from last step) ───────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -503,7 +526,7 @@ function TaskEditor({ planStartDate, onAdd }){
   const [endMode,setEndMode]=useState("count");
   const [count,setCount]=useState(4);
   const [untilDate,setUntilDate]=useState("");
-  const [untilOpen,setUntilOpen]=useState(false); /* ← NEW: dedicated modal for “until” */
+  const [untilOpen,setUntilOpen]=useState(false);
   const [horizonMonths,setHorizonMonths]=useState(6);
   const [weeklyDays,setWeeklyDays]=useState([false,true,false,true,false,false,false]);
   const [monthlyMode,setMonthlyMode]=useState("dom");
@@ -606,7 +629,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence */}
+      {/* Recurrence (wording stays for this step; we’ll revisit) */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -661,7 +684,8 @@ function TaskEditor({ planStartDate, onAdd }){
             <>
               <span className="text-sm">Date</span>
               <button type="button" onClick={()=>setUntilOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-                <Calendar className="h-4 w-4" /> {untilDate ? format(parseISODate(untilDate)||new Date(),"MMM d, yyyy") : "Pick date"}
+                <Calendar className="h-4 w-4" /> {/* shows current or pick */}
+                {untilDate ? format(parseISODate(untilDate)||new Date(),"MMM d, yyyy") : "Pick date"}
               </button>
             </>
           )}
@@ -895,7 +919,10 @@ function UsersView({ plannerEmail, onToast, onManage }){
   async function load(){
     const qs=new URLSearchParams({ plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
-    setRows(j.users||[]);
+
+    // Normalize email field to ensure it always displays
+    const arr = (j.users||[]).map(u => ({ ...u, email: u.email || u.userEmail || u.user_email || "" }));
+    setRows(arr);
   }
   useEffect(()=>{ load(); },[plannerEmail]);
 
@@ -909,7 +936,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
     }catch(e){ onToast?.("error", String(e.message||e)); }
   }
 
-  const visible = rows.filter(r=>!filter || r.email.toLowerCase().includes(filter.toLowerCase()));
+  const visible = rows.filter(r=>!filter || (r.email||"").toLowerCase().includes(filter.toLowerCase()));
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
@@ -933,8 +960,8 @@ function UsersView({ plannerEmail, onToast, onManage }){
           </thead>
           <tbody>
             {visible.map(r=>(
-              <tr key={r.email} className="border-t">
-                <td className="py-1.5 px-2">{r.email}</td>
+              <tr key={r.email || r.userEmail || r.user_email} className="border-t">
+                <td className="py-1.5 px-2">{r.email || "Unknown"}</td>
                 <td className="py-1.5 px-2">{r.status||"—"}</td>
                 <td className="py-1.5 px-2">
                   <div className="flex flex-wrap gap-1">
@@ -946,8 +973,14 @@ function UsersView({ plannerEmail, onToast, onManage }){
                 <td className="py-1.5 px-2">
                   <div className="flex flex-nowrap items-center justify-end gap-1.5">
                     <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
+
+                    {/* keep current groups editor for now; we’ll replace next step */}
                     <button onClick={()=>{ const v=prompt("Comma-separated groups", (groups[r.email]||r.groups||[]).join(", ")); if (v===null) return; const arr=v.split(",").map(s=>s.trim()).filter(Boolean); setGroups(g=>({ ...g, [r.email]: arr })); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Edit Groups</button>
-                    <button disabled={sending} onClick={async()=>{ setSending(true); try{ const resp=await fetch("/api/invite/send",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ plannerEmail, userEmail:r.email })}); const j=await resp.json(); if (!resp.ok || j.error) throw new Error(j.error||"Invite failed"); onToast?.("ok","Invite sent"); }catch(e){ onToast?.("error",String(e.message||e)); } setSending(false); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Send Invite</button>
+
+                    {/* HIDE Send Invite for connected users */}
+                    {(r.status!=="connected") && (
+                      <button disabled={sending} onClick={async()=>{ setSending(true); try{ const resp=await fetch("/api/invite/send",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ plannerEmail, userEmail:r.email })}); const j=await resp.json(); if (!resp.ok || j.error) throw new Error(j.error||"Invite failed"); onToast?.("ok","Invite sent"); }catch(e){ onToast?.("error",String(e.message||e)); } setSending(false); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Send Invite</button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -962,7 +995,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* ───────── Settings ───────── */
+/* ───────── Settings (same shell) ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(()=>{
     return {
