@@ -1,4 +1,4 @@
-// /api/users.js — Edge Runtime version using Supabase REST
+// /api/users.js — Edge Runtime with graceful fallback when `groups` column is missing
 // GET  /api/users?plannerEmail=PLANNER
 // POST /api/users { plannerEmail, userEmail, groups: [...] }
 
@@ -15,7 +15,6 @@ function corsHeaders(req) {
     'access-control-max-age': '600'
   };
 }
-
 function jsonHeaders(req) {
   return { 'content-type': 'application/json', ...corsHeaders(req) };
 }
@@ -46,7 +45,6 @@ async function supabaseRest(path, init = {}) {
   if (!urlBase || !key) {
     return { error: { message: 'Missing Supabase env vars' }, data: null };
   }
-
   const url = `${urlBase.replace(/\/+$/, '')}/rest/v1/${path.replace(/^\/+/, '')}`;
   const headers = {
     apikey: key,
@@ -58,11 +56,10 @@ async function supabaseRest(path, init = {}) {
   const text = await res.text();
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-
   if (!res.ok) {
     const message = json?.message || json?.error || text || `HTTP ${res.status}`;
     return { error: { status: res.status, message }, data: null };
-    }
+  }
   return { error: null, data: json };
 }
 
@@ -83,18 +80,25 @@ export default async function handler(req) {
       });
     }
 
-    // 1) user_connections filtered by planner (case-insensitive via ilike)
-    const fieldsConn = 'planner_email,user_email,groups,google_refresh_token,google_expires_at,updated_at';
-    const { data: connRows, error: connErr } = await supabaseRest(
-      `user_connections?select=${encodeURIComponent(fieldsConn)}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
+    const fieldsBase = 'planner_email,user_email,google_refresh_token,google_expires_at,updated_at';
+    let triedGroups = true;
+
+    // Try including groups; if column missing, fall back without crashing
+    let { data: connRows, error: connErr } = await supabaseRest(
+      `user_connections?select=${encodeURIComponent(fieldsBase + ',groups')}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
     );
+    if (connErr && /column .*groups.* does not exist/i.test(connErr.message || '')) {
+      triedGroups = false;
+      ({ data: connRows, error: connErr } = await supabaseRest(
+        `user_connections?select=${encodeURIComponent(fieldsBase)}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
+      ));
+    }
     if (connErr) {
       return new Response(JSON.stringify({ ok: false, error: connErr.message }), {
         status: 500, headers: jsonHeaders(req)
       });
     }
 
-    // 2) invites filtered by planner (case-insensitive)
     const fieldsInv = 'id,planner_email,user_email,used_at';
     const { data: inviteRows, error: invErr } = await supabaseRest(
       `invites?select=${encodeURIComponent(fieldsInv)}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
@@ -105,29 +109,27 @@ export default async function handler(req) {
       });
     }
 
-    // Merge results
     const connByUser = new Map();
-    for (const r of connRows || []) {
-      connByUser.set(toLower(r.user_email), r);
-    }
+    for (const r of connRows || []) connByUser.set(toLower(r.user_email), r);
     const invByUser = new Map();
     for (const i of inviteRows || []) {
       const key = toLower(i.user_email);
       if (!invByUser.has(key)) invByUser.set(key, i);
     }
 
-    const allUserEmails = new Set([...connByUser.keys(), ...invByUser.keys()]);
-    const users = Array.from(allUserEmails).map((uLower) => {
-      const conn = connByUser.get(uLower);
-      const inv = invByUser.get(uLower);
-      return {
-        userEmail: conn?.user_email || inv?.user_email || uLower,
-        groups: normalizeGroups(conn?.groups || []),
-        status: deriveStatus(conn, inv),
-        hasInvite: !!inv,
-        updatedAt: conn?.updated_at || null,
-      };
-    }).sort((a, b) => a.userEmail.localeCompare(b.userEmail));
+    const users = Array.from(new Set([...connByUser.keys(), ...invByUser.keys()]))
+      .map((uLower) => {
+        const conn = connByUser.get(uLower);
+        const inv = invByUser.get(uLower);
+        return {
+          userEmail: conn?.user_email || inv?.user_email || uLower,
+          groups: triedGroups ? normalizeGroups(conn?.groups || []) : [],
+          status: deriveStatus(conn, inv),
+          hasInvite: !!inv,
+          updatedAt: conn?.updated_at || null,
+        };
+      })
+      .sort((a, b) => a.userEmail.localeCompare(b.userEmail));
 
     return new Response(JSON.stringify({
       ok: true,
@@ -140,9 +142,8 @@ export default async function handler(req) {
   if (method === 'POST') {
     let body = {};
     try { body = await req.json(); } catch {}
-
     const plannerEmailNorm = toLower(body?.plannerEmail);
-    const userEmailNorm = toLower(body?.userEmail);
+    const userEmailNorm   = toLower(body?.userEmail);
     let groups = body?.groups;
 
     if (!plannerEmailNorm || !userEmailNorm) {
@@ -161,16 +162,24 @@ export default async function handler(req) {
       updated_at: nowISO()
     }];
 
-    // Upsert via REST (merge duplicates) with on_conflict
     const { error: upsertErr } = await supabaseRest(
       'user_connections?on_conflict=planner_email,user_email',
-      {
-        method: 'POST',
-        headers: { Prefer: 'resolution=merge-duplicates' },
-        body: JSON.stringify(payload)
-      }
+      { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(payload) }
     );
+
     if (upsertErr) {
+      // Give a friendly, actionable message if the column is still missing
+      if (/column .*groups.* does not exist/i.test(upsertErr.message || '')) {
+        return new Response(JSON.stringify({
+          ok: false,
+          error: "The 'groups' column does not exist yet. Please run the one-time SQL in Supabase to add it.",
+          howToFix: {
+            open: "Supabase → SQL → New query",
+            paste: "ALTER TABLE public.user_connections ADD COLUMN IF NOT EXISTS groups jsonb NOT NULL DEFAULT '[]'::jsonb; ALTER TABLE public.user_connections ADD COLUMN IF NOT EXISTS updated_at timestamptz;",
+            run: "Click Run, then refresh the Table Editor"
+          }
+        }), { status: 400, headers: jsonHeaders(req) });
+      }
       return new Response(JSON.stringify({ ok: false, error: upsertErr.message }), {
         status: 500, headers: jsonHeaders(req)
       });
