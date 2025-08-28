@@ -1,13 +1,11 @@
-// src/App.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
-  Search, Download, Archive, ArchiveRestore, Trash2, ArrowRight, X,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown,
-  Plus, RotateCcw, Info, Clock
+  Search, Trash2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Plus, RotateCcw, Info
 } from "lucide-react";
 import { format } from "date-fns";
-import { supabaseClient } from "../lib/supabase-client.js";
+import { supabaseClient } from "./lib/supabase-client.js";
 
 /* ───────────── utils ───────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
@@ -21,7 +19,7 @@ function firstWeekdayOfMonthUTC(y,m0,weekday){ const first=new Date(Date.UTC(y,m
 function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonthUTC(y,m0,weekday); const c=new Date(Date.UTC(y,m0, first.getUTCDate()+7*(nth-1))); return c.getUTCMonth()===m0?c:null; }
 function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
 
-/* human time parsing/formatting (baseline behavior) */
+/* time parsing/formatting */
 function parseTimeHuman(str){
   if (!str) return "";
   let s = String(str).trim().toLowerCase();
@@ -63,7 +61,6 @@ function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
   const [text,setText]=useState(() => to12hDisplay(value));
   const [bad,setBad]=useState(false);
   useEffect(()=>{ setText(to12hDisplay(value)); },[value]);
-
   function commit(){
     const parsed = parseTimeHuman(text);
     if (parsed===null){ setBad(true); return; }
@@ -95,7 +92,7 @@ function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
   );
 }
 
-/* ───────── Auth Screen (in-file to avoid undefined) ───────── */
+/* ───────── Auth Screen (in-file) ───────── */
 function AuthScreen({ onSignedIn }){
   const [mode,setMode]=useState("signin");
   const [email,setEmail]=useState("");
@@ -184,19 +181,26 @@ class ErrorBoundary extends React.Component{
 export default function App(){
   return (
     <ErrorBoundary>
-      <AppInner />
+      <AuthGate />
     </ErrorBoundary>
   );
 }
-function AppInner(){
+
+/** Only responsible for auth state. Keeps hooks count stable. */
+function AuthGate(){
   const [session,setSession]=useState(null);
-  useEffect(()=>{ supabaseClient.auth.getSession().then(({data})=>setSession(data.session||null));
+  useEffect(()=>{
+    supabaseClient.auth.getSession().then(({data})=>setSession(data.session||null));
     const { data:{ subscription } } = supabaseClient.auth.onAuthStateChange((_e,s)=>setSession(s));
     return ()=>subscription?.unsubscribe();
   },[]);
   if (!session) return <AuthScreen onSignedIn={(s)=>setSession(s)} />;
   const plannerEmail = session.user?.email || "";
+  return <MainApp plannerEmail={plannerEmail} />;
+}
 
+/** Everything else lives here. */
+function MainApp({ plannerEmail }){
   const [view,setView]=useState("users");
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
   const [prefs,setPrefs]=useState({});
@@ -319,8 +323,8 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* ───────── Inbox Drawer (baseline) ───────── */
-function InboxDrawer({ plannerEmail, onClose, onToast }){
+/* ───────── Inbox Drawer ───────── */
+function InboxDrawer({ plannerEmail, onClose }){
   const [query,setQuery]=useState("");
   const [items,setItems]=useState([]);
   const [loading,setLoading]=useState(false);
@@ -337,8 +341,6 @@ function InboxDrawer({ plannerEmail, onClose, onToast }){
     setLoading(false);
   }
   useEffect(()=>{ if (query.trim().length===0) setItems([]); },[query]);
-
-  function toggle(id){ setSel(s=>({ ...s, [id]: !s[id]})); }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/10 p-2 sm:p-4">
@@ -365,9 +367,7 @@ function InboxDrawer({ plannerEmail, onClose, onToast }){
             <tbody>
               {items.map(r=>(
                 <tr key={r.id} className="border-t">
-                  <td className="py-1.5 px-2">
-                    <input type="checkbox" checked={!!sel[r.id]} onChange={()=>{ setSel(s=>({ ...s, [r.id]: !s[r.id] })); }} />
-                  </td>
+                  <td className="py-1.5 px-2"><input type="checkbox" checked={!!sel[r.id]} onChange={()=>setSel(s=>({ ...s, [r.id]: !s[r.id] }))} /></td>
                   <td className="py-1.5 px-2">{r.title}</td>
                   <td className="py-1.5 px-2 text-gray-500">{r.notes||"—"}</td>
                 </tr>
@@ -388,7 +388,7 @@ function InboxDrawer({ plannerEmail, onClose, onToast }){
   );
 }
 
-/* ───────── Calendar modal (baseline) ───────── */
+/* ───────── Modal + Calendar ───────── */
 function Modal({ title, onClose, children }){
   useEffect(()=>{
     function onKey(e){ if (e.key==="Escape") onClose?.(); }
@@ -453,7 +453,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   );
 }
 
-/* ───────── Plan view (baseline visuals; tiny tweaks noted inline) ───────── */
+/* ───────── Plan view ───────── */
 function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
@@ -509,7 +509,6 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <div className="mb-3 grid grid-cols-1 gap-2 sm:gap-3 md:grid-cols-[repeat(3,minmax(0,1fr))]">
         <label className="block">
-          {/* Change #1: label text */}
           <div className="mb-1 text-sm font-medium">Plan Name</div>
           <input value={plan.title} onChange={(e)=>setPlan({...plan, title:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" placeholder="e.g., Week of Sep 1" />
         </label>
@@ -539,7 +538,6 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
 
       <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
 
-      {/* Change #2: hide Preview & Deliver until at least one task exists */}
       {tasks.length>0 && (
         <ComposerPreview
           plannerEmail={plannerEmail}
@@ -559,7 +557,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* ───────── Task editor (baseline) ───────── */
+/* ───────── Task editor ───────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -602,7 +600,7 @@ function TaskEditor({ planStartDate, onAdd }){
       const baseWeekday=base.getUTCDay();
       const baseStartOfWeek=new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate()-baseWeekday);
       const emitWeek=(weekIndex)=>{ for(const dow of checked){ const d=new Date(baseStartOfWeek); d.setUTCDate(d.getUTCDate()+dow+weekIndex*7*step); if (d>=base) push(d); } };
-      if (endMode==="count"){ const n=Math.max(1, Number(count)||1); let week=0; while (added.length<n){ const before=added.length; emitWeek(week); if (added.length===before){ week++; continue; } if (added.length-before>checked.length) { /* safety */ } week++; if (added.length-before>checked.length) break; } if (added.length>n) added.length=n; }
+      if (endMode==="count"){ const n=Math.max(1, Number(count)||1); let week=0; while (added.length<n){ const before=added.length; emitWeek(week); if (added.length===before){ week++; continue; } week++; } if (added.length>n) added.length=n; }
       else if (endMode==="until"){ const until=parseISODate(untilDate)||new Date(addMonthsUTC(base, 3)); let week=0; while (week<520){ const before=added.length; emitWeek(week);
         if (added.length>before){ const lastIdx=added.length-1; const last=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added[lastIdx]?.dayOffset??0; last.setUTCDate(last.getUTCDate()+lastOff);
           if (last>until){ while (added.length){ const test=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const testOff=added[added.length-1]?.dayOffset??0; test.setUTCDate(test.getUTCDate()+testOff); if (test<=until) break; added.pop(); } break; } } week++; } }
@@ -675,7 +673,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence block (baseline) */}
+      {/* Recurrence */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -766,9 +764,10 @@ function TaskEditor({ planStartDate, onAdd }){
 }
 function pill(on){ return cn("rounded-full border px-2 py-1 text-xs sm:text-sm", on?"border-gray-800 bg-gray-900 text-white":"border-gray-300 bg-white hover:bg-gray-50"); }
 
-/* ───────── Preview / Deliver (baseline) ───────── */
+/* ───────── Preview / Deliver ───────── */
 function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
   const total=tasks.length;
+
   async function pushNow(){
     if (!selectedUserEmail) { setMsg("Choose a user first."); return; }
     if (!plan.title?.trim()) { setMsg("Title is required."); return; }
@@ -791,6 +790,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
+      // Snapshot to history (if your API supports it)
       await fetch("/api/history/snapshot",{
         method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -825,45 +825,53 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       {total===0 ? (
         <div className="text-sm text-gray-500">No tasks yet.</div>
       ) : (
-        <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
-          <table className="w-full min-w=[640px] text-xs sm:text-sm">
-            <thead className="bg-gray-50">
-              <tr className="text-left text-gray-500">
-                <th className="py-1.5 px-2">Title</th>
-                <th className="py-1.5 px-2">Offset</th>
-                <th className="py-1.5 px-2">Time</th>
-                <th className="py-1.5 px-2">Dur</th>
-                <th className="py-1.5 px-2">Notes</th>
-                <th className="py-1.5 px-2 text-right w-40 sm:w-48">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map(t=>(
-                <tr key={t.id} className="border-t">
-                  <td className="py-1.5 px-2">{t.title}</td>
-                  <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
-                  <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
-                  <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
-                  <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
-                  <td className="py-1.5 px-2">
-                    <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
-                      <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="inline-flex items-center rounded-lg border p-1.5 hover:bg-gray-50" title="Remove">
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span className="sr-only">Remove</span>
-                      </button>
-                    </div>
-                  </td>
+        <>
+          <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
+            <table className="w-full min-w-[640px] text-xs sm:text-sm">
+              <thead className="bg-gray-50">
+                <tr className="text-left text-gray-500">
+                  <th className="py-1.5 px-2">Title</th>
+                  <th className="py-1.5 px-2">Offset</th>
+                  <th className="py-1.5 px-2">Time</th>
+                  <th className="py-1.5 px-2">Dur</th>
+                  <th className="py-1.5 px-2">Notes</th>
+                  <th className="py-1.5 px-2 text-right w-40 sm:w-48">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {tasks.map(t=>(
+                  <tr key={t.id} className="border-t">
+                    <td className="py-1.5 px-2">{t.title}</td>
+                    <td className="py-1.5 px-2">{String(t.dayOffset||0)}</td>
+                    <td className="py-1.5 px-2">{t.time?to12hDisplay(t.time):"—"}</td>
+                    <td className="py-1.5 px-2">{t.durationMins||"—"}</td>
+                    <td className="py-1.5 px-2 text-gray-500 truncate max-w-[200px]">{t.notes||"—"}</td>
+                    <td className="py-1.5 px-2">
+                      <div className="flex flex-nowrap items-center justify-end gap-1.5 whitespace-nowrap">
+                        <button onClick={()=>setTasks(prev=>prev.filter(x=>x.id!==t.id))} className="inline-flex items-center rounded-lg border p-1.5 hover:bg-gray-50" title="Remove">
+                          <Trash2 className="h-3.5 w-3.5" />
+                          <span className="sr-only">Remove</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex items-center justify-end">
+            <button onClick={pushNow} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">
+              Push to Google Tasks
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-/* ───────── History (baseline) ───────── */
+/* ───────── History ───────── */
 function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   const [rows,setRows]=useState([]);
   const [page,setPage]=useState(1);
@@ -933,7 +941,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   );
 }
 
-/* ───────── Users view (baseline) ───────── */
+/* ───────── Users view ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
@@ -1010,7 +1018,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* ───────── Settings (baseline) ───────── */
+/* ───────── Settings ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(()=>{
     return {
@@ -1086,7 +1094,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
   );
 }
 
-/* ───────── Timezones (baseline) ───────── */
+/* ───────── Timezones ───────── */
 const TIMEZONES = [
   "America/Chicago","America/New_York","America/Denver","America/Los_Angeles",
   "UTC","Europe/London","Europe/Berlin","Asia/Tokyo","Australia/Sydney"
