@@ -1,4 +1,4 @@
-# Plan2Tasks Wizard (One-Click Deploy Guide)
+# Plan2Tasks Wizard (One-Click Deploy Guide )
 
 This folder contains the **Plan2Tasks Wizard** — a small website that helps you create your weekly plan, copy a “Plan2Tasks block”, and export an `.ics` calendar file.
 
