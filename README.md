@@ -51,7 +51,7 @@ If you prefer to see the site on your own computer:
    npm install
    npm run dev
    ```
-3. Open the URL it prints (usually `http://localhost:5173`).
+3. Open the URL it prints (usually `http://localhost:5173`). 
 
 To build a static site locally:
 ```bash
