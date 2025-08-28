@@ -95,6 +95,69 @@ function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
   );
 }
 
+/* ───────── Auth Screen (baseline-style; in-file to avoid undefined) ───────── */
+function AuthScreen({ onSignedIn }){
+  const [mode,setMode]=useState("signin");
+  const [email,setEmail]=useState("");
+  const [pw,setPw]=useState("");
+  const [msg,setMsg]=useState("");
+
+  async function handleSignup(){
+    setMsg("Creating account...");
+    const { data, error } = await supabaseClient.auth.signUp({ email, password: pw });
+    if (error) return setMsg("Error: "+error.message);
+    if (!data.session) { setMsg("Check your email to confirm, then sign in."); return; }
+    onSignedIn(data.session);
+  }
+  async function handleSignin(){
+    setMsg("Signing in...");
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pw });
+    if (error) return setMsg("Error: "+error.message);
+    onSignedIn(data.session);
+  }
+  async function handleGoogle(){
+    setMsg("Redirecting…");
+    const { error } = await supabaseClient.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin }});
+    if (error) setMsg("Error: "+error.message);
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-100 p-4 sm:p-6">
+      <div className="mx-auto max-w-md rounded-2xl border border-gray-200 bg-white p-4 sm:p-6 shadow-sm">
+        <div className="mb-4 text-center">
+          <div className="text-2xl font-bold">Plan2Tasks</div>
+          <div className="text-xs text-gray-500">Sign in to continue</div>
+        </div>
+
+        <div className="mb-2 flex justify-center gap-2">
+          <button className={cn("rounded-lg border px-3 py-1.5 text-xs", mode==="signin"?"bg-gray-900 text-white border-gray-900":"bg-white")} onClick={()=>setMode("signin")}>Sign in</button>
+          <button className={cn("rounded-lg border px-3 py-1.5 text-xs", mode==="signup"?"bg-gray-900 text-white border-gray-900":"bg-white")} onClick={()=>setMode("signup")}>Sign up</button>
+        </div>
+
+        <label className="block mb-2">
+          <div className="mb-1 text-sm font-medium">Email</div>
+          <input value={email} onChange={(e)=>setEmail(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <label className="block mb-3">
+          <div className="mb-1 text-sm font-medium">Password</div>
+          <input type="password" value={pw} onChange={(e)=>setPw(e.target.value)} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+
+        <div className="flex items-center justify-between gap-2">
+          {mode==="signin" ? (
+            <button onClick={handleSignin} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Sign in</button>
+          ) : (
+            <button onClick={handleSignup} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Create account</button>
+          )}
+          <button onClick={handleGoogle} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Sign in with Google</button>
+        </div>
+
+        {!!msg && <div className="mt-3 text-xs text-gray-600">{msg}</div>}
+      </div>
+    </div>
+  );
+}
+
 /* ───────── Error boundary ───────── */
 class ErrorBoundary extends React.Component{
   constructor(p){ super(p); this.state={error:null}; }
@@ -257,7 +320,73 @@ function Toasts({ items, dismiss }){
 }
 
 /* ───────── Inbox Drawer (baseline) ───────── */
-// (keep your baseline InboxDrawer code here)
+function InboxDrawer({ plannerEmail, onClose, onToast }){
+  const [query,setQuery]=useState("");
+  const [items,setItems]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [sel,setSel]=useState({});
+
+  async function search(){
+    setLoading(true);
+    try{
+      const r=await fetch(`/api/inbox/search?q=${encodeURIComponent(query)}&plannerEmail=${encodeURIComponent(plannerEmail)}`);
+      const j=await r.json();
+      setItems(j.results||[]);
+      const m={}; for (const r of (j.results||[])) m[r.id]=false; setSel(m);
+    }catch(e){}
+    setLoading(false);
+  }
+  useEffect(()=>{ if (query.trim().length===0) setItems([]); },[query]);
+
+  function toggle(id){ setSel(s=>({ ...s, [id]: !s[id]})); }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/10 p-2 sm:p-4">
+      <div className="mx-auto max-w-2xl rounded-xl border bg-white p-3 sm:p-4 shadow-lg">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold">Inbox</div>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="mb-2 flex gap-2">
+          <input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search..." className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+          <button onClick={search} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"><Search className="h-4 w-4" /></button>
+        </div>
+
+        <div className="max-h-[50vh] overflow-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr className="text-left text-gray-500">
+                <th className="py-1.5 px-2">Pick</th>
+                <th className="py-1.5 px-2">Title</th>
+                <th className="py-1.5 px-2">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(r=>(
+                <tr key={r.id} className="border-t">
+                  <td className="py-1.5 px-2">
+                    <input type="checkbox" checked={!!sel[r.id]} onChange={()=>{ setSel(s=>({ ...s, [r.id]: !s[r.id] })); }} />
+                  </td>
+                  <td className="py-1.5 px-2">{r.title}</td>
+                  <td className="py-1.5 px-2 text-gray-500">{r.notes||"—"}</td>
+                </tr>
+              ))}
+              {(!items||items.length===0) && (
+                <tr><td colSpan={3} className="py-4 text-center text-gray-500">{loading?"Searching…":"No results"}</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <div className="text-xs text-gray-500">Search your inbox items to add to a plan.</div>
+          <button onClick={onClose} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Done</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ───────── Calendar modal (baseline) ───────── */
 function Modal({ title, onClose, children }){
@@ -282,7 +411,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   const init = parseISODate(initialDate) || new Date();
   const sel = parseISODate(selectedDate) || init;
   const [vm,setVm]=useState(()=>new Date(Date.UTC(sel.getUTCFullYear(), sel.getUTCMonth(), 1)));
-  function same(d1,d2){ return d1.getUTCFullYear()===d2.getUTCFullYear() && d1.getUTCMonth()===d2.getUTCMonth() && d1.getUTCDate()===d2.getUTCDate(); }
+  function same(d1,d2){ return d1.getUTCFullYear()===d2.getUTCFullYear() && d2 && d1.getUTCMonth()===d2.getUTCMonth() && d1.getUTCDate()===d2.getUTCDate(); }
   const weeks = useMemo(()=>{
     const out=[]; const firstDow=new Date(Date.UTC(vm.getUTCFullYear(), vm.getUTCMonth(), 1)).getUTCDay();
     const start=new Date(Date.UTC(vm.getUTCFullYear(), vm.getUTCMonth(), 1-firstDow));
@@ -606,7 +735,7 @@ function TaskEditor({ planStartDate, onAdd }){
             </>
           )}
 
-          {endMode==="horizon" && (
+          {endMode==="horizon" and (
             <>
               <span className="text-sm">Months</span>
               <input type="number" min={1} value={horizonMonths} onChange={(e)=>setHorizonMonths(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
@@ -734,8 +863,231 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
   );
 }
 
-/* ───────── History/Users/Settings (baseline) ───────── */
-// (keep your baseline HistoryPanel, UsersView, SettingsView code here)
+/* ───────── History (baseline) ───────── */
+function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
+  const [rows,setRows]=useState([]);
+  const [page,setPage]=useState(1);
+  const [total,setTotal]=useState(0);
+  const [loading,setLoading]=useState(false);
+
+  async function load(){
+    if (!userEmail) { setRows([]); setTotal(0); return; }
+    setLoading(true);
+    try{
+      const r=await fetch(`/api/history/list`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail, status: "active", page })
+      });
+      const j=await r.json();
+      setRows(j.rows||[]);
+      setTotal(j.total||0);
+    }catch(e){}
+    setLoading(false);
+  }
+  useEffect(()=>{ load(); },[plannerEmail,userEmail,page]);
+
+  return (
+    <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-sm font-semibold">History</div>
+        <div className="text-xs text-gray-500">{total} plan(s)</div>
+      </div>
+
+      <div className="rounded-lg border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr className="text-left text-gray-500">
+              <th className="py-1.5 px-2">Title</th>
+              <th className="py-1.5 px-2">Start</th>
+              <th className="py-1.5 px-2">Items</th>
+              <th className="py-1.5 px-2 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r=>(
+              <tr key={r.id} className="border-t">
+                <td className="py-1.5 px-2">{r.title}</td>
+                <td className="py-1.5 px-2">{r.startDate}</td>
+                <td className="py-1.5 px-2">{r.itemsCount||"—"}</td>
+                <td className="py-1.5 px-2">
+                  <div className="flex justify-end">
+                    <button onClick={()=>onPrefill?.({ plan:{ title:r.title, startDate:r.startDate, timezone:r.timezone }, tasks:r.tasks, mode:r.mode })} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Restore</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {(!rows || rows.length===0) && (
+              <tr><td colSpan={4} className="py-6 text-center text-gray-500">{loading?"Loading…":"No history yet"}</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="mt-2 flex items-center justify-end gap-2">
+        <button onClick={()=>setPage(p=>Math.max(1,p-1))} className="rounded-lg border px-2 py-1 text-xs"><ChevronLeft className="h-3 w-3" /></button>
+        <div className="text-xs">Page {page}</div>
+        <button onClick={()=>setPage(p=>p+1)} className="rounded-lg border px-2 py-1 text-xs"><ChevronRight className="h-3 w-3" /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Users view (baseline) ───────── */
+function UsersView({ plannerEmail, onToast, onManage }){
+  const [rows,setRows]=useState([]);
+  const [filter,setFilter]=useState("");
+  const [groups,setGroups]=useState({});
+  const [sending,setSending]=useState(false);
+
+  async function load(){
+    const qs=new URLSearchParams({ plannerEmail, status:"all" });
+    const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
+    setRows(j.users||[]);
+  }
+  useEffect(()=>{ load(); },[plannerEmail]);
+
+  async function saveGroups(email){
+    try{
+      const body={ plannerEmail, userEmail: email, groups: groups[email]||[] };
+      const r=await fetch("/api/users",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      const j=await r.json();
+      if (!r.ok || j.error) throw new Error(j.error||"Save failed");
+      onToast?.("ok", "Saved groups");
+    }catch(e){ onToast?.("error", String(e.message||e)); }
+  }
+
+  const visible = rows.filter(r=>!filter || r.email.toLowerCase().includes(filter.toLowerCase()));
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-sm font-semibold">Users</div>
+        <div className="flex items-center gap-2">
+          <input value={filter} onChange={(e)=>setFilter(e.target.value)} placeholder="Search…" className="rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+          <button onClick={load} className="rounded-xl border px-2 py-1 text-sm hover:bg-gray-50"><RotateCcw className="h-4 w-4" /></button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr className="text-left text-gray-500">
+              <th className="py-1.5 px-2">Email</th>
+              <th className="py-1.5 px-2">Status</th>
+              <th className="py-1.5 px-2">Groups</th>
+              <th className="py-1.5 px-2 text-right w-56">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map(r=>(
+              <tr key={r.email} className="border-t">
+                <td className="py-1.5 px-2">{r.email}</td>
+                <td className="py-1.5 px-2">{r.status||"—"}</td>
+                <td className="py-1.5 px-2">
+                  <div className="flex flex-wrap gap-1">
+                    {(groups[r.email]||r.groups||[]).map(g=>(
+                      <span key={g} className="rounded-full border px-2 py-0.5 text-xs">{g}</span>
+                    ))}
+                  </div>
+                </td>
+                <td className="py-1.5 px-2">
+                  <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                    <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
+                    <button onClick={()=>{ const v=prompt("Comma-separated groups", (groups[r.email]||r.groups||[]).join(", ")); if (v===null) return; const arr=v.split(",").map(s=>s.trim()).filter(Boolean); setGroups(g=>({ ...g, [r.email]: arr })); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Edit Groups</button>
+                    <button disabled={sending} onClick={async()=>{ setSending(true); try{ const resp=await fetch("/api/invite/send",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ plannerEmail, userEmail:r.email })}); const j=await resp.json(); if (!resp.ok || j.error) throw new Error(j.error||"Invite failed"); onToast?.("ok","Invite sent"); }catch(e){ onToast?.("error",String(e.message||e)); } setSending(false); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Send Invite</button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {visible.length===0 && (
+              <tr><td colSpan={4} className="py-6 text-center text-gray-500">No users</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Settings (baseline) ───────── */
+function SettingsView({ plannerEmail, prefs, onChange }){
+  const [local,setLocal]=useState(()=>{
+    return {
+      default_view: prefs.default_view || "users",
+      default_timezone: prefs.default_timezone || "America/Chicago",
+      default_push_mode: prefs.default_push_mode || "append",
+      auto_archive_after_assign: !!prefs.auto_archive_after_assign,
+      show_inbox_badge: !!prefs.show_inbox_badge,
+    };
+  });
+
+  useEffect(()=>{ setLocal({
+    default_view: prefs.default_view || "users",
+    default_timezone: prefs.default_timezone || "America/Chicago",
+    default_push_mode: prefs.default_push_mode || "append",
+    auto_archive_after_assign: !!prefs.auto_archive_after_assign,
+    show_inbox_badge: !!prefs.show_inbox_badge,
+  }); },[prefs]);
+
+  async function save(){
+    try{
+      const body={ plannerEmail, prefs: local };
+      const r=await fetch("/api/prefs/set",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
+      const j=await r.json();
+      if (!r.ok || j.error) throw new Error(j.error||"Save failed");
+      onChange?.(local);
+    }catch(e){}
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
+      <div className="mb-3 text-sm font-semibold">Settings</div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Default view</div>
+          <select value={local.default_view} onChange={(e)=>setLocal({...local, default_view:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            <option value="users">Users</option>
+            <option value="plan">Plan</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Default timezone</div>
+          <select value={local.default_timezone} onChange={(e)=>setLocal({...local, default_timezone:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Default push mode</div>
+          <select value={local.default_push_mode} onChange={(e)=>setLocal({...local, default_push_mode:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            <option value="append">Append</option>
+            <option value="replace">Replace</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Auto-archive after assign</div>
+          <input type="checkbox" checked={!!local.auto_archive_after_assign} onChange={(e)=>setLocal({...local, auto_archive_after_assign:(e.target.checked)})} />
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Show inbox badge</div>
+          <input type="checkbox" checked={!!local.show_inbox_badge} onChange={(e)=>setLocal({...local, show_inbox_badge:(e.target.checked)})} />
+        </label>
+      </div>
+
+      <div className="mt-3">
+        <button onClick={save} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Save</button>
+      </div>
+    </div>
+  );
+}
 
 /* ───────── Timezones (baseline) ───────── */
-const TIMEZONES = ["America/Chicago","America/New_York","America/Denver","America/Los_Angeles","UTC"];
+const TIMEZONES = [
+  "America/Chicago","America/New_York","America/Denver","America/Los_Angeles",
+  "UTC","Europe/London","Europe/Berlin","Asia/Tokyo","Australia/Sydney"
+];
