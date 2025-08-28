@@ -95,7 +95,7 @@ function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
   );
 }
 
-/* ───────── Auth Screen (baseline-style; in-file to avoid undefined) ───────── */
+/* ───────── Auth Screen (in-file to avoid undefined) ───────── */
 function AuthScreen({ onSignedIn }){
   const [mode,setMode]=useState("signin");
   const [email,setEmail]=useState("");
@@ -411,7 +411,7 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
   const init = parseISODate(initialDate) || new Date();
   const sel = parseISODate(selectedDate) || init;
   const [vm,setVm]=useState(()=>new Date(Date.UTC(sel.getUTCFullYear(), sel.getUTCMonth(), 1)));
-  function same(d1,d2){ return d1.getUTCFullYear()===d2.getUTCFullYear() && d2 && d1.getUTCMonth()===d2.getUTCMonth() && d1.getUTCDate()===d2.getUTCDate(); }
+  function same(d1,d2){ return d2 && d1.getUTCFullYear()===d2.getUTCFullYear() && d1.getUTCMonth()===d2.getUTCMonth() && d1.getUTCDate()===d2.getUTCDate(); }
   const weeks = useMemo(()=>{
     const out=[]; const firstDow=new Date(Date.UTC(vm.getUTCFullYear(), vm.getUTCMonth(), 1)).getUTCDay();
     const start=new Date(Date.UTC(vm.getUTCFullYear(), vm.getUTCMonth(), 1-firstDow));
@@ -735,7 +735,7 @@ function TaskEditor({ planStartDate, onAdd }){
             </>
           )}
 
-          {endMode==="horizon" and (
+          {endMode==="horizon" && (
             <>
               <span className="text-sm">Months</span>
               <input type="number" min={1} value={horizonMonths} onChange={(e)=>setHorizonMonths(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
@@ -826,7 +826,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
         <div className="text-sm text-gray-500">No tasks yet.</div>
       ) : (
         <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
-          <table className="w-full min-w-[640px] text-xs sm:text-sm">
+          <table className="w-full min-w=[640px] text-xs sm:text-sm">
             <thead className="bg-gray-50">
               <tr className="text-left text-gray-500">
                 <th className="py-1.5 px-2">Title</th>
