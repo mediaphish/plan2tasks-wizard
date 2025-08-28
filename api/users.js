@@ -1,28 +1,10 @@
-// /api/users.js
-// GET  /api/users?plannerEmail=PLANNER[&debug=1]
-// POST /api/users { plannerEmail, userEmail, groups: [...] }
+// /api/users.js  —  DIAGNOSTIC "PING" VERSION (no imports, no DB)
+// Purpose: prove the route executes without crashing.
 
+'use strict';
+
+// ---- tiny helpers ----
 const toLower = (s) => (typeof s === 'string' ? s.trim().toLowerCase() : '');
-const nowISO = () => new Date().toISOString();
-
-function normalizeGroups(groups) {
-  if (!Array.isArray(groups)) return [];
-  return groups
-    .map((g) => {
-      if (typeof g === 'string') return g;
-      if (g == null) return '';
-      if (typeof g === 'object' && typeof g.name === 'string') return g.name;
-      try { return JSON.stringify(g); } catch { return String(g); }
-    })
-    .filter(Boolean);
-}
-
-function deriveStatus(connectionRow, inviteRow) {
-  const hasTokens = !!connectionRow?.google_refresh_token;
-  if (hasTokens) return 'connected';
-  if (inviteRow && !inviteRow.used_at) return 'invited';
-  return 'pending';
-}
 
 function send(res, code, payload) {
   res.status(code).setHeader('Content-Type', 'application/json');
@@ -44,46 +26,50 @@ function setCors(req, res) {
 
 async function getJsonBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
-  if (req.body && typeof req.body === 'string') {
-    try { return JSON.parse(req.body); } catch { /* fall through */ }
+  if (typeof req.body === 'string') {
+    try { return JSON.parse(req.body); } catch {}
   }
   const chunks = [];
-  for await (const chunk of req) chunks.push(Buffer.from(chunk));
+  for await (const c of req) chunks.push(Buffer.from(c));
   const raw = Buffer.concat(chunks).toString('utf8').trim();
   if (!raw) return {};
-  try { return JSON.parse(raw); } catch { throw new Error('Invalid JSON body'); }
+  try { return JSON.parse(raw); } catch { return {}; }
 }
 
 module.exports = async (req, res) => {
   setCors(req, res);
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  // Debug flag for richer error messages (no secrets).
-  const debug =
-    (req.query && (req.query.debug === '1' || req.query.debug === 'true')) || false;
-
-  let phase = 'import-supabase';
   try {
-    // Dynamic import prevents top-level crashes if the module system differs.
-    const { createClient } = await import('@supabase/supabase-js');
+    if (req.method === 'GET') {
+      const plannerEmail = req.query?.plannerEmail || '';
+      const plannerEmailNorm = toLower(plannerEmail);
 
-    phase = 'create-client';
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return send(res, 500, {
-        ok: false,
-        error: 'Missing Supabase env vars. See /api/debug/config.',
-        ...(debug ? { diag: { phase } } : {}),
+      if (!plannerEmailNorm) {
+        return send(res, 400, { ok: false, error: 'plannerEmail is required', diag: { phase: 'ping-get' } });
+      }
+
+      // Return a fake but well-shaped response so the app doesn't choke.
+      return send(res, 200, {
+        ok: true,
+        plannerEmail: plannerEmailNorm,
+        count: 0,
+        users: [],
+        diag: { phase: 'ping-get', note: 'no DB, route is healthy' }
       });
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: { persistSession: false },
-    });
+    if (req.method === 'POST') {
+      const body = await getJsonBody(req);
+      return send(res, 200, {
+        ok: true,
+        diag: { phase: 'ping-post', echo: body || null }
+      });
+    }
 
-    if (req.method === 'GET') {
-      const { plannerEmail } = req.query || {};
-      const plannerEmailNorm = toLower(plannerEmail);
-      if (!plannerEmailNorm) {
-        return send(res, 400, { ok: false, error: 'plannerEmail is requir
+    res.setHeader('Allow', 'GET,POST,OPTIONS');
+    return send(res, 405, { ok: false, error: 'Method Not Allowed', diag: { phase: 'ping' } });
+  } catch (err) {
+    return send(res, 500, { ok: false, error: 'Unhandled error', diag: { phase: 'ping-catch', message: err?.message || '' } });
+  }
+};
