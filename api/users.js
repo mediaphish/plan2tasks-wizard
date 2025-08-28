@@ -10,7 +10,6 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  // Fail fast in cold start so problems are obvious in logs
   console.warn(
     '[users] Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Check /api/debug/config.'
   );
@@ -27,17 +26,18 @@ const nowISO = () => new Date().toISOString();
 /** Normalize groups into an array of strings, even if stored as jsonb[] */
 function normalizeGroups(groups) {
   if (!Array.isArray(groups)) return [];
-  return groups.map((g) => {
-    if (typeof g === 'string') return g;
-    if (g == null) return '';
-    // If jsonb[] holds objects, accept `name` or stringify
-    if (typeof g === 'object' && typeof g.name === 'string') return g.name;
-    try {
-      return JSON.stringify(g);
-    } catch {
-      return String(g);
-    }
-  }).filter(Boolean);
+  return groups
+    .map((g) => {
+      if (typeof g === 'string') return g;
+      if (g == null) return '';
+      if (typeof g === 'object' && typeof g.name === 'string') return g.name;
+      try {
+        return JSON.stringify(g);
+      } catch {
+        return String(g);
+      }
+    })
+    .filter(Boolean);
 }
 
 /** Derive status from connection + invite */
@@ -67,19 +67,60 @@ function send(res, code, payload) {
   res.end(JSON.stringify(payload));
 }
 
-/** CORS for safety (same-origin should be fine, but this keeps OPTIONS happy) */
-function setCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+/** CORS (expanded to satisfy strict preflights from tools/browsers) */
+function setCors(req, res) {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Vary', 'Origin');
+
+  // Allow common methods, including preflight
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Allow typical headers sent by browsers & API clients
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, Accept'
+  );
+
+  // Let credentials flow if you ever need them (safe since we echo specific origin above)
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+
+  // Cache preflight briefly
+  res.setHeader('Access-Control-Max-Age', '600');
+}
+
+/** Safe body reader: Vercel usually parses JSON for us, but we guard fallbacks. */
+async function getJsonBody(req) {
+  if (req.body && typeof req.body === 'object') return req.body;
+  if (req.body && typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      // fall through
+    }
+  }
+
+  // If body wasn't parsed, read the stream
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.from(chunk));
+  }
+  const raw = Buffer.concat(chunks).toString('utf8').trim();
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('Invalid JSON body');
+  }
 }
 
 // --------- Handler ---------
 module.exports = async (req, res) => {
-  setCors(res);
+  setCors(req, res);
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    // Important: send a quick OK for preflight with the CORS headers above
+    return res.status(204).end();
   }
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -97,7 +138,7 @@ module.exports = async (req, res) => {
         return send(res, 400, { ok: false, error: 'plannerEmail is required' });
       }
 
-      // Case-insensitive match using ILIKE with exact string (no wildcards)
+      // Case-insensitive equality using ILIKE without wildcards
       const { data: connRows, error: connErr } = await supabase
         .from('user_connections')
         .select(
@@ -124,7 +165,6 @@ module.exports = async (req, res) => {
       }
       const latestInvByUser = latestInvite(inviteRows);
 
-      // Union of emails across connections + invites
       const allUserEmails = new Set([
         ...Array.from(connByUser.keys()),
         ...Array.from(latestInvByUser.keys()),
@@ -138,7 +178,6 @@ module.exports = async (req, res) => {
             userEmail: conn?.user_email || inv?.user_email || uLower,
             groups: normalizeGroups(conn?.groups || []),
             status: deriveStatus(conn, inv),
-            // Auxiliary fields if you want to display or debug:
             hasInvite: !!inv,
             updatedAt: conn?.updated_at || null,
           };
@@ -154,9 +193,13 @@ module.exports = async (req, res) => {
     }
 
     if (req.method === 'POST') {
-      // Accept JSON body; Vercel may already parse it
-      const body =
-        typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+      let body;
+      try {
+        body = await getJsonBody(req);
+      } catch (e) {
+        return send(res, 400, { ok: false, error: e.message || 'Invalid JSON' });
+      }
+
       const plannerEmail = body.plannerEmail;
       const userEmail = body.userEmail;
       let groups = body.groups;
@@ -172,17 +215,14 @@ module.exports = async (req, res) => {
       }
 
       if (!Array.isArray(groups)) {
-        // Gracefully coerce a single value into an array
         groups = groups == null ? [] : [groups];
       }
-      // Sanitize groups to strings (jsonb[] will happily store strings as json)
       const cleanGroups = normalizeGroups(groups);
 
-      // Upsert by natural key (planner_email, user_email)
       const payload = {
-        planner_email: plannerEmailNorm, // store normalized for consistent lookups
+        planner_email: plannerEmailNorm,
         user_email: userEmailNorm,
-        groups: cleanGroups, // fits jsonb[] or text[] depending on schema
+        groups: cleanGroups,
         updated_at: nowISO(),
       };
 
@@ -197,7 +237,6 @@ module.exports = async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
-    // Method not allowed
     res.setHeader('Allow', 'GET,POST,OPTIONS');
     return send(res, 405, { ok: false, error: 'Method Not Allowed' });
   } catch (err) {
