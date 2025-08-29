@@ -709,7 +709,7 @@ function TaskEditor({ planStartDate, onAdd }){
             </div>
           )}
 
-          {repeat==="monthly" && (
+          {repeat==="monthly" and (
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <span className="text-sm">Every</span>
               <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
@@ -1151,7 +1151,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* Categories Modal: tag-cloud + partial search */
+/* Categories Modal: tag-cloud + partial search (Add box removed) */
 function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToast }){
   const [local,setLocal]=useState(()=>dedupeCaseInsensitive(assigned||[]));
   const [search,setSearch]=useState("");
@@ -1228,6 +1228,10 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
     if (confirm("Discard unsaved changes?")) onClose?.();
   }
 
+  const canQuickAdd = !!search.trim()
+    && !allCats.some(x=>x.toLowerCase()===search.trim().toLowerCase())
+    && !local.some(x=>x.toLowerCase()===search.trim().toLowerCase());
+
   return (
     <Modal title={`Categories`} onClose={maybeClose}>
       <div className="text-xs text-gray-500 mb-2">User: <b className="text-gray-700">{userEmail}</b></div>
@@ -1239,6 +1243,7 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
             onChange={(e)=>setSearch(e.target.value)}
             placeholder="Search categories (partial match)…"
             className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm pr-8"
+            onKeyDown={(e)=>{ if (e.key==="Enter" && canQuickAdd) { e.preventDefault(); addFromQuery(); } }}
           />
           {search && (
             <button
@@ -1248,7 +1253,7 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
             >×</button>
           )}
         </div>
-        {search.trim() && !allCats.some(x=>x.toLowerCase()===search.trim().toLowerCase()) && !local.some(x=>x.toLowerCase()===search.trim().toLowerCase()) && (
+        {canQuickAdd && (
           <button onClick={addFromQuery} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">Add “{search.trim()}”</button>
         )}
       </div>
@@ -1280,49 +1285,11 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
         )}
       </div>
 
-      {/* Add-new section (kept) */}
-      <AddNewCategoryBlock
-        local={local}
-        allCats={allCats}
-        onAdd={(name)=>{
-          const next = dedupeCaseInsensitive([...local, name]).sort((a,b)=>a.localeCompare(b));
-          setLocal(next); setDirty(true);
-          onToast?.("ok","Category added");
-        }}
-      />
-
       <div className="flex items-center justify-end gap-2">
         <button onClick={maybeClose} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Cancel</button>
         <button onClick={doSave} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Save</button>
       </div>
     </Modal>
-  );
-}
-
-function AddNewCategoryBlock({ local, allCats, onAdd }){
-  const [newCat,setNewCat]=useState("");
-  function add(){
-    const raw = String(newCat||"").trim();
-    if (!raw) return;
-    const exists = local.some(x=>x.toLowerCase()===raw.toLowerCase()) || allCats.some(x=>x.toLowerCase()===raw.toLowerCase());
-    if (exists) return;
-    onAdd?.(raw);
-    setNewCat("");
-  }
-  return (
-    <div className="mb-3 rounded-xl border bg-gray-50 p-2">
-      <div className="text-xs font-semibold text-gray-600 mb-1">Add new category</div>
-      <div className="flex gap-2">
-        <input
-          value={newCat}
-          onChange={(e)=>setNewCat(e.target.value)}
-          onKeyDown={(e)=>{ if (e.key==="Enter"){ e.preventDefault(); add(); } }}
-          placeholder='e.g., "Personal Training"'
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button onClick={add} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Add</button>
-      </div>
-    </div>
   );
 }
 
