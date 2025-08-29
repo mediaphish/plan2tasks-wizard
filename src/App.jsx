@@ -682,7 +682,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence (kept as-is per earlier approval) */}
+      {/* Recurrence */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -1001,7 +1001,7 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   );
 }
 
-/* ───────── Users view — Option A (2 pills + Tag button → unified modal) ───────── */
+/* ───────── Users view — with Archive/Unarchive/Delete actions ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
@@ -1057,6 +1057,37 @@ function UsersView({ plannerEmail, onToast, onManage }){
     saveGroups(email, nextList);
   }
 
+  async function doArchive(email, archived){
+    try{
+      const r = await fetch("/api/users/archive",{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email, archived })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Archive failed");
+      onToast?.("ok", archived ? "User archived" : "User unarchived");
+      await load();
+    } catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+  }
+
+  async function doDelete(email){
+    if (!confirm("Delete this user connection? This cannot be undone.")) return;
+    try{
+      const r = await fetch("/api/users/remove",{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Delete failed");
+      onToast?.("ok","User deleted");
+      await load();
+    } catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+  }
+
   const visible = rows.filter(r=>!filter || (r.email||"").toLowerCase().includes(filter.toLowerCase()));
 
   return (
@@ -1079,7 +1110,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
               <th className="py-1.5 px-2">Email</th>
               <th className="py-1.5 px-2">Status</th>
               <th className="py-1.5 px-2">Categories</th>
-              <th className="py-1.5 px-2 text-right w-64">Actions</th>
+              <th className="py-1.5 px-2 text-right w-[20rem]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1087,11 +1118,19 @@ function UsersView({ plannerEmail, onToast, onManage }){
               const list = (groups[r.email] ?? r.groups ?? []).slice().sort((a,b)=>a.localeCompare(b));
               const pills = list.slice(0,2);
               const count = list.length;
+              const isArchived = (r.status||"").toLowerCase()==="archived";
 
               return (
                 <tr key={r.email} className="border-t align-top">
                   <td className="py-1.5 px-2">{r.email || "Unknown"}</td>
-                  <td className="py-1.5 px-2">{r.status||"—"}</td>
+                  <td className="py-1.5 px-2">
+                    <span className={cn(
+                      "inline-flex items-center rounded-full px-2 py-0.5 text-xs border",
+                      isArchived ? "border-gray-300 text-gray-500 bg-gray-50" : "border-emerald-300 text-emerald-800 bg-emerald-50"
+                    )}>
+                      {r.status||"—"}
+                    </span>
+                  </td>
                   <td className="py-1.5 px-2">
                     <div className="flex flex-wrap items-center gap-1.5">
                       {pills.map(g=>(
@@ -1115,8 +1154,18 @@ function UsersView({ plannerEmail, onToast, onManage }){
                     </div>
                   </td>
                   <td className="py-1.5 px-2">
-                    <div className="flex flex-nowrap items-center justify-end gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Plan</button>
+
+                      {!isArchived && (
+                        <button onClick={()=>doArchive(r.email, true)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Archive</button>
+                      )}
+                      {isArchived && (
+                        <>
+                          <button onClick={()=>doArchive(r.email, false)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Unarchive</button>
+                          <button onClick={()=>doDelete(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-red-50 text-red-700 border-red-300">Delete</button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1151,7 +1200,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* Categories Modal: tag-cloud + partial search (Add box removed) */
+/* Categories Modal (unchanged from your working version) */
 function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToast }){
   const [local,setLocal]=useState(()=>dedupeCaseInsensitive(assigned||[]));
   const [search,setSearch]=useState("");
@@ -1169,13 +1218,11 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
 
   const filtered = useMemo(()=>{
     const q = norm(search);
-    // build unified set of categories = allCats ∪ local
     const map = new Map();
     for (const c of allCats) map.set(norm(c), c);
     for (const c of local) if (!map.has(norm(c))) map.set(norm(c), c);
     let arr = Array.from(map.values());
 
-    // scoring: selected first, then starts-with match, then contains, then A→Z
     const selSet = new Set(local.map(x=>norm(x)));
     const score = (c)=>{
       const n = norm(c);
@@ -1184,7 +1231,7 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
       if (q){
         if (n.startsWith(q)) s -= 2;
         else if (n.includes(q)) s -= 1;
-        else s += 5; // non-match goes later
+        else s += 5;
       }
       return s;
     };
@@ -1193,7 +1240,6 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
       if (sa!==sb) return sa-sb;
       return a.localeCompare(b);
     });
-    // if there's a query, keep non-matches at the end but still visible
     if (q){
       const matches = arr.filter(c=>norm(c).includes(q));
       const rest = arr.filter(c=>!norm(c).includes(q));
@@ -1258,7 +1304,6 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
         )}
       </div>
 
-      {/* Tag cloud */}
       <div className="mb-3 max-h-[40vh] overflow-auto rounded-xl border p-2">
         {filtered.length===0 ? (
           <div className="p-2 text-sm text-gray-500">No categories yet.</div>
