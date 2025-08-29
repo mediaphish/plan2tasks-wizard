@@ -2,12 +2,12 @@
 // Snapshot pushed plans into history_plans + history_items via Supabase.
 //
 // What this version does:
-// - Detects which optional columns exist on history_items (time, notes, duration_mins)
-//   and only inserts the columns your table actually has.
-// - Normalizes time to "HH:MM:SS" (Postgres TIME-friendly).
-// - Batch inserts to handle big recurrences.
-// - Clear error JSON if anything fails.
-// - GET debug helpers you can click in a browser (no writes unless you ask).
+// - FIX: writes `timezone` to history_plans (NOT NULL in your DB).
+// - Accepts timezone from request; defaults to "America/Chicago" if absent.
+// - Detects optional item columns (time, notes, duration_mins) and only inserts those.
+// - Normalizes time to "HH:MM:SS".
+// - Batch inserts items.
+// - GET debug helpers you can click in a browser.
 //
 // GET debug (open these in your browser):
 //  1) Check available item columns (no writes):
@@ -50,7 +50,7 @@ async function columnExists(col){
 }
 
 async function resolveItemColumns(){
-  // We always assume these required: plan_id, title, day_offset
+  // Always present: plan_id, title, day_offset
   // Optional we detect: time, notes, duration_mins
   const [hasTime, hasNotes, hasDuration] = await Promise.all([
     columnExists("time"),
@@ -60,7 +60,7 @@ async function resolveItemColumns(){
   return { hasTime, hasNotes, hasDuration };
 }
 
-async function insertPlan({ plannerEmail, userEmail, listTitle, startDate, mode, itemsLen }){
+async function insertPlan({ plannerEmail, userEmail, listTitle, startDate, timezone, mode, itemsLen }){
   const pushedAt = new Date().toISOString();
   return await supabaseAdmin
     .from("history_plans")
@@ -69,6 +69,7 @@ async function insertPlan({ plannerEmail, userEmail, listTitle, startDate, mode,
       user_email: userEmail,
       title: listTitle,
       start_date: startDate,
+      timezone: timezone || "America/Chicago", // ✅ ensure NOT NULL
       items_count: itemsLen,
       mode: mode || "append",
       pushed_at: pushedAt,
@@ -121,6 +122,7 @@ async function doSnapshot(body){
     userEmail,
     listTitle,
     startDate,
+    timezone,   // ✅ new
     mode,
     items = [],
   } = body || {};
@@ -129,6 +131,7 @@ async function doSnapshot(body){
   const user = toLowerEmail(userEmail);
   const title = norm(listTitle);
   const sDate = norm(startDate);
+  const tz = norm(timezone) || "America/Chicago"; // ✅ default if missing
 
   if (!planner || !user || !title || !sDate) {
     return { ok:false, status:400, error:"Missing plannerEmail, userEmail, listTitle, or startDate" };
@@ -137,12 +140,13 @@ async function doSnapshot(body){
   // 0) Detect available item columns once
   const cols = await resolveItemColumns();
 
-  // 1) Insert plan
+  // 1) Insert plan (now includes timezone)
   const planIns = await insertPlan({
     plannerEmail: planner,
     userEmail: user,
     listTitle: title,
     startDate: sDate,
+    timezone: tz,           // ✅
     mode,
     itemsLen: Array.isArray(items) ? items.length : 0,
   });
@@ -161,7 +165,7 @@ async function doSnapshot(body){
 
   // 2) Insert items
   const src = Array.isArray(items) ? items : [];
-  if (src.length === 0) return { ok:true, status:200, planId, items:0 };
+  if (src.length === 0) return { ok:true, status:200, planId, items:0, colsUsed: cols };
 
   const ins = await insertItems(planId, src, cols);
   if (!ins.ok) {
@@ -194,6 +198,7 @@ export default async function handler(req, res) {
         const userEmail = req.query.userEmail || "";
         const listTitle = req.query.listTitle || "DEBUG Plan";
         const startDate = req.query.startDate || new Date().toISOString().slice(0,10);
+        const timezone = req.query.timezone || "America/Chicago"; // ✅ make debug insert pass NOT NULL
         const insertOne = String(req.query.insertOne || "") === "1";
 
         if (!insertOne) {
@@ -202,6 +207,7 @@ export default async function handler(req, res) {
             ok:true,
             dryRun:true,
             columns: cols,
+            samplePlan: { plannerEmail, userEmail, listTitle, startDate, timezone },
             sampleItemShape: {
               title:"Debug item",
               dayOffset:0,
@@ -213,7 +219,7 @@ export default async function handler(req, res) {
         }
 
         const out = await doSnapshot({
-          plannerEmail, userEmail, listTitle, startDate, mode:"append",
+          plannerEmail, userEmail, listTitle, startDate, timezone, mode:"append",
           items: [{ title:"Debug item", dayOffset:0, time:"12:00", durationMins:30, notes:"dbg" }]
         });
         return res.status(out.status || (out.ok ? 200 : 500)).json(out);
