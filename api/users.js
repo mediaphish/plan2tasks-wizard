@@ -20,14 +20,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: "Missing plannerEmail" });
       }
 
-      // 1) Pull ALL connections (we filter later)
+      // 1) Pull ALL connections for the planner (we filter after)
       const { data: allConn, error: ucErr } = await supabaseAdmin
         .from("user_connections")
         .select("user_email, groups, status, google_refresh_token, updated_at")
         .ilike("planner_email", plannerEmail);
       if (ucErr) throw ucErr;
 
-      // Map connections by normalized email
+      // Map by normalized email
       const connMap = new Map();
       for (const r of allConn || []) {
         const emailRaw = r.user_email || "";
@@ -38,13 +38,12 @@ export default async function handler(req, res) {
           groups: Array.isArray(r.groups) ? r.groups : [],
           status: deriveStatus(r),
           updated_at: r.updated_at || null,
-          __hasConnection: true,
+          __source: "connection",
         });
       }
 
-      // 2) Merge invites only for views where it makes sense: active/all
-      //    Never merge invites for archived or deleted views.
-      const usersMap = new Map(connMap);
+      // 2) Merge invites only for active/all (never for archived or deleted)
+      const merged = new Map(connMap);
       if (status !== "archived" && status !== "deleted") {
         const { data: invRows, error: invErr } = await supabaseAdmin
           .from("invites")
@@ -52,26 +51,39 @@ export default async function handler(req, res) {
           .ilike("planner_email", plannerEmail);
         if (invErr) throw invErr;
 
+        // Deduplicate invites by normalized email and prefer "used" if mixed
+        const inviteByEmail = new Map();
         for (const r of invRows || []) {
           const emailRaw = r.user_email || "";
           const key = normEmail(emailRaw);
           if (!key) continue;
-
-          // If any connection row exists (even archived/deleted), do not add an invite-only duplicate
-          if (connMap.has(key)) continue;
-
           const used = !!r.used_at;
-          usersMap.set(key, {
-            email: emailRaw.trim(),
+          const prev = inviteByEmail.get(key);
+          if (!prev || (used && !prev.used)) {
+            inviteByEmail.set(key, { email: emailRaw.trim(), used });
+          }
+        }
+
+        for (const [key, row] of inviteByEmail) {
+          if (merged.has(key)) continue; // connection beats invite
+          merged.set(key, {
+            email: row.email,
             groups: [],
-            status: used ? "connected" : "pending",
+            status: row.used ? "connected" : "pending",
             updated_at: null,
+            __source: "invite",
           });
         }
       }
 
-      // 3) Final filter by requested status
-      let users = Array.from(usersMap.values());
+      // 3) Final array + **final dedupe** (belt & suspenders), then status filter
+      const finalMap = new Map();
+      for (const v of merged.values()) {
+        const k = normEmail(v.email);
+        if (!finalMap.has(k)) finalMap.set(k, v);
+      }
+      let users = Array.from(finalMap.values());
+
       if (status === "archived") {
         users = users.filter(u => u.status === "archived");
       } else if (status === "deleted") {
@@ -85,7 +97,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      // Upsert groups
+      // Upsert groups on user_connections
       const { plannerEmail, userEmail, groups } = req.body || {};
       if (!plannerEmail || !userEmail) {
         return res.status(400).json({ ok: false, error: "Missing plannerEmail or userEmail" });
