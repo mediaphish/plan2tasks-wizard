@@ -200,7 +200,14 @@ function MainApp(){
           />
         )}
 
-        {view==="settings" && <SettingsView plannerEmail={plannerEmail} prefs={prefs} onChange={(p)=>setPrefs(p)} />}
+        {view==="settings" && (
+          <SettingsView
+            plannerEmail={plannerEmail}
+            prefs={prefs}
+            onChange={(p)=>setPrefs(p)}
+            onToast={(t,m)=>toast(t,m)}  // ← add toast feedback on save
+          />
+        )}
 
         {inboxOpen && (
           <InboxDrawer
@@ -1094,19 +1101,16 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
   function extractFirstUrl(text){
     const m = String(text||"").match(/https?:\/\/[^\s"'<>]+/);
     return m ? m[0] : "";
-    // simple but effective for invite URLs in plain text/HTML
   }
-
   async function parseMaybeJson(resp){
     const ctype = resp.headers.get("content-type") || "";
-    const txt = await resp.text(); // read once
+    const txt = await resp.text();
     if (ctype.includes("application/json")) {
       try { return { kind:"json", json: JSON.parse(txt), txt }; }
-      catch { /* fall through to text */ }
+      catch { /* fall through */ }
     }
     return { kind:"text", txt };
   }
-
   async function doPreview(){
     setLoading(true);
     setPreviewUrl(""); setPreviewRaw("");
@@ -1116,44 +1120,23 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
       const parsed = await parseMaybeJson(resp);
 
       if (!resp.ok) {
-        if (parsed.kind==="json") {
-          const msg = parsed.json?.error || JSON.stringify(parsed.json);
-          onToast?.("error", `Preview failed: ${msg}`);
-        } else {
-          onToast?.("error", `Preview failed: ${parsed.txt.slice(0,120)}`);
-        }
-        setLoading(false);
-        return;
+        if (parsed.kind==="json") onToast?.("error", `Preview failed: ${parsed.json?.error || JSON.stringify(parsed.json)}`);
+        else onToast?.("error", `Preview failed: ${parsed.txt.slice(0,120)}`);
+        setLoading(false); return;
       }
-
       if (parsed.kind==="json") {
         const j = parsed.json;
         const url = j.url || j.inviteUrl || j.href || "";
-        if (url) {
-          setPreviewUrl(url);
-          onToast?.("ok","Preview generated");
-        } else {
-          setPreviewRaw(JSON.stringify(j));
-          onToast?.("warn","Preview returned JSON but no URL field");
-        }
+        if (url) { setPreviewUrl(url); onToast?.("ok","Preview generated"); }
+        else { setPreviewRaw(JSON.stringify(j)); onToast?.("warn","Preview returned JSON but no URL field"); }
       } else {
-        // HTML or text. Try to extract a URL.
         const url = extractFirstUrl(parsed.txt);
-        if (url) {
-          setPreviewUrl(url);
-          onToast?.("ok","Preview URL detected");
-        } else {
-          setPreviewRaw(parsed.txt);
-          if (resp.status===404) onToast?.("error","Preview endpoint not found (404)");
-          else onToast?.("warn","Preview returned non-JSON content");
-        }
+        if (url) { setPreviewUrl(url); onToast?.("ok","Preview URL detected"); }
+        else { setPreviewRaw(parsed.txt); onToast?.("warn","Preview returned non-JSON content"); }
       }
-    }catch(e){
-      onToast?.("error", String(e.message||e));
-    }
+    }catch(e){ onToast?.("error", String(e.message||e)); }
     setLoading(false);
   }
-
   async function doSend(){
     setLoading(true);
     try{
@@ -1162,34 +1145,14 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
         body: JSON.stringify({ plannerEmail, userEmail: email })
       });
       const parsed = await parseMaybeJson(resp);
-
       if (!resp.ok) {
-        if (parsed.kind==="json") {
-          const msg = parsed.json?.error || JSON.stringify(parsed.json);
-          onToast?.("error", `Invite failed: ${msg}`);
-        } else {
-          onToast?.("error", `Invite failed: ${parsed.txt.slice(0,120)}`);
-        }
-        setLoading(false);
-        return;
+        if (parsed.kind==="json") onToast?.("error", `Invite failed: ${parsed.json?.error || JSON.stringify(parsed.json)}`);
+        else onToast?.("error", `Invite failed: ${parsed.txt.slice(0,120)}`);
+        setLoading(false); return;
       }
-
-      if (parsed.kind==="json") {
-        if (parsed.json?.ok || parsed.json?.sent || parsed.json?.status==="sent") {
-          onToast?.("ok","Invite sent");
-          onClose?.();
-        } else {
-          onToast?.("ok","Invite sent"); // be generous even if schema is different
-          onClose?.();
-        }
-      } else {
-        // Non-JSON success; treat as OK
-        onToast?.("ok","Invite sent");
-        onClose?.();
-      }
-    }catch(e){
-      onToast?.("error", String(e.message||e));
-    }
+      onToast?.("ok","Invite sent");
+      onClose?.();
+    }catch(e){ onToast?.("error", String(e.message||e)); }
     setLoading(false);
   }
 
@@ -1242,7 +1205,7 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
 }
 
 /* ───────── Settings ───────── */
-function SettingsView({ plannerEmail, prefs, onChange }){
+function SettingsView({ plannerEmail, prefs, onChange, onToast }){
   const [local,setLocal]=useState(()=>{
     return {
       default_view: prefs.default_view || "users",
@@ -1252,6 +1215,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
       show_inbox_badge: !!prefs.show_inbox_badge,
     };
   });
+  const [saving,setSaving]=useState(false);
 
   useEffect(()=>{ setLocal({
     default_view: prefs.default_view || "users",
@@ -1262,13 +1226,18 @@ function SettingsView({ plannerEmail, prefs, onChange }){
   }); },[prefs]);
 
   async function save(){
+    setSaving(true);
     try{
       const body={ plannerEmail, prefs: local };
       const r=await fetch("/api/prefs/set",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
       const j=await r.json();
       if (!r.ok || j.error) throw new Error(j.error||"Save failed");
       onChange?.(local);
-    }catch(e){/* noop */}
+      onToast?.("ok","Settings saved");
+    }catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+    setSaving(false);
   }
 
   return (
@@ -1311,7 +1280,9 @@ function SettingsView({ plannerEmail, prefs, onChange }){
       </div>
 
       <div className="mt-3">
-        <button onClick={save} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Save</button>
+        <button onClick={save} disabled={saving} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50">
+          {saving ? "Saving…" : "Save"}
+        </button>
       </div>
     </div>
   );
