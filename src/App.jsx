@@ -1001,7 +1001,7 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   );
 }
 
-/* ───────── Users view — with Archive/Unarchive/Delete actions ───────── */
+/* ───────── Users view — with clearer Archive/Restore/Delete labels ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
@@ -1065,7 +1065,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
       });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Archive failed");
-      onToast?.("ok", archived ? "User archived" : "User unarchived");
+      onToast?.("ok", archived ? "User archived" : "User restored");
       await load();
     } catch(e){
       onToast?.("error", String(e.message||e));
@@ -1155,15 +1155,39 @@ function UsersView({ plannerEmail, onToast, onManage }){
                   </td>
                   <td className="py-1.5 px-2">
                     <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Plan</button>
+                      <button
+                        onClick={()=>onManage?.(r.email)}
+                        className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                        title="Open Plan view for this user"
+                      >
+                        Plan
+                      </button>
 
                       {!isArchived && (
-                        <button onClick={()=>doArchive(r.email, true)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Archive</button>
+                        <button
+                          onClick={()=>doArchive(r.email, true)}
+                          className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                          title="Archive this user connection"
+                        >
+                          Archive user
+                        </button>
                       )}
                       {isArchived && (
                         <>
-                          <button onClick={()=>doArchive(r.email, false)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Unarchive</button>
-                          <button onClick={()=>doDelete(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-red-50 text-red-700 border-red-300">Delete</button>
+                          <button
+                            onClick={()=>doArchive(r.email, false)}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                            title="Restore this user from archive"
+                          >
+                            Restore user
+                          </button>
+                          <button
+                            onClick={()=>doDelete(r.email)}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-red-50 text-red-700 border-red-300"
+                            title="Permanently delete this user connection"
+                          >
+                            Delete user
+                          </button>
                         </>
                       )}
                     </div>
@@ -1200,7 +1224,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* Categories Modal (unchanged from your working version) */
+/* Categories Modal */
 function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToast }){
   const [local,setLocal]=useState(()=>dedupeCaseInsensitive(assigned||[]));
   const [search,setSearch]=useState("");
@@ -1349,7 +1373,7 @@ function dedupeCaseInsensitive(arr){
   return Array.from(m.values());
 }
 
-/* ───────── Invite modal (unchanged) ───────── */
+/* ───────── Invite modal ───────── */
 function SendInviteModal({ plannerEmail, onClose, onToast }){
   const [email,setEmail]=useState("");
   const [previewUrl,setPreviewUrl]=useState("");
