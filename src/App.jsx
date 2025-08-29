@@ -1,4 +1,3 @@
-// (full file) src/App.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
@@ -1093,6 +1092,23 @@ function UsersView({ plannerEmail, onToast, onManage }){
     }
   }
 
+  // NEW: Cancel invite (invite-only pending rows)
+  async function doCancelInvite(email){
+    try{
+      const r = await fetch("/api/invite/remove",{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Cancel invite failed");
+      setRows(prev => prev.filter(x => x.email !== email));
+      onToast?.("ok", `Invite canceled: ${email}`);
+      setTimeout(()=>{ load(); }, 400);
+    } catch (e){
+      onToast?.("error", String(e.message||e));
+    }
+  }
+
   // Permanent purge; allowed only in "deleted" tab
   async function doPurge(email){
     if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
@@ -1162,7 +1178,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
               <th className="py-1.5 px-2">Email</th>
               <th className="py-1.5 px-2">Status</th>
               <th className="py-1.5 px-2">Categories</th>
-              <th className="py-1.5 px-2 text-right w-[22rem]">Actions</th>
+              <th className="py-1.5 px-2 text-right w-[24rem]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1172,6 +1188,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
               const count = list.length;
               const isArchived = (r.status||"").toLowerCase()==="archived";
               const isDeleted = (r.status||"").toLowerCase()==="deleted";
+              const isPendingInvite = !isArchived && !isDeleted && ((r.status||"").toLowerCase()==="pending") && (r.__source==="invite");
 
               return (
                 <tr key={r.email} className="border-t align-top">
@@ -1181,7 +1198,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
                       "inline-flex items-center rounded-full px-2 py-0.5 text-xs border",
                       isDeleted ? "border-red-300 text-red-700 bg-red-50" :
                       isArchived ? "border-gray-300 text-gray-600 bg-gray-50" :
-                      "border-emerald-300 text-emerald-800 bg-emerald-50"
+                      (r.status==="connected" ? "border-emerald-300 text-emerald-800 bg-emerald-50" : "border-gray-300 text-gray-700 bg-white")
                     )}>
                       {r.status||"—"}
                     </span>
@@ -1220,6 +1237,18 @@ function UsersView({ plannerEmail, onToast, onManage }){
                           >
                             Plan
                           </button>
+
+                          {/* NEW: Cancel invite for pending invite-only rows */}
+                          {isPendingInvite && (
+                            <button
+                              onClick={()=>doCancelInvite(r.email)}
+                              className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                              title="Cancel pending invite"
+                            >
+                              Cancel invite
+                            </button>
+                          )}
+
                           <button
                             onClick={()=>doArchive(r.email, true)}
                             className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
