@@ -709,7 +709,7 @@ function TaskEditor({ planStartDate, onAdd }){
             </div>
           )}
 
-          {repeat==="monthly" and (
+          {repeat==="monthly" && (
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <span className="text-sm">Every</span>
               <input type="number" min={1} value={interval} onChange={(e)=>setInterval(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
@@ -1361,7 +1361,7 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
       if (!resp.ok) {
         if (parsed.kind==="json") onToast?.("error", `Invite failed: ${parsed.json?.error || JSON.stringify(parsed.json)}`);
         else onToast?.("error", `Invite failed: ${parsed.txt.slice(0,120)}`);
-        setLoading(false); return;
+        setLoading=false; return;
       }
       onToast?.("ok","Invite sent");
       onClose?.();
