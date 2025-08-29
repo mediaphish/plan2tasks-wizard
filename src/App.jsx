@@ -1002,15 +1002,15 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   );
 }
 
-/* ───────── Users view — Active/Archived toggle + immediate state updates ───────── */
+/* ───────── Users view — Active/Archived/Deleted ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
   const [groups,setGroups]=useState({});
   const [inviteOpen,setInviteOpen]=useState(false);
 
-  // Active / Archived tab
-  const [tab,setTab]=useState("active"); // "active" | "archived"
+  // Tabs: active | archived | deleted
+  const [tab,setTab]=useState("active");
 
   // Category modal state
   const [catOpen,setCatOpen]=useState(false);
@@ -1065,19 +1065,19 @@ function UsersView({ plannerEmail, onToast, onManage }){
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Archive failed");
 
-      // Immediate UI update: remove from current tab
+      // Immediate UI update
       setRows(prev => prev.filter(x => x.email !== email));
       onToast?.("ok", `${archived ? "User archived" : "User restored"}: ${email}`);
 
-      // Gentle background refresh to stay in sync
+      // Gentle background refresh
       setTimeout(()=>{ load(); }, 400);
     } catch(e){
       onToast?.("error", String(e.message||e));
     }
   }
 
-  async function doDelete(email){
-    if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
+  // Soft delete (to status=deleted); allowed only in "archived" tab
+  async function doSoftDelete(email){
     try{
       const r = await fetch("/api/users/remove",{
         method:"POST", headers:{ "Content-Type":"application/json" },
@@ -1086,7 +1086,25 @@ function UsersView({ plannerEmail, onToast, onManage }){
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Delete failed");
       setRows(prev => prev.filter(x => x.email !== email));
-      onToast?.("ok", `User deleted: ${email}`);
+      onToast?.("ok", `User moved to Deleted: ${email}`);
+      setTimeout(()=>{ load(); }, 400);
+    } catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+  }
+
+  // Permanent purge; allowed only in "deleted" tab
+  async function doPurge(email){
+    if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
+    try{
+      const r = await fetch("/api/users/purge",{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Purge failed");
+      setRows(prev => prev.filter(x => x.email !== email));
+      onToast?.("ok", `Permanently deleted: ${email}`);
       setTimeout(()=>{ load(); }, 400);
     } catch(e){
       onToast?.("error", String(e.message||e));
@@ -1105,7 +1123,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold">Users</div>
-          {/* Active / Archived toggle */}
+          {/* Active / Archived / Deleted toggle */}
           <div className="ml-2 inline-flex rounded-xl border overflow-hidden">
             <button
               onClick={()=>setTab("active")}
@@ -1118,6 +1136,12 @@ function UsersView({ plannerEmail, onToast, onManage }){
               className={cn("px-2.5 py-1 text-xs border-l", tab==="archived" ? "bg-gray-900 text-white" : "bg-white hover:bg-gray-50")}
             >
               Archived
+            </button>
+            <button
+              onClick={()=>setTab("deleted")}
+              className={cn("px-2.5 py-1 text-xs border-l", tab==="deleted" ? "bg-gray-900 text-white" : "bg-white hover:bg-gray-50")}
+            >
+              Deleted
             </button>
           </div>
         </div>
@@ -1138,7 +1162,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
               <th className="py-1.5 px-2">Email</th>
               <th className="py-1.5 px-2">Status</th>
               <th className="py-1.5 px-2">Categories</th>
-              <th className="py-1.5 px-2 text-right w-[20rem]">Actions</th>
+              <th className="py-1.5 px-2 text-right w-[22rem]">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1147,6 +1171,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
               const pills = list.slice(0,2);
               const count = list.length;
               const isArchived = (r.status||"").toLowerCase()==="archived";
+              const isDeleted = (r.status||"").toLowerCase()==="deleted";
 
               return (
                 <tr key={r.email} className="border-t align-top">
@@ -1154,7 +1179,9 @@ function UsersView({ plannerEmail, onToast, onManage }){
                   <td className="py-1.5 px-2">
                     <span className={cn(
                       "inline-flex items-center rounded-full px-2 py-0.5 text-xs border",
-                      isArchived ? "border-gray-300 text-gray-500 bg-gray-50" : "border-emerald-300 text-emerald-800 bg-emerald-50"
+                      isDeleted ? "border-red-300 text-red-700 bg-red-50" :
+                      isArchived ? "border-gray-300 text-gray-600 bg-gray-50" :
+                      "border-emerald-300 text-emerald-800 bg-emerald-50"
                     )}>
                       {r.status||"—"}
                     </span>
@@ -1168,9 +1195,10 @@ function UsersView({ plannerEmail, onToast, onManage }){
                       ))}
                       <button
                         onClick={()=>openCats(r.email)}
-                        className="relative inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-xs hover:bg-gray-50"
+                        className="relative inline-flex items-center justify-center rounded-full border px-2.5 py-0.5 text-xs hover:bg-gray-50 disabled:opacity-40"
                         aria-label={count===0 ? "Add categories" : "Edit categories"}
                         title={count===0 ? "Add categories" : "Edit categories"}
+                        disabled={isDeleted}
                       >
                         <Tag className="h-3.5 w-3.5" />
                         {count===0 ? (
@@ -1183,7 +1211,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
                   </td>
                   <td className="py-1.5 px-2">
                     <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      {!isArchived && (
+                      {!isArchived && !isDeleted && (
                         <>
                           <button
                             onClick={()=>onManage?.(r.email)}
@@ -1201,6 +1229,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
                           </button>
                         </>
                       )}
+
                       {isArchived && (
                         <>
                           <button
@@ -1211,11 +1240,30 @@ function UsersView({ plannerEmail, onToast, onManage }){
                             Restore user
                           </button>
                           <button
-                            onClick={()=>doDelete(r.email)}
+                            onClick={()=>doSoftDelete(r.email)}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-red-50 text-red-700 border-red-300"
+                            title="Move to Deleted (soft delete)"
+                          >
+                            Delete user
+                          </button>
+                        </>
+                      )}
+
+                      {isDeleted && (
+                        <>
+                          <button
+                            onClick={()=>doArchive(r.email, false)}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                            title="Restore this user (undelete)"
+                          >
+                            Restore user
+                          </button>
+                          <button
+                            onClick={()=>doPurge(r.email)}
                             className="rounded-lg border px-2 py-1 text-xs hover:bg-red-50 text-red-700 border-red-300"
                             title="Permanently delete this user connection"
                           >
-                            Delete user
+                            Permanently delete
                           </button>
                         </>
                       )}
