@@ -1,5 +1,9 @@
 // /api/users/archive.js
-import { supabaseAdmin } from "../lib/supabase-admin.js";
+import { supabaseAdmin } from "../../lib/supabase-admin.js";
+
+function normEmail(e) {
+  return String(e || "").trim().toLowerCase();
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -8,10 +12,12 @@ export default async function handler(req, res) {
   try {
     const { plannerEmail, userEmail, archived } = req.body || {};
     if (!plannerEmail || !userEmail || typeof archived !== "boolean") {
-      return res.status(400).json({ ok: false, error: "Missing plannerEmail, userEmail, or archived" });
+      return res
+        .status(400)
+        .json({ ok: false, error: "Missing plannerEmail, userEmail, or archived" });
     }
 
-    // Fetch or create the connection row
+    // Find existing connection
     const { data: row, error: selErr } = await supabaseAdmin
       .from("user_connections")
       .select("planner_email, user_email, status, google_refresh_token")
@@ -21,22 +27,21 @@ export default async function handler(req, res) {
     if (selErr && selErr.code !== "PGRST116") throw selErr;
 
     if (!row) {
-      // If archiving without a row, create one directly as archived
+      // If no row: create one immediately in the desired state
       const status = archived ? "archived" : "pending";
       const { error: insErr } = await supabaseAdmin
         .from("user_connections")
-        .insert([{ planner_email: plannerEmail, user_email: userEmail, status, groups: [] }]);
+        .insert([
+          { planner_email: plannerEmail, user_email: userEmail, status, groups: [] },
+        ]);
       if (insErr) throw insErr;
       return res.json({ ok: true, status });
     }
 
-    // Decide the new status
+    // Decide new status on restore
     let newStatus = "pending";
-    if (archived) {
-      newStatus = "archived";
-    } else {
-      newStatus = row.google_refresh_token ? "connected" : "pending";
-    }
+    if (archived) newStatus = "archived";
+    else newStatus = row.google_refresh_token ? "connected" : "pending";
 
     const { error: updErr } = await supabaseAdmin
       .from("user_connections")
