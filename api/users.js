@@ -1,196 +1,124 @@
-// /api/users.js — Edge Runtime with graceful fallback when `groups` column is missing
-// GET  /api/users?plannerEmail=PLANNER
-// POST /api/users { plannerEmail, userEmail, groups: [...] }
+// /api/users.js
+import { supabaseAdmin } from "../lib/supabase-admin.js";
 
-export const config = { runtime: 'edge' };
-
-function corsHeaders(req) {
-  const origin = req.headers.get('origin') || '*';
-  return {
-    'access-control-allow-origin': origin,
-    'vary': 'Origin',
-    'access-control-allow-methods': 'GET,POST,OPTIONS',
-    'access-control-allow-headers': 'content-type, authorization, x-requested-with, accept',
-    'access-control-allow-credentials': 'true',
-    'access-control-max-age': '600'
-  };
-}
-function jsonHeaders(req) {
-  return { 'content-type': 'application/json', ...corsHeaders(req) };
-}
-
-const toLower = (s) => (typeof s === 'string' ? s.trim().toLowerCase() : '');
-const nowISO = () => new Date().toISOString();
-
-function normalizeGroups(groups) {
-  if (!Array.isArray(groups)) return [];
-  return groups.map((g) => {
-    if (typeof g === 'string') return g;
-    if (g == null) return '';
-    if (typeof g === 'object' && typeof g.name === 'string') return g.name;
-    try { return JSON.stringify(g); } catch { return String(g); }
-  }).filter(Boolean);
-}
-
-function deriveStatus(connectionRow, inviteRow) {
-  const hasTokens = !!connectionRow?.google_refresh_token;
-  if (hasTokens) return 'connected';
-  if (inviteRow && !inviteRow.used_at) return 'invited';
-  return 'pending';
-}
-
-async function supabaseRest(path, init = {}) {
-  const urlBase = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!urlBase || !key) {
-    return { error: { message: 'Missing Supabase env vars' }, data: null };
-  }
-  const url = `${urlBase.replace(/\/+$/, '')}/rest/v1/${path.replace(/^\/+/, '')}`;
-  const headers = {
-    apikey: key,
-    Authorization: `Bearer ${key}`,
-    'content-type': 'application/json',
-    ...(init.headers || {}),
-  };
-  const res = await fetch(url, { ...init, headers });
-  const text = await res.text();
-  let json = null;
-  try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-  if (!res.ok) {
-    const message = json?.message || json?.error || text || `HTTP ${res.status}`;
-    return { error: { status: res.status, message }, data: null };
-  }
-  return { error: null, data: json };
-}
-
-export default async function handler(req) {
-  const method = req.method || 'GET';
-  const url = new URL(req.url);
-
-  if (method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(req) });
-  }
-
-  if (method === 'GET') {
-    const plannerEmail = url.searchParams.get('plannerEmail') || '';
-    const plannerEmailNorm = toLower(plannerEmail);
-    if (!plannerEmailNorm) {
-      return new Response(JSON.stringify({ ok: false, error: 'plannerEmail is required' }), {
-        status: 400, headers: jsonHeaders(req)
-      });
-    }
-
-    const fieldsBase = 'planner_email,user_email,google_refresh_token,google_expires_at,updated_at';
-    let triedGroups = true;
-
-    // Try including groups; if column missing, fall back without crashing
-    let { data: connRows, error: connErr } = await supabaseRest(
-      `user_connections?select=${encodeURIComponent(fieldsBase + ',groups')}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
-    );
-    if (connErr && /column .*groups.* does not exist/i.test(connErr.message || '')) {
-      triedGroups = false;
-      ({ data: connRows, error: connErr } = await supabaseRest(
-        `user_connections?select=${encodeURIComponent(fieldsBase)}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
-      ));
-    }
-    if (connErr) {
-      return new Response(JSON.stringify({ ok: false, error: connErr.message }), {
-        status: 500, headers: jsonHeaders(req)
-      });
-    }
-
-    const fieldsInv = 'id,planner_email,user_email,used_at';
-    const { data: inviteRows, error: invErr } = await supabaseRest(
-      `invites?select=${encodeURIComponent(fieldsInv)}&planner_email=ilike.${encodeURIComponent(plannerEmailNorm)}`
-    );
-    if (invErr) {
-      return new Response(JSON.stringify({ ok: false, error: invErr.message }), {
-        status: 500, headers: jsonHeaders(req)
-      });
-    }
-
-    const connByUser = new Map();
-    for (const r of connRows || []) connByUser.set(toLower(r.user_email), r);
-    const invByUser = new Map();
-    for (const i of inviteRows || []) {
-      const key = toLower(i.user_email);
-      if (!invByUser.has(key)) invByUser.set(key, i);
-    }
-
-    const users = Array.from(new Set([...connByUser.keys(), ...invByUser.keys()]))
-      .map((uLower) => {
-        const conn = connByUser.get(uLower);
-        const inv = invByUser.get(uLower);
-        return {
-          userEmail: conn?.user_email || inv?.user_email || uLower,
-          groups: triedGroups ? normalizeGroups(conn?.groups || []) : [],
-          status: deriveStatus(conn, inv),
-          hasInvite: !!inv,
-          updatedAt: conn?.updated_at || null,
-        };
-      })
-      .sort((a, b) => a.userEmail.localeCompare(b.userEmail));
-
-    return new Response(JSON.stringify({
-      ok: true,
-      plannerEmail: plannerEmailNorm,
-      count: users.length,
-      users
-    }), { status: 200, headers: jsonHeaders(req) });
-  }
-
-  if (method === 'POST') {
-    let body = {};
-    try { body = await req.json(); } catch {}
-    const plannerEmailNorm = toLower(body?.plannerEmail);
-    const userEmailNorm   = toLower(body?.userEmail);
-    let groups = body?.groups;
-
-    if (!plannerEmailNorm || !userEmailNorm) {
-      return new Response(JSON.stringify({ ok: false, error: 'plannerEmail and userEmail are required' }), {
-        status: 400, headers: jsonHeaders(req)
-      });
-    }
-
-    if (!Array.isArray(groups)) groups = groups == null ? [] : [groups];
-    const cleanGroups = normalizeGroups(groups);
-
-    const payload = [{
-      planner_email: plannerEmailNorm,
-      user_email: userEmailNorm,
-      groups: cleanGroups,
-      updated_at: nowISO()
-    }];
-
-    const { error: upsertErr } = await supabaseRest(
-      'user_connections?on_conflict=planner_email,user_email',
-      { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates' }, body: JSON.stringify(payload) }
-    );
-
-    if (upsertErr) {
-      // Give a friendly, actionable message if the column is still missing
-      if (/column .*groups.* does not exist/i.test(upsertErr.message || '')) {
-        return new Response(JSON.stringify({
-          ok: false,
-          error: "The 'groups' column does not exist yet. Please run the one-time SQL in Supabase to add it.",
-          howToFix: {
-            open: "Supabase → SQL → New query",
-            paste: "ALTER TABLE public.user_connections ADD COLUMN IF NOT EXISTS groups jsonb NOT NULL DEFAULT '[]'::jsonb; ALTER TABLE public.user_connections ADD COLUMN IF NOT EXISTS updated_at timestamptz;",
-            run: "Click Run, then refresh the Table Editor"
-          }
-        }), { status: 400, headers: jsonHeaders(req) });
+export default async function handler(req, res) {
+  try {
+    if (req.method === "GET") {
+      const { plannerEmail, status = "active" } = req.query || {};
+      if (!plannerEmail) {
+        return res.status(400).json({ ok: false, error: "Missing plannerEmail" });
       }
-      return new Response(JSON.stringify({ ok: false, error: upsertErr.message }), {
-        status: 500, headers: jsonHeaders(req)
-      });
+
+      // 1) Fetch user_connections for this planner
+      let q = supabaseAdmin
+        .from("user_connections")
+        .select("user_email, groups, status, google_refresh_token, google_access_token, google_expires_at, updated_at")
+        .ilike("planner_email", plannerEmail);
+
+      if (status === "archived") {
+        q = q.eq("status", "archived");
+      } else if (status === "active") {
+        q = q.neq("status", "archived");
+      }
+
+      const { data: ucRows, error: ucErr } = await q;
+      if (ucErr) throw ucErr;
+
+      // Normalize rows and derive status (unless explicitly archived)
+      const usersMap = new Map();
+      for (const r of ucRows || []) {
+        const email = (r.user_email || "").trim();
+        const explicitStatus = (r.status || "").toLowerCase();
+        let effStatus = explicitStatus === "archived"
+          ? "archived"
+          : (r.google_refresh_token ? "connected" : (explicitStatus || "pending"));
+
+        usersMap.set(email, {
+          email,
+          groups: Array.isArray(r.groups) ? r.groups : [],
+          status: effStatus,
+          updated_at: r.updated_at || null
+        });
+      }
+
+      // 2) Merge invites (only for active/all); do not show invites on archived view
+      if (status !== "archived") {
+        const { data: invRows, error: invErr } = await supabaseAdmin
+          .from("invites")
+          .select("user_email, used_at")
+          .ilike("planner_email", plannerEmail);
+        if (invErr) throw invErr;
+
+        for (const r of invRows || []) {
+          const email = (r.user_email || "").trim();
+          if (!email) continue;
+          if (usersMap.has(email)) continue; // already have a connection row
+          const used = !!r.used_at;
+          // If invite used and there's *no* user_connections row, treat as connected; else pending
+          usersMap.set(email, {
+            email,
+            groups: [],
+            status: used ? "connected" : "pending",
+            updated_at: null
+          });
+        }
+      }
+
+      // 3) Filter by requested status *after* merge (safety net)
+      let users = Array.from(usersMap.values());
+      if (status === "archived") {
+        users = users.filter(u => u.status === "archived");
+      } else if (status === "active") {
+        users = users.filter(u => u.status !== "archived");
+      }
+
+      users.sort((a, b) => a.email.localeCompare(b.email));
+      return res.json({ ok: true, users });
     }
 
-    return new Response(JSON.stringify({ ok: true }), {
-      status: 200, headers: jsonHeaders(req)
-    });
-  }
+    if (req.method === "POST") {
+      // Upsert groups to user_connections for (planner_email, user_email)
+      const { plannerEmail, userEmail, groups } = req.body || {};
+      if (!plannerEmail || !userEmail) {
+        return res.status(400).json({ ok: false, error: "Missing plannerEmail or userEmail" });
+      }
+      const list = Array.isArray(groups) ? groups : [];
 
-  return new Response(JSON.stringify({ ok: false, error: 'Method Not Allowed' }), {
-    status: 405, headers: jsonHeaders(req)
-  });
+      // Make sure a row exists, then update groups
+      // If no row, insert with status 'pending' by default
+      const { data: existing, error: selErr } = await supabaseAdmin
+        .from("user_connections")
+        .select("planner_email, user_email")
+        .ilike("planner_email", plannerEmail)
+        .ilike("user_email", userEmail)
+        .maybeSingle();
+      if (selErr && selErr.code !== "PGRST116") throw selErr;
+
+      if (!existing) {
+        const { error: insErr } = await supabaseAdmin
+          .from("user_connections")
+          .insert([{
+            planner_email: plannerEmail,
+            user_email: userEmail,
+            groups: list,
+            status: "pending"
+          }]);
+        if (insErr) throw insErr;
+      } else {
+        const { error: updErr } = await supabaseAdmin
+          .from("user_connections")
+          .update({ groups: list })
+          .ilike("planner_email", plannerEmail)
+          .ilike("user_email", userEmail);
+        if (updErr) throw updErr;
+      }
+
+      return res.json({ ok: true });
+    }
+
+    return res.status(405).json({ ok: false, error: "Method not allowed" });
+  } catch (e) {
+    console.error("users endpoint error", e);
+    return res.status(500).json({ ok: false, error: e.message || "Server error" });
+  }
 }
