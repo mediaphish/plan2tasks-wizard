@@ -6,19 +6,59 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
-/* ───────────── utils ───────────── */
+/* ───────────── utils (LOCAL DATE ONLY — fixes off-by-one) ───────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
-function parseISODate(s){ if (!s) return null; const d=new Date(`${s}T00:00:00Z`); return Number.isNaN(d.getTime())?null:d; }
-function fmtDateYMD(d){ const y=d.getUTCFullYear(); const m=String(d.getUTCMonth()+1).padStart(2,"0"); const dd=String(d.getUTCDate()).padStart(2,"0"); return `${y}-${m}-${dd}`; }
-function daysBetweenUTC(a,b){ const ms=86400000; const da=Date.UTC(a.getUTCFullYear(),a.getUTCMonth(),a.getUTCDate()); const db=Date.UTC(b.getUTCFullYear(),b.getUTCMonth(),b.getUTCDate()); return Math.round((db-da)/ms); }
-function addMonthsUTC(dateUTC, months){ const y=dateUTC.getUTCFullYear(), m=dateUTC.getUTCMonth(), d=dateUTC.getUTCDate(); const nmo=m+months; const ny=y+Math.floor(nmo/12); const nm=((nmo%12)+12)%12; const last=lastDayOfMonthUTC(ny,nm); const nd=Math.min(d,last); return new Date(Date.UTC(ny,nm,nd)); }
-function lastDayOfMonthUTC(y,m0){ return new Date(Date.UTC(y,m0+1,0)).getUTCDate(); }
-function firstWeekdayOfMonthUTC(y,m0,weekday){ const first=new Date(Date.UTC(y,m0,1)); const shift=(7+weekday-first.getUTCDay())%7; return new Date(Date.UTC(y,m0,1+shift)); }
-function nthWeekdayOfMonthUTC(y,m0,weekday,nth){ const first=firstWeekdayOfMonthUTC(y,m0,weekday); const c=new Date(Date.UTC(y,m0, first.getUTCDate()+7*(nth-1))); return c.getUTCMonth()===m0?c:null; }
-function lastWeekdayOfMonthUTC(y,m0,weekday){ const lastD=lastDayOfMonthUTC(y,m0); const last=new Date(Date.UTC(y,m0,lastD)); const shift=(7+last.getUTCDay()-weekday)%7; return new Date(Date.UTC(y,m0,lastD-shift)); }
 
-/* time parsing/formatting (kept as-is for now) */
+/* Parse "YYYY-MM-DD" as a **local** midnight Date */
+function parseYMDLocal(s){
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  return new Date(y, mo-1, d); // local midnight
+}
+/* Format a Date → "YYYY-MM-DD" using local getters */
+function fmtYMDLocal(d){
+  const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,"0"); const dd=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${dd}`;
+}
+/* Add whole days in local time */
+function addDaysLocal(base, days){
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate()+days);
+}
+/* Whole-day difference (b - a) in days using local midnight */
+function daysBetweenLocal(a,b){
+  const a0=new Date(a.getFullYear(),a.getMonth(),a.getDate());
+  const b0=new Date(b.getFullYear(),b.getMonth(),b.getDate());
+  return Math.round((b0 - a0)/86400000);
+}
+/* Month helpers (LOCAL) */
+function addMonthsLocal(date, months){
+  const y=date.getFullYear(), m=date.getMonth(), d=date.getDate();
+  const nmo=m+months; const ny=y+Math.floor(nmo/12); const nm=((nmo%12)+12)%12;
+  const last=new Date(ny, nm+1, 0).getDate();
+  return new Date(ny, nm, Math.min(d,last));
+}
+function lastDayOfMonthLocal(y,m0){ return new Date(y, m0+1, 0).getDate(); }
+function firstWeekdayOfMonthLocal(y,m0,weekday){
+  const first=new Date(y,m0,1);
+  const shift=(7+weekday-first.getDay())%7;
+  return new Date(y,m0,1+shift);
+}
+function nthWeekdayOfMonthLocal(y,m0,weekday,nth){
+  const first=firstWeekdayOfMonthLocal(y,m0,weekday);
+  const c=new Date(y,m0, first.getDate()+7*(nth-1));
+  return c.getMonth()===m0?c:null;
+}
+function lastWeekdayOfMonthLocal(y,m0,weekday){
+  const lastD=lastDayOfMonthLocal(y,m0);
+  const last=new Date(y,m0,lastD);
+  const shift=(7+last.getDay()-weekday)%7;
+  return new Date(y,m0,lastD-shift);
+}
+
+/* time parsing/formatting (kept; displays 12-hour) */
 function parseTimeHuman(str){
   if (!str) return "";
   let s = String(str).trim().toLowerCase();
@@ -113,7 +153,7 @@ class ErrorBoundary extends React.Component{
   }
 }
 
-/* ───────── App shell (no auth, no new deps) ───────── */
+/* ───────── App shell ───────── */
 export default function App(){
   return (
     <ErrorBoundary>
@@ -133,7 +173,7 @@ function MainApp(){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [toasts,setToasts]=useState([]);
 
-  // load prefs (kept)
+  // load prefs
   useEffect(()=>{ (async ()=>{
     try{
       const qs=new URLSearchParams({ plannerEmail });
@@ -188,8 +228,8 @@ function MainApp(){
             plannerEmail={plannerEmail}
             onToast={(t,m)=>toast(t,m)}
             onManage={(email)=>{ 
-              setSelectedUserEmail(email);          // ← set selected user
-              setView("plan");                      // ← go to Plan
+              setSelectedUserEmail(email);
+              setView("plan");
             }}
           />
         )}
@@ -197,7 +237,7 @@ function MainApp(){
         {view==="plan" && (
           <PlanView
             plannerEmail={plannerEmail}
-            selectedUserEmailProp={selectedUserEmail}  // ← pass through
+            selectedUserEmailProp={selectedUserEmail}
             onToast={(t,m)=>toast(t,m)}
           />
         )}
@@ -235,7 +275,7 @@ function Toasts({ items, dismiss }){
       <div className="flex max-w-[90vw] flex-col gap-2">
         {items.map(t=>(
           <div key={t.id} className={cn(
-            "rounded-xl border px-3 py-2 text-sm shadow-sm",
+            "relative rounded-xl border px-3 py-2 text-sm shadow-sm",
             t.type==="ok" ? "border-green-300 bg-green-50 text-green-800" :
             t.type==="warn" ? "border-yellow-300 bg-yellow-50 text-yellow-800" :
             "border-red-300 bg-red-50 text-red-800"
@@ -317,7 +357,7 @@ function InboxDrawer({ plannerEmail, onClose }){
   );
 }
 
-/* ───────── Modal + Calendar ───────── */
+/* ───────── Modal + Calendar (LOCAL time) ───────── */
 function Modal({ title, onClose, children }){
   useEffect(()=>{
     function onKey(e){ if (e.key==="Escape") onClose?.(); }
@@ -337,29 +377,38 @@ function Modal({ title, onClose, children }){
   );
 }
 function CalendarGridFree({ initialDate, selectedDate, onPick }){
-  const init = parseISODate(initialDate) || new Date();
-  const sel = parseISODate(selectedDate) || init;
-  const [vm,setVm]=useState(()=>new Date(Date.UTC(sel.getUTCFullYear(), sel.getUTCMonth(), 1)));
-  function same(d1,d2){ return d2 && d1.getUTCFullYear()===d2.getUTCFullYear() && d1.getUTCMonth()===d2.getUTCMonth() && d1.getUTCDate()===d2.getUTCDate(); }
+  const init = parseYMDLocal(initialDate) || new Date();
+  const sel = parseYMDLocal(selectedDate) || init;
+  const [vm,setVm]=useState(()=>new Date(sel.getFullYear(), sel.getMonth(), 1)); // view month, local
+
+  function same(d1,d2){ return d2 && d1.getFullYear()===d2.getFullYear() && d1.getMonth()===d2.getMonth() && d1.getDate()===d2.getDate(); }
+
   const weeks = useMemo(()=>{
-    const out=[]; const firstDow=new Date(Date.UTC(vm.getUTCFullYear(), vm.getUTCMonth(), 1)).getUTCDay();
-    const start=new Date(Date.UTC(vm.getUTCFullYear(), vm.getUTCMonth(), 1-firstDow));
-    let cur = new Date(start); for (let r=0;r<6;r++){ const row=[]; for (let c=0;c<7;c++){ row.push(new Date(cur)); cur.setUTCDate(cur.getUTCDate()+1);} out.push(row); }
+    const out=[];
+    const firstDow=new Date(vm.getFullYear(), vm.getMonth(), 1).getDay();
+    const start=new Date(vm.getFullYear(), vm.getMonth(), 1-firstDow);
+    let cur = new Date(start);
+    for (let r=0;r<6;r++){
+      const row=[];
+      for (let c=0;c<7;c++){ row.push(new Date(cur)); cur = addDaysLocal(cur,1); }
+      out.push(row);
+    }
     return out;
   },[vm]);
+
   const monthLabel = (d)=> format(d, "LLLL yyyy");
 
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear()-1, v.getUTCMonth(), 1)))} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth()-1, 1)))} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(v.getFullYear()-1, v.getMonth(), 1))} title="Prev year"><ChevronsLeft className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(v.getFullYear(), v.getMonth()-1, 1))} title="Prev month"><ChevronLeft className="h-3 w-3" /></button>
           <div className="px-2 text-sm font-semibold">{monthLabel(vm)}</div>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear(), v.getUTCMonth()+1, 1)))} title="Next month"><ChevronRight className="h-3 w-4" /></button>
-          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(Date.UTC(v.getUTCFullYear()+1, v.getUTCMonth(), 1)))} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(v.getFullYear(), v.getMonth()+1, 1))} title="Next month"><ChevronRight className="h-3 w-4" /></button>
+          <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(v=>new Date(v.getFullYear()+1, v.getMonth(), 1))} title="Next year"><ChevronsRight className="h-3 w-3" /></button>
         </div>
-        <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(new Date(Date.UTC(init.getUTCFullYear(), init.getUTCMonth(), 1)))}>Jump to current</button>
+        <button className="rounded-lg border px-2 py-1 text-xs" onClick={()=>setVm(new Date(init.getFullYear(), init.getMonth(), 1))}>Jump to current</button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-gray-500 mb-1">
         {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=><div key={d}>{d}</div>)}
@@ -367,14 +416,14 @@ function CalendarGridFree({ initialDate, selectedDate, onPick }){
       <div className="grid grid-cols-7 gap-1">
         {weeks.map((row,ri)=>row.map((c,ci)=>(
           <button key={`${ri}-${ci}`} type="button"
-            onClick={()=>onPick?.(fmtDateYMD(c))}
+            onClick={()=>onPick?.(fmtYMDLocal(c))}
             className={cn(
               "rounded-lg border px-2 py-2 text-sm",
-              c.getUTCMonth()===vm.getUTCMonth() ? "bg-white hover:bg-gray-50" : "bg-gray-50 text-gray-400",
-              same(c, parseISODate(selectedDate)||new Date(0)) ? "border-gray-800 ring-1 ring-gray-700" : "border-gray-300"
+              c.getMonth()===vm.getMonth() ? "bg-white hover:bg-gray-50" : "bg-gray-50 text-gray-400",
+              same(c, parseYMDLocal(selectedDate)||new Date(0)) ? "border-gray-800 ring-1 ring-gray-700" : "border-gray-300"
             )}
           >
-            {c.getUTCDate()}
+            {c.getDate()}
           </button>
         )))}
       </div>
@@ -391,33 +440,32 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [replaceMode,setReplaceMode]=useState(false);
   const [msg,setMsg]=useState("");
   const [planDateOpen,setPlanDateOpen]=useState(false);
+  const [histReloadKey,setHistReloadKey]=useState(0); // bump to refresh History
 
-  // 1) If MainApp passed us a chosen user (from Users → Manage), adopt it immediately.
+  // adopt user from Users → Manage
   useEffect(()=>{ 
     if (selectedUserEmailProp) setSelectedUserEmail(selectedUserEmailProp);
   },[selectedUserEmailProp]);
 
-  // 2) Load users; normalize email field; if nothing selected yet, pick connected → first
+  // load users, choose default if none selected
   useEffect(()=>{ (async ()=>{
     const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
 
-    // normalize email field (email | userEmail | user_email)
     const arr = (j.users||[]).map(u => ({ ...u, email: u.email || u.userEmail || u.user_email || "" }));
     setUsers(arr);
 
-    // Only set a default if we *still* don't have a selection
     if (!selectedUserEmail) {
       const fromProp = selectedUserEmailProp && arr.find(a=>a.email===selectedUserEmailProp)?.email;
       const connected = arr.find(u=>u.status==="connected")?.email;
       const fallback = arr[0]?.email || "";
       setSelectedUserEmail(fromProp || connected || fallback || "");
     }
-  })(); },[plannerEmail]); // ← do not include selectedUserEmailProp here to avoid re-overwrites
+  })(); },[plannerEmail]);
 
   useEffect(()=>{ setTasks([]); setMsg(""); },[selectedUserEmail]);
 
-  const planDateText = format(parseISODate(plan.startDate)||new Date(),"EEE MMM d, yyyy");
+  const planDateText = format(parseYMDLocal(plan.startDate)||new Date(),"EEE MMM d, yyyy");
 
   const applyPrefill = useCallback(({ plan: rp, tasks: rt, mode })=>{
     try{
@@ -441,7 +489,8 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-base sm:text-lg font-semibold">Plan (create & deliver tasks)</div>
-          <div className="text-[11px] sm:text-xs text-gray-500">Set the <b>Plan Name</b> (list title), timezone, and start date. Add tasks, preview, then push.</div>
+          <div className="text-[11px] sm:text-xs text-gray-500">Set the <b>Plan Name</b>, timezone, and start date. Add tasks, preview, then push.</div>
+          {!!msg && <div className="mt-1 text-xs text-gray-600">{msg}</div>}
         </div>
         <div className="w-full sm:w-72">
           <select
@@ -452,10 +501,8 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           >
             <option value="">— Choose user —</option>
             {users.map(u=>(
-              <option key={u.email || u.userEmail || u.user_email}
-                      value={u.email}
-                      title={u.email}>
-                {u.email || "Unknown"} {u.status==="connected" ? "✓" : ""}
+              <option key={u.email} value={u.email} title={u.email}>
+                {u.email} {u.status==="connected" ? "✓" : ""}
               </option>
             ))}
           </select>
@@ -491,7 +538,13 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
         </Modal>
       )}
 
-      <TaskEditor planStartDate={plan.startDate} onAdd={(items)=>setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))])} />
+      <TaskEditor
+        planStartDate={plan.startDate}
+        onAdd={(items)=>{
+          setTasks(prev=>[...prev, ...items.map(t=>({ id: uid(), ...t }))]);
+          onToast?.("ok", `Added ${items.length} task${items.length>1?"s":""} to plan`);
+        }}
+      />
 
       {tasks.length>0 && (
         <ComposerPreview
@@ -503,16 +556,18 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           replaceMode={replaceMode}
           setReplaceMode={setReplaceMode}
           msg={msg}
-          setMsg={(m)=>setMsg(m)}
+          setMsg={setMsg}
+          onToast={onToast}
+          onPushed={(created)=>{ setHistReloadKey(k=>k+1); }}
         />
       )}
 
-      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} onPrefill={applyPrefill} />
+      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} reloadKey={histReloadKey} onPrefill={applyPrefill} />
     </div>
   );
 }
 
-/* ───────── Task editor (unchanged from last step) ───────── */
+/* ───────── Task editor ───────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -535,56 +590,95 @@ function TaskEditor({ planStartDate, onAdd }){
 
   function generate(){
     const name=title.trim(); if (!name) return;
-    const planStart=parseISODate(planStartDate)||new Date();
-    const base=parseISODate(taskDate)||planStart;
+    const planStart=parseYMDLocal(planStartDate)||new Date();
+    const base=parseYMDLocal(taskDate)||planStart;
     const baseObj={ title:name, time: time || undefined, durationMins: Number(dur)||undefined, notes: notes || undefined };
 
     const added=[];
-    function push(d){ const off=daysBetweenUTC(planStart, d); added.push({ ...baseObj, dayOffset: off }); }
+    function push(d){ const off=daysBetweenLocal(planStart, d); added.push({ ...baseObj, dayOffset: off }); }
 
     const step=Math.max(1, Number(interval)||1);
+
     if (repeat==="none"){ push(base); }
+
     if (repeat==="daily"){
-      if (endMode==="count"){ const n=Math.max(1, Number(count)||1);
-        for (let i=0;i<n;i++){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); push(d); } }
-      else if (endMode==="until"){ const until=parseISODate(untilDate)||new Date(addMonthsUTC(base, 1)); let i=0; while (i<2000){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); if (d>until) break; push(d); i++; } }
-      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let i=0; while (true){ const d=new Date(base); d.setUTCDate(d.getUTCDate()+i*step); if (d>end) break; push(d); if(++i>2000) break; } }
+      if (endMode==="count"){
+        const n=Math.max(1, Number(count)||1);
+        for (let i=0;i<n;i++){ push(addDaysLocal(base, i*step)); }
+      } else if (endMode==="until"){
+        const until=parseYMDLocal(untilDate)||addMonthsLocal(base, 1);
+        let i=0; while (i<2000){ const d=addDaysLocal(base, i*step); if (d>until) break; push(d); i++; }
+      } else { // horizon
+        const end=addMonthsLocal(base, Math.max(1, Number(horizonMonths)||6));
+        let i=0; for(;;){ const d=addDaysLocal(base, i*step); if (d>end) break; push(d); if(++i>2000) break; }
+      }
     }
+
     if (repeat==="weekly"){
       const checked=weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
       if (checked.length===0) { alert("Pick at least one weekday."); return; }
-      const baseWeekday=base.getUTCDay();
-      const baseStartOfWeek=new Date(base); baseStartOfWeek.setUTCDate(base.getUTCDate()-baseWeekday);
-      const emitWeek=(weekIndex)=>{ for(const dow of checked){ const d=new Date(baseStartOfWeek); d.setUTCDate(d.getUTCDate()+dow+weekIndex*7*step); if (d>=base) push(d); } };
-      if (endMode==="count"){ const n=Math.max(1, Number(count)||1); let week=0; while (added.length<n){ emitWeek(week); week++; } if (added.length>n) added.length=n; }
-      else if (endMode==="until"){ const until=parseISODate(untilDate)||new Date(addMonthsUTC(base, 3)); let week=0; while (week<520){ emitWeek(week);
-        const lastDate=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added.length? (added[added.length-1].dayOffset||0):0; lastDate.setUTCDate(lastDate.getUTCDate()+lastOff);
-        if (lastDate>until) break; week++; } }
-      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let week=0; while (week<520){ emitWeek(week);
-        const lastDate=new Date(`${fmtDateYMD(new Date(planStart))}T00:00:00Z`); const lastOff=added.length? (added[added.length-1].dayOffset||0):0; lastDate.setUTCDate(lastDate.getUTCDate()+lastOff);
-        if (lastDate>end) break; week++; } }
+      const baseDow=base.getDay();
+      const baseStartOfWeek=addDaysLocal(base, -baseDow); // Sunday
+      const emitWeek=(weekIndex)=>{
+        for(const dow of checked){
+          const d=addDaysLocal(baseStartOfWeek, dow + weekIndex*7*step);
+          if (d>=base) push(d);
+        }
+      };
+      if (endMode==="count"){
+        const n=Math.max(1, Number(count)||1);
+        let week=0; while (added.length<n){ emitWeek(week); week++; }
+        if (added.length>n) added.length=n;
+      } else if (endMode==="until"){
+        const until=parseYMDLocal(untilDate)||addMonthsLocal(base, 3);
+        let week=0;
+        while (week<520){
+          emitWeek(week);
+          const lastOff=added.length? (added[added.length-1].dayOffset||0) : 0;
+          const lastDate = addDaysLocal(planStart, lastOff);
+          if (lastDate>until) break;
+          week++;
+        }
+      } else { // horizon
+        const end=addMonthsLocal(base, Math.max(1, Number(horizonMonths)||6));
+        let week=0;
+        while (week<520){
+          emitWeek(week);
+          const lastOff=added.length? (added[added.length-1].dayOffset||0) : 0;
+          const lastDate = addDaysLocal(planStart, lastOff);
+          if (lastDate>end) break;
+          week++;
+        }
+      }
     }
+
     if (repeat==="monthly"){
-      const by=base.getUTCFullYear(), bm=base.getUTCMonth(), bd=base.getUTCDate(), bw=base.getUTCDay();
-      const firstSame=firstWeekdayOfMonthUTC(by,bm,bw);
-      const nth=Math.floor((base.getUTCDate()-firstSame.getUTCDate())/7)+1;
-      const lastSame=lastWeekdayOfMonthUTC(by,bm,bw);
-      const isLast=(base.getUTCDate()===lastSame.getUTCDate());
+      const by=base.getFullYear(), bm=base.getMonth(), bd=base.getDate(), bw=base.getDay();
+      const firstSame=firstWeekdayOfMonthLocal(by,bm,bw);
+      const nth=Math.floor((base.getDate()-firstSame.getDate())/7)+1;
+      const lastSame=lastWeekdayOfMonthLocal(by,bm,bw);
+      const isLast=(base.getDate()===lastSame.getDate());
       const compute=(y,m0)=> monthlyMode==="dom"
-        ? new Date(Date.UTC(y,m0, Math.min(bd, lastDayOfMonthUTC(y,m0))))
-        : (isLast ? lastWeekdayOfMonthUTC(y,m0,bw) : (nthWeekdayOfMonthUTC(y,m0,bw, Math.max(1,nth)) || lastWeekdayOfMonthUTC(y,m0,bw)));
-      if (endMode==="count"){ const n=Math.max(1, Number(count)||1);
-        for (let i=0;i<n;i++){ const t=addMonthsUTC(base, i*step); push(compute(t.getUTCFullYear(), t.getUTCMonth())); } }
-      else if (endMode==="until"){ const until=parseISODate(untilDate)||new Date(addMonthsUTC(base, 6)); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const d=compute(t.getUTCFullYear(), t.getUTCMonth()); if (d>until) break; push(d); i++; } }
-      else { const end=addMonthsUTC(base, Math.max(1, Number(horizonMonths)||6)); let i=0; while (i<240){ const t=addMonthsUTC(base, i*step); const d=compute(t.getUTCFullYear(), t.getUTCMonth()); if (d>end) break; push(d); i++; } }
+        ? new Date(y,m0, Math.min(bd, lastDayOfMonthLocal(y,m0)))
+        : (isLast ? lastWeekdayOfMonthLocal(y,m0,bw) : (nthWeekdayOfMonthLocal(y,m0,bw, Math.max(1,nth)) || lastWeekdayOfMonthLocal(y,m0,bw)));
+      if (endMode==="count"){
+        const n=Math.max(1, Number(count)||1);
+        for (let i=0;i<n;i++){ const t=addMonthsLocal(base, i*step); push(compute(t.getFullYear(), t.getMonth())); }
+      } else if (endMode==="until"){
+        const until=parseYMDLocal(untilDate)||addMonthsLocal(base, 6);
+        let i=0; while (i<240){ const t=addMonthsLocal(base, i*step); const d=compute(t.getFullYear(), t.getMonth()); if (d>until) break; push(d); i++; }
+      } else { // horizon
+        const end=addMonthsLocal(base, Math.max(1, Number(horizonMonths)||6));
+        let i=0; while (i<240){ const t=addMonthsLocal(base, i*step); const d=compute(t.getFullYear(), t.getMonth()); if (d>end) break; push(d); i++; }
+      }
     }
 
     if (added.length===0) return;
     onAdd(added);
-    setTitle(""); setNotes(""); /* keep date/time for convenience */
+    setTitle(""); setNotes(""); // keep date & time
   }
 
-  const taskDateText = format(parseISODate(taskDate||planStartDate)||new Date(),"EEE MMM d, yyyy");
+  const taskDateText = format(parseYMDLocal(taskDate||planStartDate)||new Date(),"EEE MMM d, yyyy");
 
   return (
     <div className="rounded-xl border border-gray-200 bg-gray-50 p-2 sm:p-3">
@@ -629,7 +723,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence (wording stays for this step; we’ll revisit) */}
+      {/* Recurrence (as-is for now) */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -684,8 +778,8 @@ function TaskEditor({ planStartDate, onAdd }){
             <>
               <span className="text-sm">Date</span>
               <button type="button" onClick={()=>setUntilOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-                <Calendar className="h-4 w-4" /> {/* shows current or pick */}
-                {untilDate ? format(parseISODate(untilDate)||new Date(),"MMM d, yyyy") : "Pick date"}
+                <Calendar className="h-4 w-4" />
+                {untilDate ? format(parseYMDLocal(untilDate)||new Date(),"MMM d, yyyy") : "Pick date"}
               </button>
             </>
           )}
@@ -732,14 +826,14 @@ function TaskEditor({ planStartDate, onAdd }){
 function pill(on){ return cn("rounded-full border px-2 py-1 text-xs sm:text-sm", on?"border-gray-800 bg-gray-900 text-white":"border-gray-300 bg-white hover:bg-gray-50"); }
 
 /* ───────── Preview / Deliver ───────── */
-function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg }){
+function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTasks, replaceMode, setReplaceMode, msg, setMsg, onToast, onPushed }){
   const total=tasks.length;
 
   async function pushNow(){
-    if (!selectedUserEmail) { setMsg("Choose a user first."); return; }
-    if (!plan.title?.trim()) { setMsg("Title is required."); return; }
-    if (!plan.startDate) { setMsg("Plan start date is required."); return; }
-    if (!total) { setMsg("Add at least one task."); return; }
+    if (!selectedUserEmail) { setMsg("Choose a user first."); onToast?.("warn","Choose a user first"); return; }
+    if (!plan.title?.trim()) { setMsg("Title is required."); onToast?.("warn","Title is required"); return; }
+    if (!plan.startDate) { setMsg("Plan start date is required."); onToast?.("warn","Plan start date is required"); return; }
+    if (!total) { setMsg("Add at least one task."); onToast?.("warn","Add at least one task"); return; }
     setMsg("Pushing…");
     try {
       const resp = await fetch("/api/push", {
@@ -757,24 +851,15 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
-      try{
-        await fetch("/api/history/snapshot",{
-          method:"POST", headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({
-            plannerEmail,
-            userEmail: selectedUserEmail,
-            listTitle: plan.title,
-            plan: { title: plan.title, startDate: plan.startDate, timezone: plan.timezone },
-            tasks: tasks.map(t=>({ title:t.title, dayOffset:t.dayOffset, time:t.time, durationMins:t.durationMins, notes:t.notes })),
-            mode: replaceMode ? "replace" : "append",
-          })
-        });
-      }catch(_e){}
-
-      setMsg(`Success — ${j.created||total} task(s) created`);
-      setTasks([]);
+      const created = j.created || total;
+      setMsg(`Success — ${created} task(s) created`);
+      onToast?.("ok", `Pushed ${created} task${created>1?"s":""}`);
+      setTasks([]);           // clear preview
+      onPushed?.(created);    // trigger History reload
     } catch (e) {
-      setMsg("Error: "+String(e.message||e));
+      const m = String(e.message||e);
+      setMsg("Error: "+m);
+      onToast?.("error", m);
     }
   }
 
@@ -840,7 +925,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
 }
 
 /* ───────── History ───────── */
-function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
+function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   const [rows,setRows]=useState([]);
   const [page,setPage]=useState(1);
   const [total,setTotal]=useState(0);
@@ -861,7 +946,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
     }catch(e){}
     setLoading(false);
   }
-  useEffect(()=>{ load(); },[plannerEmail,userEmail,page]);
+  useEffect(()=>{ load(); },[plannerEmail,userEmail,page,reloadKey]);
 
   return (
     <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4">
@@ -909,7 +994,7 @@ function HistoryPanel({ plannerEmail, userEmail, onPrefill }){
   );
 }
 
-/* ───────── Users view ───────── */
+/* ───────── Users view (unchanged except normalization & invite hide) ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
@@ -919,8 +1004,6 @@ function UsersView({ plannerEmail, onToast, onManage }){
   async function load(){
     const qs=new URLSearchParams({ plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
-
-    // Normalize email field to ensure it always displays
     const arr = (j.users||[]).map(u => ({ ...u, email: u.email || u.userEmail || u.user_email || "" }));
     setRows(arr);
   }
@@ -960,7 +1043,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
           </thead>
           <tbody>
             {visible.map(r=>(
-              <tr key={r.email || r.userEmail || r.user_email} className="border-t">
+              <tr key={r.email} className="border-t">
                 <td className="py-1.5 px-2">{r.email || "Unknown"}</td>
                 <td className="py-1.5 px-2">{r.status||"—"}</td>
                 <td className="py-1.5 px-2">
@@ -973,11 +1056,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
                 <td className="py-1.5 px-2">
                   <div className="flex flex-nowrap items-center justify-end gap-1.5">
                     <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
-
-                    {/* keep current groups editor for now; we’ll replace next step */}
-                    <button onClick={()=>{ const v=prompt("Comma-separated groups", (groups[r.email]||r.groups||[]).join(", ")); if (v===null) return; const arr=v.split(",").map(s=>s.trim()).filter(Boolean); setGroups(g=>({ ...g, [r.email]: arr })); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Edit Groups</button>
-
-                    {/* HIDE Send Invite for connected users */}
+                    <button onClick={()=>{ const v=prompt("Comma-separated groups", (groups[r.email]||r.groups||[]).join(", ")); if (v===null) return; const arr=v.split(",").map(s=>s.trim()).filter(Boolean); setGroups(g=>({ ...g, [r.email]: arr })); saveGroups(r.email); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Edit Groups</button>
                     {(r.status!=="connected") && (
                       <button disabled={sending} onClick={async()=>{ setSending(true); try{ const resp=await fetch("/api/invite/send",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ plannerEmail, userEmail:r.email })}); const j=await resp.json(); if (!resp.ok || j.error) throw new Error(j.error||"Invite failed"); onToast?.("ok","Invite sent"); }catch(e){ onToast?.("error",String(e.message||e)); } setSending(false); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Send Invite</button>
                     )}
@@ -995,7 +1074,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* ───────── Settings (same shell) ───────── */
+/* ───────── Settings ───────── */
 function SettingsView({ plannerEmail, prefs, onChange }){
   const [local,setLocal]=useState(()=>{
     return {
