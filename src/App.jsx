@@ -1106,7 +1106,6 @@ function UsersView({ plannerEmail, onToast, onManage }){
                         title={count===0 ? "Add categories" : "Edit categories"}
                       >
                         <Tag className="h-3.5 w-3.5" />
-                        {/* badge */}
                         {count===0 ? (
                           <span className="absolute -top-1 -right-1 inline-flex h-4 w-4 items-center justify-center rounded-full border bg-white text-[10px] font-bold">+</span>
                         ) : (
@@ -1118,7 +1117,6 @@ function UsersView({ plannerEmail, onToast, onManage }){
                   <td className="py-1.5 px-2">
                     <div className="flex flex-nowrap items-center justify-end gap-1.5">
                       <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Plan</button>
-                      {/* (Archive/Delete to be added in next step) */}
                     </div>
                   </td>
                 </tr>
@@ -1153,33 +1151,54 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* Categories Modal: assign + create (unified) */
+/* Categories Modal: tag-cloud + partial search */
 function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToast }){
   const [local,setLocal]=useState(()=>dedupeCaseInsensitive(assigned||[]));
   const [search,setSearch]=useState("");
-  const [newCat,setNewCat]=useState("");
   const [dirty,setDirty]=useState(false);
 
   useEffect(()=>{
     setLocal(dedupeCaseInsensitive(assigned||[]));
     setDirty(false);
+    setSearch("");
   },[assigned]);
 
+  const norm = (s)=> String(s||"")
+    .normalize("NFD").replace(/\p{Diacritic}/gu,"")
+    .toLowerCase().trim();
+
   const filtered = useMemo(()=>{
-    const q = search.trim().toLowerCase();
-    const set = new Map();
-    for (const c of allCats) set.set(c.toLowerCase(), c);
-    for (const c of local) set.set(c.toLowerCase(), c); // ensure selected exist
-    let arr = Array.from(set.values());
-    if (q) arr = arr.filter(c=>c.toLowerCase().includes(q));
-    // assigned first, then A→Z
-    const inLocal = new Set(local.map(x=>x.toLowerCase()));
+    const q = norm(search);
+    // build unified set of categories = allCats ∪ local
+    const map = new Map();
+    for (const c of allCats) map.set(norm(c), c);
+    for (const c of local) if (!map.has(norm(c))) map.set(norm(c), c);
+    let arr = Array.from(map.values());
+
+    // scoring: selected first, then starts-with match, then contains, then A→Z
+    const selSet = new Set(local.map(x=>norm(x)));
+    const score = (c)=>{
+      const n = norm(c);
+      let s = 0;
+      if (selSet.has(n)) s -= 3;
+      if (q){
+        if (n.startsWith(q)) s -= 2;
+        else if (n.includes(q)) s -= 1;
+        else s += 5; // non-match goes later
+      }
+      return s;
+    };
     arr.sort((a,b)=>{
-      const aa = inLocal.has(a.toLowerCase()) ? 0 : 1;
-      const bb = inLocal.has(b.toLowerCase()) ? 0 : 1;
-      if (aa!==bb) return aa-bb;
+      const sa=score(a), sb=score(b);
+      if (sa!==sb) return sa-sb;
       return a.localeCompare(b);
     });
+    // if there's a query, keep non-matches at the end but still visible
+    if (q){
+      const matches = arr.filter(c=>norm(c).includes(q));
+      const rest = arr.filter(c=>!norm(c).includes(q));
+      return [...matches, ...rest];
+    }
     return arr;
   },[allCats, local, search]);
 
@@ -1192,25 +1211,20 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
     setDirty(true);
   }
 
-  function addNew(){
-    const raw = String(newCat||"").trim();
-    if (!raw) { onToast?.("warn","Category name required"); return; }
+  function addFromQuery(){
+    const raw = search.trim();
+    if (!raw){ onToast?.("warn","Type a category name"); return; }
     const exists = local.some(x=>x.toLowerCase()===raw.toLowerCase()) || allCats.some(x=>x.toLowerCase()===raw.toLowerCase());
-    if (exists) { onToast?.("warn","Category already exists"); return; }
+    if (exists){ onToast?.("warn","Category already exists"); return; }
     const next = dedupeCaseInsensitive([...local, raw]).sort((a,b)=>a.localeCompare(b));
     setLocal(next);
-    setNewCat("");
     setDirty(true);
     onToast?.("ok","Category added");
   }
 
-  function doSave(){
-    onSave?.(local);
-  }
-
+  function doSave(){ onSave?.(local); }
   function maybeClose(){
     if (!dirty) return onClose?.();
-    // simple guard
     if (confirm("Discard unsaved changes?")) onClose?.();
   }
 
@@ -1218,52 +1232,97 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
     <Modal title={`Categories`} onClose={maybeClose}>
       <div className="text-xs text-gray-500 mb-2">User: <b className="text-gray-700">{userEmail}</b></div>
 
-      <div className="mb-2 flex gap-2">
-        <input
-          value={search}
-          onChange={(e)=>setSearch(e.target.value)}
-          placeholder="Search categories…"
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-        />
-      </div>
-
-      <div className="mb-2 max-h-[40vh] overflow-auto rounded-lg border">
-        {filtered.length===0 ? (
-          <div className="p-3 text-sm text-gray-500">No categories yet.</div>
-        ) : (
-          <ul className="divide-y">
-            {filtered.map(c=>{
-              const checked = local.some(x=>x.toLowerCase()===c.toLowerCase());
-              return (
-                <li key={c} className="flex items-center justify-between px-3 py-2">
-                  <span className="truncate pr-2" title={c}>{c}</span>
-                  <input type="checkbox" checked={checked} onChange={()=>toggle(c)} />
-                </li>
-              );
-            })}
-          </ul>
+      <div className="mb-2 flex items-center gap-2">
+        <div className="relative w-full">
+          <input
+            value={search}
+            onChange={(e)=>setSearch(e.target.value)}
+            placeholder="Search categories (partial match)…"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm pr-8"
+          />
+          {search && (
+            <button
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+              onClick={()=>setSearch("")}
+              aria-label="Clear search"
+            >×</button>
+          )}
+        </div>
+        {search.trim() && !allCats.some(x=>x.toLowerCase()===search.trim().toLowerCase()) && !local.some(x=>x.toLowerCase()===search.trim().toLowerCase()) && (
+          <button onClick={addFromQuery} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">Add “{search.trim()}”</button>
         )}
       </div>
 
-      <div className="mb-3 rounded-xl border bg-gray-50 p-2">
-        <div className="text-xs font-semibold text-gray-600 mb-1">Add new category</div>
-        <div className="flex gap-2">
-          <input
-            value={newCat}
-            onChange={(e)=>setNewCat(e.target.value)}
-            onKeyDown={(e)=>{ if (e.key==="Enter"){ e.preventDefault(); addNew(); } }}
-            placeholder='e.g., "Personal Training"'
-            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
-          />
-          <button onClick={addNew} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Add</button>
-        </div>
+      {/* Tag cloud */}
+      <div className="mb-3 max-h-[40vh] overflow-auto rounded-xl border p-2">
+        {filtered.length===0 ? (
+          <div className="p-2 text-sm text-gray-500">No categories yet.</div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {filtered.map(c=>{
+              const checked = local.some(x=>x.toLowerCase()===c.toLowerCase());
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  onClick={()=>toggle(c)}
+                  className={cn(
+                    "max-w-[180px] truncate rounded-full border px-2.5 py-1 text-xs",
+                    checked ? "border-gray-800 bg-gray-900 text-white" : "border-gray-300 bg-white hover:bg-gray-50"
+                  )}
+                >
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
+
+      {/* Add-new section (kept) */}
+      <AddNewCategoryBlock
+        local={local}
+        allCats={allCats}
+        onAdd={(name)=>{
+          const next = dedupeCaseInsensitive([...local, name]).sort((a,b)=>a.localeCompare(b));
+          setLocal(next); setDirty(true);
+          onToast?.("ok","Category added");
+        }}
+      />
 
       <div className="flex items-center justify-end gap-2">
         <button onClick={maybeClose} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Cancel</button>
         <button onClick={doSave} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Save</button>
       </div>
     </Modal>
+  );
+}
+
+function AddNewCategoryBlock({ local, allCats, onAdd }){
+  const [newCat,setNewCat]=useState("");
+  function add(){
+    const raw = String(newCat||"").trim();
+    if (!raw) return;
+    const exists = local.some(x=>x.toLowerCase()===raw.toLowerCase()) || allCats.some(x=>x.toLowerCase()===raw.toLowerCase());
+    if (exists) return;
+    onAdd?.(raw);
+    setNewCat("");
+  }
+  return (
+    <div className="mb-3 rounded-xl border bg-gray-50 p-2">
+      <div className="text-xs font-semibold text-gray-600 mb-1">Add new category</div>
+      <div className="flex gap-2">
+        <input
+          value={newCat}
+          onChange={(e)=>setNewCat(e.target.value)}
+          onKeyDown={(e)=>{ if (e.key==="Enter"){ e.preventDefault(); add(); } }}
+          placeholder='e.g., "Personal Training"'
+          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+        />
+        <button onClick={add} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Add</button>
+      </div>
+    </div>
   );
 }
 
