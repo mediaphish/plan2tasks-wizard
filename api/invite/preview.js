@@ -1,6 +1,6 @@
 // /api/invite/preview.js
-// GET-only. Creates (or reuses) an invite row and returns an OAuth start URL as JSON.
-// Tables used: public.invites(id uuid default gen_random_uuid(), planner_email text, user_email text, used_at timestamptz)
+// GET-only. Reuses existing invite for (planner_email,user_email) or creates one,
+// and returns a stable OAuth start URL as JSON.
 
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
@@ -9,10 +9,27 @@ function lowerEmail(v) { return norm(v).toLowerCase(); }
 function siteBase(req) {
   const envSite = norm(process.env.SITE_URL);
   if (envSite) return envSite.replace(/\/+$/,"");
-  // Fallback to host header if SITE_URL not set
   const host = req.headers["x-forwarded-host"] || req.headers.host || "";
   const proto = (req.headers["x-forwarded-proto"] || "https").toString();
   return host ? `${proto}://${host}` : "https://www.plan2tasks.com";
+}
+
+async function getExistingInvite(plannerEmail, userEmail) {
+  return await supabaseAdmin
+    .from("invites")
+    .select("id, used_at")
+    .eq("planner_email", plannerEmail)
+    .eq("user_email", userEmail)
+    .limit(1)
+    .maybeSingle();
+}
+
+async function createInvite(plannerEmail, userEmail) {
+  return await supabaseAdmin
+    .from("invites")
+    .insert({ planner_email: plannerEmail, user_email: userEmail })
+    .select("id, used_at")
+    .single();
 }
 
 export default async function handler(req, res) {
@@ -24,37 +41,62 @@ export default async function handler(req, res) {
 
     const plannerEmail = lowerEmail(req.query.plannerEmail);
     const userEmail = lowerEmail(req.query.userEmail);
-
     if (!plannerEmail || !userEmail) {
       return res.status(400).json({ ok:false, error: "Missing plannerEmail or userEmail" });
     }
 
-    // Create a fresh invite each time (simpler + guarantees a valid id)
-    const ins = await supabaseAdmin
-      .from("invites")
-      .insert({ planner_email: plannerEmail, user_email: userEmail })
-      .select("id")
-      .single();
-
-    if (ins.error) {
-      return res.status(500).json({
-        ok:false,
-        error: ins.error.message || "Failed to create invite",
-        detail: ins.error.details || null,
-        hint: ins.error.hint || null
-      });
+    // 1) Try to reuse existing
+    let { data: exist, error: existErr } = await getExistingInvite(plannerEmail, userEmail);
+    if (existErr) {
+      // Non-fatal: just log and continue to create
+      console.error("invite/preview select error:", existErr);
     }
 
-    const id = ins.data?.id;
-    if (!id) return res.status(500).json({ ok:false, error: "Invite created without id" });
+    let reused = false;
+    let row = exist;
+
+    // 2) If none, create
+    if (!row) {
+      const ins = await createInvite(plannerEmail, userEmail);
+      if (ins.error) {
+        // If unique violation raced, select again
+        const msg = ins.error?.message || "";
+        const detail = ins.error?.details || "";
+        if (/duplicate key/i.test(msg) || /duplicate key/i.test(detail)) {
+          const again = await getExistingInvite(plannerEmail, userEmail);
+          if (again.error) {
+            return res.status(500).json({ ok:false, error: again.error.message || "Failed to reuse invite" });
+          }
+          row = again.data;
+          reused = true;
+        } else {
+          return res.status(500).json({
+            ok:false,
+            error: ins.error.message || "Failed to create invite",
+            detail: ins.error.details || null,
+            hint: ins.error.hint || null
+          });
+        }
+      } else {
+        row = ins.data;
+      }
+    } else {
+      reused = true;
+    }
+
+    if (!row?.id) {
+      return res.status(500).json({ ok:false, error: "Invite row missing id" });
+    }
 
     const base = siteBase(req);
-    const url = `${base}/api/google/start?invite=${encodeURIComponent(id)}`;
+    const url = `${base}/api/google/start?invite=${encodeURIComponent(row.id)}`;
 
     return res.status(200).json({
       ok: true,
-      inviteId: id,
-      url
+      inviteId: row.id,
+      url,
+      reused,
+      used: !!row.used_at
     });
   } catch (e) {
     console.error("invite/preview error:", e);
