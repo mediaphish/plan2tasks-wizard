@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
   Search, Trash2, X, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Plus, RotateCcw, Info
+  Plus, RotateCcw, Info, Mail
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -61,7 +61,7 @@ function to12hDisplay(hhmm){
   return `${h12}:${String(m).padStart(2,"0")} ${ampm}`;
 }
 
-/* New: Dropdown time selector (15-minute steps) */
+/* Time dropdown (15-min steps) */
 const TIME_OPTIONS = (() => {
   const out = [{ value: "", label: "— none —" }];
   for (let h=0; h<24; h++){
@@ -265,7 +265,7 @@ function InboxDrawer({ plannerEmail, onClose }){
       setItems(j.results||[]);
       const m={}; for (const r of (j.results||[])) m[r.id]=false; setSel(m);
     }catch(e){/* noop */}
-    setLoading(false);
+    setLoading=false;
   }
   useEffect(()=>{ if (query.trim().length===0) setItems([]); },[query]);
 
@@ -675,6 +675,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
+      {/* Recurrence (current behavior retained — removal of N to be applied in a separate step if desired) */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -837,6 +838,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
             userEmail: selectedUserEmail,
             listTitle: plan.title,
             startDate: plan.startDate,
+            timezone: plan.timezone,
             mode: replaceMode ? "replace" : "append",
             items: tasks.map(t=>({ title:t.title, dayOffset:t.dayOffset, time:t.time, durationMins:t.durationMins, notes:t.notes }))
           })
@@ -998,6 +1000,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
   const [filter,setFilter]=useState("");
   const [groups,setGroups]=useState({});
   const [sending,setSending]=useState(false);
+  const [inviteOpen,setInviteOpen]=useState(false);
 
   async function load(){
     const qs=new URLSearchParams({ plannerEmail, status:"all" });
@@ -1026,6 +1029,9 @@ function UsersView({ plannerEmail, onToast, onManage }){
         <div className="flex items-center gap-2">
           <input value={filter} onChange={(e)=>setFilter(e.target.value)} placeholder="Search…" className="rounded-xl border border-gray-300 px-2 py-1 text-sm" />
           <button onClick={load} className="rounded-xl border px-2 py-1 text-sm hover:bg-gray-50"><RotateCcw className="h-4 w-4" /></button>
+          <button onClick={()=>setInviteOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">
+            <Mail className="h-4 w-4" /> Send Invite
+          </button>
         </div>
       </div>
 
@@ -1055,9 +1061,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
                   <div className="flex flex-nowrap items-center justify-end gap-1.5">
                     <button onClick={()=>onManage?.(r.email)} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Manage</button>
                     <button onClick={()=>{ const v=prompt("Comma-separated groups", (groups[r.email]||r.groups||[]).join(", ")); if (v===null) return; const arr=v.split(",").map(s=>s.trim()).filter(Boolean); setGroups(g=>({ ...g, [r.email]: arr })); saveGroups(r.email); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Edit Groups</button>
-                    {(r.status!=="connected") && (
-                      <button disabled={sending} onClick={async()=>{ setSending(true); try{ const resp=await fetch("/api/invite/send",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ plannerEmail, userEmail:r.email })}); const j=await resp.json(); if (!resp.ok || j.error) throw new Error(j.error||"Invite failed"); onToast?.("ok","Invite sent"); }catch(e){ onToast?.("error",String(e.message||e)); } setSending(false); }} className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50">Send Invite</button>
-                    )}
+                    {/* Inline Send Invite removed per Issue D */}
                   </div>
                 </td>
               </tr>
@@ -1067,6 +1071,93 @@ function UsersView({ plannerEmail, onToast, onManage }){
             )}
           </tbody>
         </table>
+      </div>
+
+      {inviteOpen && (
+        <SendInviteModal
+          plannerEmail={plannerEmail}
+          onClose={()=>setInviteOpen(false)}
+          onToast={onToast}
+        />
+      )}
+    </div>
+  );
+}
+
+/* Invite modal (top-level action) */
+function SendInviteModal({ plannerEmail, onClose, onToast }){
+  const [email,setEmail]=useState("");
+  const [previewUrl,setPreviewUrl]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  async function doPreview(){
+    setLoading(true);
+    try{
+      const qs = new URLSearchParams({ plannerEmail, userEmail: email });
+      const r = await fetch(`/api/invite/preview?${qs.toString()}`);
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Preview failed");
+      setPreviewUrl(j.url || j.inviteUrl || j.href || "");
+      onToast?.("ok","Preview generated");
+    }catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+    setLoading(false);
+  }
+
+  async function doSend(){
+    setLoading(true);
+    try{
+      const r = await fetch("/api/invite/send",{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email })
+      });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "Invite failed");
+      onToast?.("ok","Invite sent");
+      onClose?.();
+    }catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/10 p-2 sm:p-4">
+      <div className="mx-auto max-w-lg rounded-xl border bg-white p-3 sm:p-4 shadow-lg">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold">Send Invite</div>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">User email</div>
+            <input
+              type="email"
+              value={email}
+              onChange={(e)=>setEmail(e.target.value)}
+              placeholder="name@example.com"
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+
+          <div className="flex gap-2">
+            <button disabled={!email || loading} onClick={doPreview} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50">Preview</button>
+            <button disabled={!email || loading} onClick={doSend} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50">Send Invite</button>
+          </div>
+
+          {!!previewUrl && (
+            <div className="rounded-lg border bg-gray-50 p-2 text-xs break-all">
+              <div className="mb-1 font-semibold text-gray-700">Preview URL</div>
+              <div className="text-gray-700">{previewUrl}</div>
+            </div>
+          )}
+
+          <div className="text-[11px] text-gray-500">
+            Invite CTA opens Google OAuth and returns a “Connected” confirmation (no route back to app for users).
+          </div>
+        </div>
       </div>
     </div>
   );
