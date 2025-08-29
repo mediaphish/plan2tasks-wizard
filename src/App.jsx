@@ -6,34 +6,28 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
-/* ───────────── utils (LOCAL DATE ONLY — fixes off-by-one) ───────────── */
+/* ───────────── utils (LOCAL DATE ONLY) ───────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
-
-/* Parse "YYYY-MM-DD" as a **local** midnight Date */
 function parseYMDLocal(s){
   if (!s) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
   if (!m) return null;
   const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
-  return new Date(y, mo-1, d); // local midnight
+  return new Date(y, mo-1, d);
 }
-/* Format a Date → "YYYY-MM-DD" using local getters */
 function fmtYMDLocal(d){
   const y=d.getFullYear(); const m=String(d.getMonth()+1).padStart(2,"0"); const dd=String(d.getDate()).padStart(2,"0");
   return `${y}-${m}-${dd}`;
 }
-/* Add whole days in local time */
 function addDaysLocal(base, days){
   return new Date(base.getFullYear(), base.getMonth(), base.getDate()+days);
 }
-/* Whole-day difference (b - a) in days using local midnight */
 function daysBetweenLocal(a,b){
   const a0=new Date(a.getFullYear(),a.getMonth(),a.getDate());
   const b0=new Date(b.getFullYear(),b.getMonth(),b.getDate());
   return Math.round((b0 - a0)/86400000);
 }
-/* Month helpers (LOCAL) */
 function addMonthsLocal(date, months){
   const y=date.getFullYear(), m=date.getMonth(), d=date.getDate();
   const nmo=m+months; const ny=y+Math.floor(nmo/12); const nm=((nmo%12)+12)%12;
@@ -58,7 +52,7 @@ function lastWeekdayOfMonthLocal(y,m0,weekday){
   return new Date(y,m0,lastD-shift);
 }
 
-/* time parsing/formatting (kept; displays 12-hour) */
+/* time parsing/formatting */
 function parseTimeHuman(str){
   if (!str) return "";
   let s = String(str).trim().toLowerCase();
@@ -173,7 +167,6 @@ function MainApp(){
   const [inboxBadge,setInboxBadge]=useState(0);
   const [toasts,setToasts]=useState([]);
 
-  // load prefs
   useEffect(()=>{ (async ()=>{
     try{
       const qs=new URLSearchParams({ plannerEmail });
@@ -182,7 +175,7 @@ function MainApp(){
         setPrefs(p||{});
         setView((p&&p.default_view) || "users");
       }
-    }catch(e){}
+    }catch(e){/* noop */} // keep build happy
   })(); },[plannerEmail]);
 
   async function loadBadge(){
@@ -190,7 +183,7 @@ function MainApp(){
       const qs=new URLSearchParams({ plannerEmail, status:"new" });
       const r=await fetch(`/api/inbox?${qs.toString()}`); const j=await r.json();
       setInboxBadge((j.bumpCount||0));
-    }catch(e){}
+    }catch(e){/* noop */}
   }
   useEffect(()=>{ if (prefs.show_inbox_badge) loadBadge(); },[plannerEmail,prefs.show_inbox_badge]);
 
@@ -292,7 +285,7 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* ───────── Inbox Drawer (baseline) ───────── */
+/* ───────── Inbox Drawer ───────── */
 function InboxDrawer({ plannerEmail, onClose }){
   const [query,setQuery]=useState("");
   const [items,setItems]=useState([]);
@@ -306,7 +299,7 @@ function InboxDrawer({ plannerEmail, onClose }){
       const j=await r.json();
       setItems(j.results||[]);
       const m={}; for (const r of (j.results||[])) m[r.id]=false; setSel(m);
-    }catch(e){}
+    }catch(e){/* noop */}
     setLoading(false);
   }
   useEffect(()=>{ if (query.trim().length===0) setItems([]); },[query]);
@@ -357,7 +350,7 @@ function InboxDrawer({ plannerEmail, onClose }){
   );
 }
 
-/* ───────── Modal + Calendar (LOCAL time) ───────── */
+/* ───────── Modal + Calendar (LOCAL) ───────── */
 function Modal({ title, onClose, children }){
   useEffect(()=>{
     function onKey(e){ if (e.key==="Escape") onClose?.(); }
@@ -379,7 +372,7 @@ function Modal({ title, onClose, children }){
 function CalendarGridFree({ initialDate, selectedDate, onPick }){
   const init = parseYMDLocal(initialDate) || new Date();
   const sel = parseYMDLocal(selectedDate) || init;
-  const [vm,setVm]=useState(()=>new Date(sel.getFullYear(), sel.getMonth(), 1)); // view month, local
+  const [vm,setVm]=useState(()=>new Date(sel.getFullYear(), sel.getMonth(), 1));
 
   function same(d1,d2){ return d2 && d1.getFullYear()===d2.getFullYear() && d1.getMonth()===d2.getMonth() && d1.getDate()===d2.getDate(); }
 
@@ -440,21 +433,17 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   const [replaceMode,setReplaceMode]=useState(false);
   const [msg,setMsg]=useState("");
   const [planDateOpen,setPlanDateOpen]=useState(false);
-  const [histReloadKey,setHistReloadKey]=useState(0); // bump to refresh History
+  const [histReloadKey,setHistReloadKey]=useState(0);
 
-  // adopt user from Users → Manage
   useEffect(()=>{ 
     if (selectedUserEmailProp) setSelectedUserEmail(selectedUserEmailProp);
   },[selectedUserEmailProp]);
 
-  // load users, choose default if none selected
   useEffect(()=>{ (async ()=>{
     const qs=new URLSearchParams({ op:"list", plannerEmail, status:"all" });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
-
     const arr = (j.users||[]).map(u => ({ ...u, email: u.email || u.userEmail || u.user_email || "" }));
     setUsers(arr);
-
     if (!selectedUserEmail) {
       const fromProp = selectedUserEmailProp && arr.find(a=>a.email===selectedUserEmailProp)?.email;
       const connected = arr.find(u=>u.status==="connected")?.email;
@@ -558,7 +547,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           msg={msg}
           setMsg={setMsg}
           onToast={onToast}
-          onPushed={(created)=>{ setHistReloadKey(k=>k+1); }}
+          onPushed={()=>{ setHistReloadKey(k=>k+1); }}
         />
       )}
 
@@ -567,7 +556,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
   );
 }
 
-/* ───────── Task editor ───────── */
+/* ───────── Task editor (Recurrence UI modernized) ───────── */
 function TaskEditor({ planStartDate, onAdd }){
   const [title,setTitle]=useState("");
   const [notes,setNotes]=useState("");
@@ -576,15 +565,16 @@ function TaskEditor({ planStartDate, onAdd }){
   const [time,setTime]=useState("");
   const [dur,setDur]=useState(60);
 
-  const [repeat,setRepeat]=useState("none");
-  const [interval,setInterval]=useState(1);
-  const [endMode,setEndMode]=useState("count");
-  const [count,setCount]=useState(4);
-  const [untilDate,setUntilDate]=useState("");
+  const [repeat,setRepeat]=useState("none");    // none | daily | weekly | monthly
+  const [interval,setInterval]=useState(1);     // every N units (1 = every day/week/month)
+  // End options: align with Google Calendar phrasing
+  const [endMode,setEndMode]=useState("count"); // "horizon" (No end), "until" (On date), "count" (After)
+  const [count,setCount]=useState(4);           // After <count> occurrences
+  const [untilDate,setUntilDate]=useState("");  // On <date>
   const [untilOpen,setUntilOpen]=useState(false);
-  const [horizonMonths,setHorizonMonths]=useState(6);
+  const [horizonMonths,setHorizonMonths]=useState(6); // planning window for "No end date"
   const [weeklyDays,setWeeklyDays]=useState([false,true,false,true,false,false,false]);
-  const [monthlyMode,setMonthlyMode]=useState("dom");
+  const [monthlyMode,setMonthlyMode]=useState("dom"); // dom | dow
 
   useEffect(()=>{ if (!taskDate) setTaskDate(planStartDate); },[planStartDate]);
 
@@ -608,7 +598,7 @@ function TaskEditor({ planStartDate, onAdd }){
       } else if (endMode==="until"){
         const until=parseYMDLocal(untilDate)||addMonthsLocal(base, 1);
         let i=0; while (i<2000){ const d=addDaysLocal(base, i*step); if (d>until) break; push(d); i++; }
-      } else { // horizon
+      } else { // "horizon" => No end date (bounded by planning window)
         const end=addMonthsLocal(base, Math.max(1, Number(horizonMonths)||6));
         let i=0; for(;;){ const d=addDaysLocal(base, i*step); if (d>end) break; push(d); if(++i>2000) break; }
       }
@@ -618,7 +608,7 @@ function TaskEditor({ planStartDate, onAdd }){
       const checked=weeklyDays.map((v,i)=>v?i:null).filter(v=>v!==null);
       if (checked.length===0) { alert("Pick at least one weekday."); return; }
       const baseDow=base.getDay();
-      const baseStartOfWeek=addDaysLocal(base, -baseDow); // Sunday
+      const baseStartOfWeek=addDaysLocal(base, -baseDow);
       const emitWeek=(weekIndex)=>{
         for(const dow of checked){
           const d=addDaysLocal(baseStartOfWeek, dow + weekIndex*7*step);
@@ -639,7 +629,7 @@ function TaskEditor({ planStartDate, onAdd }){
           if (lastDate>until) break;
           week++;
         }
-      } else { // horizon
+      } else {
         const end=addMonthsLocal(base, Math.max(1, Number(horizonMonths)||6));
         let week=0;
         while (week<520){
@@ -667,7 +657,7 @@ function TaskEditor({ planStartDate, onAdd }){
       } else if (endMode==="until"){
         const until=parseYMDLocal(untilDate)||addMonthsLocal(base, 6);
         let i=0; while (i<240){ const t=addMonthsLocal(base, i*step); const d=compute(t.getFullYear(), t.getMonth()); if (d>until) break; push(d); i++; }
-      } else { // horizon
+      } else {
         const end=addMonthsLocal(base, Math.max(1, Number(horizonMonths)||6));
         let i=0; while (i<240){ const t=addMonthsLocal(base, i*step); const d=compute(t.getFullYear(), t.getMonth()); if (d>end) break; push(d); i++; }
       }
@@ -675,7 +665,7 @@ function TaskEditor({ planStartDate, onAdd }){
 
     if (added.length===0) return;
     onAdd(added);
-    setTitle(""); setNotes(""); // keep date & time
+    setTitle(""); setNotes("");
   }
 
   const taskDateText = format(parseYMDLocal(taskDate||planStartDate)||new Date(),"EEE MMM d, yyyy");
@@ -723,12 +713,12 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence (as-is for now) */}
+      {/* Recurrence — wording updated to match Google Calendar style */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
           <select value={repeat} onChange={(e)=>setRepeat(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm">
-            <option value="none">None</option>
+            <option value="none">Doesn’t repeat</option>
             <option value="daily">Daily</option>
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
@@ -760,16 +750,26 @@ function TaskEditor({ planStartDate, onAdd }){
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="text-sm font-medium">End</div>
-          <select value={endMode} onChange={(e)=>setEndMode(e.target.value)} className="rounded-xl border border-gray-300 px-2 py-1 text-sm">
-            <option value="count">After N</option>
-            <option value="until">Until date</option>
-            <option value="horizon">Over horizon</option>
+          <div className="text-sm font-medium">Ends</div>
+          <select
+            value={endMode}
+            onChange={(e)=>setEndMode(e.target.value)}
+            className="rounded-xl border border-gray-300 px-2 py-1 text-sm"
+          >
+            <option value="horizon">No end date</option>
+            <option value="until">On date</option>
+            <option value="count">After</option>
           </select>
 
           {endMode==="count" && (
             <>
-              <input type="number" min={1} value={count} onChange={(e)=>setCount(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+              <input
+                type="number"
+                min={1}
+                value={count}
+                onChange={(e)=>setCount(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm"
+              />
               <span className="text-sm">occurrence(s)</span>
             </>
           )}
@@ -786,10 +786,17 @@ function TaskEditor({ planStartDate, onAdd }){
 
           {endMode==="horizon" && (
             <>
-              <span className="text-sm">Months</span>
-              <input type="number" min={1} value={horizonMonths} onChange={(e)=>setHorizonMonths(e.target.value)} className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm" />
+              <span className="text-sm">Planning window (months)</span>
+              <input
+                type="number"
+                min={1}
+                value={horizonMonths}
+                onChange={(e)=>setHorizonMonths(e.target.value)}
+                className="w-16 rounded-xl border border-gray-300 px-2 py-1 text-sm"
+              />
             </>
           )}
+
           {repeat==="monthly" && (
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
               <span className="text-sm">Pattern</span>
@@ -836,6 +843,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
     if (!total) { setMsg("Add at least one task."); onToast?.("warn","Add at least one task"); return; }
     setMsg("Pushing…");
     try {
+      // 1) Push to Google Tasks (existing backend)
       const resp = await fetch("/api/push", {
         method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -851,11 +859,32 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
+      // 2) Snapshot to History (new backend)
+      try{
+        const snap = await fetch("/api/history/snapshot",{
+          method:"POST", headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({
+            plannerEmail,
+            userEmail: selectedUserEmail,
+            listTitle: plan.title,
+            startDate: plan.startDate,
+            mode: replaceMode ? "replace" : "append",
+            items: tasks.map(t=>({ title:t.title, dayOffset:t.dayOffset, time:t.time, durationMins:t.durationMins, notes:t.notes }))
+          })
+        });
+        const sj = await snap.json();
+        if (!snap.ok || sj.error) {
+          onToast?.("warn", "Pushed, but could not save to History");
+        }
+      } catch (_e) {
+        onToast?.("warn", "Pushed, but could not save to History");
+      }
+
       const created = j.created || total;
       setMsg(`Success — ${created} task(s) created`);
       onToast?.("ok", `Pushed ${created} task${created>1?"s":""}`);
-      setTasks([]);           // clear preview
-      onPushed?.(created);    // trigger History reload
+      setTasks([]);                 // clear preview
+      onPushed?.(created);          // ask History to reload
     } catch (e) {
       const m = String(e.message||e);
       setMsg("Error: "+m);
@@ -879,7 +908,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
         <div className="text-sm text-gray-500">No tasks yet.</div>
       ) : (
         <>
-          <div className="mb-3 sm:max-h-56 sm:overflow-auto rounded-lg border overflow-x-auto">
+          <div className="mb-3 rounded-lg border overflow-x-auto">
             <table className="w-full min-w-[640px] text-xs sm:text-sm">
               <thead className="bg-gray-50">
                 <tr className="text-left text-gray-500">
@@ -943,7 +972,7 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
       const j=await r.json();
       setRows(j.rows||[]);
       setTotal(j.total||0);
-    }catch(e){}
+    }catch(e){/* noop */}
     setLoading(false);
   }
   useEffect(()=>{ load(); },[plannerEmail,userEmail,page,reloadKey]);
@@ -994,7 +1023,7 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   );
 }
 
-/* ───────── Users view (unchanged except normalization & invite hide) ───────── */
+/* ───────── Users view ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
@@ -1101,7 +1130,7 @@ function SettingsView({ plannerEmail, prefs, onChange }){
       const j=await r.json();
       if (!r.ok || j.error) throw new Error(j.error||"Save failed");
       onChange?.(local);
-    }catch(e){}
+    }catch(e){/* noop */}
   }
 
   return (
