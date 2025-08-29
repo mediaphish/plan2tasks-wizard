@@ -1,20 +1,23 @@
 // /api/history/snapshot.js
-// Save a pushed plan into history_plans + history_items using Supabase.
-// Improvements:
-//  - Normalize time to HH:MM:SS (add seconds) to satisfy strict Postgres "time" columns.
-//  - Batch insert items to avoid payload limits.
-//  - Verbose error details.
-//  - GET debug mode: dry-run by default; optional one-item test insert.
+// Snapshot pushed plans into history_plans + history_items via Supabase.
 //
-// GET debug examples (CLICKABLE IN BROWSER):
-//   Dry-run (no writes): /api/history/snapshot?debug=1&plannerEmail=...&userEmail=...&listTitle=Test&startDate=2025-08-28
-//   One test insert (writes 1 plan + 1 item): add &insertOne=1
+// What this version does:
+// - Detects which optional columns exist on history_items (time, notes, duration_mins)
+//   and only inserts the columns your table actually has.
+// - Normalizes time to "HH:MM:SS" (Postgres TIME-friendly).
+// - Batch inserts to handle big recurrences.
+// - Clear error JSON if anything fails.
+// - GET debug helpers you can click in a browser (no writes unless you ask).
 //
-// Notes: No schema changes. Uses existing columns only.
+// GET debug (open these in your browser):
+//  1) Check available item columns (no writes):
+//     /api/history/snapshot?debug=columns
+//  2) Dry run shape (no writes):
+//     /api/history/snapshot?debug=1&plannerEmail=bartpaden@gmail.com&userEmail=bart@midwesternbuilt.com&listTitle=Test&startDate=2025-08-28
+//  3) Single test insert (writes 1 plan + 1 item):
+//     /api/history/snapshot?debug=1&insertOne=1&plannerEmail=bartpaden@gmail.com&userEmail=bart@midwesternbuilt.com&listTitle=Test&startDate=2025-08-28
 //
-// Expected tables/columns used:
-//   history_plans: id (uuid), planner_email, user_email, title, start_date, items_count, mode, pushed_at, archived_at
-//   history_items: plan_id (uuid), title, day_offset, time, duration_mins, notes
+// No schema changes. UI untouched.
 
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
@@ -24,11 +27,10 @@ function norm(v) { return (v ?? "").toString().trim(); }
 function toLowerEmail(v){ return norm(v).toLowerCase(); }
 function isFiniteNum(n){ return Number.isFinite(n); }
 
-/** Accepts "HH:MM" or "HH:MM:SS" or empty; anything else -> null. Always returns "HH:MM:SS". */
+/** Accept "HH:MM" or "HH:MM:SS" → return "HH:MM:SS"; anything else → null */
 function sanitizeTime(v){
   if (!v) return null;
   const s = String(v).trim();
-  // Accept 24h "HH:MM" or "HH:MM:SS"
   let m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
   if (m) return `${m[1]}:${m[2]}:00`;
   m = /^([01]\d|2[0-3]):([0-5]\d):([0-5]\d)$/.exec(s);
@@ -36,171 +38,198 @@ function sanitizeTime(v){
   return null;
 }
 
-async function insertPlanAndItems({ plannerEmail, userEmail, listTitle, startDate, mode, items }) {
+async function columnExists(col){
+  // Try selecting the column; if it errors with "does not exist", treat as missing.
+  const { error } = await supabaseAdmin
+    .from("history_items")
+    .select(`id, ${col}`)
+    .limit(1);
+  if (!error) return true;
+  const msg = String(error.message || "");
+  return !/column .* does not exist/i.test(msg);
+}
+
+async function resolveItemColumns(){
+  // We always assume these required: plan_id, title, day_offset
+  // Optional we detect: time, notes, duration_mins
+  const [hasTime, hasNotes, hasDuration] = await Promise.all([
+    columnExists("time"),
+    columnExists("notes"),
+    columnExists("duration_mins"),
+  ]);
+  return { hasTime, hasNotes, hasDuration };
+}
+
+async function insertPlan({ plannerEmail, userEmail, listTitle, startDate, mode, itemsLen }){
+  const pushedAt = new Date().toISOString();
+  return await supabaseAdmin
+    .from("history_plans")
+    .insert({
+      planner_email: plannerEmail,
+      user_email: userEmail,
+      title: listTitle,
+      start_date: startDate,
+      items_count: itemsLen,
+      mode: mode || "append",
+      pushed_at: pushedAt,
+      // archived_at null => active
+    })
+    .select("id")
+    .single();
+}
+
+async function insertItems(planId, items, cols){
+  // Build rows with only available columns.
+  const rows = items.map((it) => {
+    const base = {
+      plan_id: planId,
+      title: norm(it.title),
+      day_offset: isFiniteNum(Number(it.dayOffset)) ? Number(it.dayOffset) : 0,
+    };
+    if (cols.hasTime) base.time = sanitizeTime(it.time);
+    if (cols.hasDuration) {
+      base.duration_mins =
+        it.durationMins === null || it.durationMins === undefined
+          ? null
+          : (isFiniteNum(Number(it.durationMins)) ? Number(it.durationMins) : null);
+    }
+    if (cols.hasNotes) base.notes = it.notes != null ? String(it.notes) : null;
+    return base;
+  });
+
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const chunk = rows.slice(i, i + BATCH_SIZE);
+    const ins = await supabaseAdmin.from("history_items").insert(chunk);
+    if (ins.error) {
+      return {
+        ok:false,
+        error: ins.error.message || "Items insert failed",
+        detail: ins.error.details || null,
+        hint: ins.error.hint || null,
+        inserted,
+      };
+    }
+    inserted += chunk.length;
+  }
+  return { ok:true, inserted };
+}
+
+async function doSnapshot(body){
+  const {
+    plannerEmail,
+    userEmail,
+    listTitle,
+    startDate,
+    mode,
+    items = [],
+  } = body || {};
+
   const planner = toLowerEmail(plannerEmail);
   const user = toLowerEmail(userEmail);
   const title = norm(listTitle);
   const sDate = norm(startDate);
-  const pushMode = norm(mode) || "append";
 
   if (!planner || !user || !title || !sDate) {
     return { ok:false, status:400, error:"Missing plannerEmail, userEmail, listTitle, or startDate" };
   }
 
-  const pushedAt = new Date().toISOString();
+  // 0) Detect available item columns once
+  const cols = await resolveItemColumns();
 
   // 1) Insert plan
-  const planInsert = await supabaseAdmin
-    .from("history_plans")
-    .insert({
-      planner_email: planner,
-      user_email: user,
-      title,
-      start_date: sDate,
-      items_count: Array.isArray(items) ? items.length : 0,
-      mode: pushMode,
-      pushed_at: pushedAt,
-      // archived_at left NULL => active
-    })
-    .select("id")
-    .single();
-
-  if (planInsert.error) {
+  const planIns = await insertPlan({
+    plannerEmail: planner,
+    userEmail: user,
+    listTitle: title,
+    startDate: sDate,
+    mode,
+    itemsLen: Array.isArray(items) ? items.length : 0,
+  });
+  if (planIns.error) {
     return {
       ok:false,
       status:500,
-      error: planInsert.error.message || "Plan insert failed",
-      detail: planInsert.error.details || null,
-      hint: planInsert.error.hint || null
+      error: planIns.error.message || "Plan insert failed",
+      detail: planIns.error.details || null,
+      hint: planIns.error.hint || null,
+      where: "plan_insert",
+    };
+  }
+  const planId = planIns.data?.id;
+  if (!planId) return { ok:false, status:500, error:"Plan inserted without ID", where:"plan_insert" };
+
+  // 2) Insert items
+  const src = Array.isArray(items) ? items : [];
+  if (src.length === 0) return { ok:true, status:200, planId, items:0 };
+
+  const ins = await insertItems(planId, src, cols);
+  if (!ins.ok) {
+    return {
+      ok:false,
+      status:500,
+      error: ins.error,
+      detail: ins.detail || null,
+      hint: ins.hint || null,
+      planId,
+      inserted: ins.inserted,
+      colsUsed: cols,
+      where: "items_insert",
     };
   }
 
-  const planId = planInsert.data?.id;
-  if (!planId) {
-    return { ok:false, status:500, error:"Plan inserted without ID" };
-  }
-
-  // 2) Insert items in batches
-  const source = Array.isArray(items) ? items : [];
-  let insertedCount = 0;
-
-  if (source.length > 0) {
-    const rows = source.map((it) => {
-      const title = norm(it.title);
-      const dayOffset = isFiniteNum(Number(it.dayOffset)) ? Number(it.dayOffset) : 0;
-      const time = sanitizeTime(it.time); // null if invalid
-      const duration = (it.durationMins === null || it.durationMins === undefined)
-        ? null
-        : (isFiniteNum(Number(it.durationMins)) ? Number(it.durationMins) : null);
-      const notes = it.notes != null ? String(it.notes) : null;
-
-      return {
-        plan_id: planId,
-        title,
-        day_offset: dayOffset,
-        time,               // "HH:MM:SS" or null
-        duration_mins: duration, // null OK if column exists
-        notes,              // null OK if column exists
-      };
-    });
-
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const chunk = rows.slice(i, i + BATCH_SIZE);
-      let ins = await supabaseAdmin.from("history_items").insert(chunk);
-
-      // If the insert fails due to a column mismatch, try narrower sets
-      if (ins.error && /column .* does not exist/i.test(ins.error.message || "")) {
-        // Try without duration_mins first
-        const noDur = chunk.map(({ plan_id, title, day_offset, time, notes }) => ({
-          plan_id, title, day_offset, time, notes
-        }));
-        ins = await supabaseAdmin.from("history_items").insert(noDur);
-
-        if (ins.error && /column .* does not exist/i.test(ins.error.message || "")) {
-          // Try minimal guaranteed columns only
-          const minimal = chunk.map(({ plan_id, title, day_offset, time }) => ({
-            plan_id, title, day_offset, time
-          }));
-          ins = await supabaseAdmin.from("history_items").insert(minimal);
-        }
-      }
-
-      if (ins.error) {
-        return {
-          ok:false,
-          status:500,
-          error: ins.error.message || "Items insert failed",
-          detail: ins.error.details || null,
-          hint: ins.error.hint || null,
-          planId,
-          inserted: insertedCount
-        };
-      }
-
-      insertedCount += chunk.length;
-    }
-  }
-
-  return { ok:true, status:200, planId, items: insertedCount };
+  return { ok:true, status:200, planId, items: ins.inserted, colsUsed: cols };
 }
 
 export default async function handler(req, res) {
   try {
-    if (req.method === "GET" && String(req.query?.debug || "") === "1") {
-      // Debug mode (dry-run by default)
-      const plannerEmail = req.query.plannerEmail || "";
-      const userEmail = req.query.userEmail || "";
-      const listTitle = req.query.listTitle || "DEBUG Plan";
-      const startDate = req.query.startDate || new Date().toISOString().slice(0,10);
-      const insertOne = String(req.query.insertOne || "") === "1";
+    // -------- GET debug helpers --------
+    if (req.method === "GET") {
+      if (String(req.query?.debug || "") === "columns") {
+        const cols = await resolveItemColumns();
+        return res.status(200).json({ ok:true, columns: cols });
+      }
+      if (String(req.query?.debug || "") === "1") {
+        const plannerEmail = req.query.plannerEmail || "";
+        const userEmail = req.query.userEmail || "";
+        const listTitle = req.query.listTitle || "DEBUG Plan";
+        const startDate = req.query.startDate || new Date().toISOString().slice(0,10);
+        const insertOne = String(req.query.insertOne || "") === "1";
 
-      const sampleItems = [
-        { title:"Debug item", dayOffset:0, time:"12:00", durationMins:30, notes:"dbg" }
-      ];
+        if (!insertOne) {
+          const cols = await resolveItemColumns();
+          return res.status(200).json({
+            ok:true,
+            dryRun:true,
+            columns: cols,
+            sampleItemShape: {
+              title:"Debug item",
+              dayOffset:0,
+              time:"12:00:00",
+              durationMins:30,
+              notes:"dbg"
+            }
+          });
+        }
 
-      if (!insertOne) {
-        // Dry-run: just show what would be inserted and the normalized time
-        return res.status(200).json({
-          ok:true,
-          dryRun:true,
-          normalized: { time: sanitizeTime("12:00") }, // should be "12:00:00"
-          wouldInsert: {
-            plannerEmail, userEmail, listTitle, startDate,
-            items: sampleItems
-          }
+        const out = await doSnapshot({
+          plannerEmail, userEmail, listTitle, startDate, mode:"append",
+          items: [{ title:"Debug item", dayOffset:0, time:"12:00", durationMins:30, notes:"dbg" }]
         });
+        return res.status(out.status || (out.ok ? 200 : 500)).json(out);
       }
 
-      // Perform a single-item insert to expose the real error (if any)
-      const out = await insertPlanAndItems({
-        plannerEmail,
-        userEmail,
-        listTitle,
-        startDate,
-        mode: "append",
-        items: sampleItems
-      });
-      return res.status(out.status || (out.ok ? 200 : 500)).json(out);
+      res.setHeader("Allow", "GET, POST");
+      return res.status(400).json({ ok:false, error:"Missing debug param. Use ?debug=columns or ?debug=1" });
     }
 
+    // -------- POST from the app --------
     if (req.method !== "POST") {
-      res.setHeader("Allow", "POST, GET");
-      return res.status(405).json({ ok:false, error: "Method Not Allowed" });
+      res.setHeader("Allow", "GET, POST");
+      return res.status(405).json({ ok:false, error:"Method Not Allowed" });
     }
 
-    const {
-      plannerEmail,
-      userEmail,
-      listTitle,
-      startDate,
-      mode,
-      items = [],
-    } = req.body || {};
-
-    const out = await insertPlanAndItems({
-      plannerEmail, userEmail, listTitle, startDate, mode, items
-    });
-
+    const out = await doSnapshot(req.body || {});
     return res.status(out.status || (out.ok ? 200 : 500)).json(out);
 
   } catch (e) {
