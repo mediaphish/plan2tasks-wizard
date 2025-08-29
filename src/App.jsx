@@ -1,3 +1,4 @@
+// (full file) src/App.jsx
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Users, Calendar, Settings as SettingsIcon, Inbox as InboxIcon,
@@ -986,7 +987,7 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
               </tr>
             ))}
             {(!rows || rows.length===0) && (
-              <tr><td colSpan={4} className="py-6 text-center text-gray-500">{loading?"Loading…":"No history yet"}</td></tr>
+              <tr><td colSpan={4} className="py-6 text-center text-gray-500">No history yet</td></tr>
             )}
           </tbody>
         </table>
@@ -1001,21 +1002,24 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   );
 }
 
-/* ───────── Users view — with clearer Archive/Restore/Delete labels ───────── */
+/* ───────── Users view — Active/Archived toggle + clearer labels ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
   const [groups,setGroups]=useState({});
   const [inviteOpen,setInviteOpen]=useState(false);
 
+  // NEW: Active / Archived tab
+  const [tab,setTab]=useState("active"); // "active" | "archived"
+
   // Category modal state
   const [catOpen,setCatOpen]=useState(false);
   const [catUserEmail,setCatUserEmail]=useState("");
-  const [catAssigned,setCatAssigned]=useState([]); // initial list for the user
+  const [catAssigned,setCatAssigned]=useState([]);
 
   // Derived global categories (union) for the planner
   const allCats = useMemo(()=>{
-    const set = new Map(); // key: lower, val: original case (first seen)
+    const set = new Map();
     const eat = (arr)=> (arr||[]).forEach(g=>{
       const s=String(g||"").trim();
       if (!s) return;
@@ -1026,10 +1030,10 @@ function UsersView({ plannerEmail, onToast, onManage }){
     return Array.from(set.values()).sort((a,b)=>a.localeCompare(b));
   },[rows, groups]);
 
-  useEffect(()=>{ load(); },[plannerEmail]);
+  useEffect(()=>{ load(); },[plannerEmail, tab]);
 
   async function load(){
-    const qs=new URLSearchParams({ plannerEmail, status:"all" });
+    const qs=new URLSearchParams({ plannerEmail, status: tab });
     const r=await fetch(`/api/users?${qs.toString()}`); const j=await r.json();
     const arr = (j.users||[]).map(u => ({ ...u, email: u.email || u.userEmail || u.user_email || "" }));
     setRows(arr);
@@ -1066,7 +1070,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Archive failed");
       onToast?.("ok", archived ? "User archived" : "User restored");
-      await load();
+      await load(); // reload current tab
     } catch(e){
       onToast?.("error", String(e.message||e));
     }
@@ -1092,8 +1096,26 @@ function UsersView({ plannerEmail, onToast, onManage }){
 
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-sm font-semibold">Users</div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="text-sm font-semibold">Users</div>
+          {/* NEW: Active / Archived toggle */}
+          <div className="ml-2 inline-flex rounded-xl border overflow-hidden">
+            <button
+              onClick={()=>setTab("active")}
+              className={cn("px-2.5 py-1 text-xs", tab==="active" ? "bg-gray-900 text-white" : "bg-white hover:bg-gray-50")}
+            >
+              Active
+            </button>
+            <button
+              onClick={()=>setTab("archived")}
+              className={cn("px-2.5 py-1 text-xs border-l", tab==="archived" ? "bg-gray-900 text-white" : "bg-white hover:bg-gray-50")}
+            >
+              Archived
+            </button>
+          </div>
+        </div>
+
         <div className="flex items-center gap-2">
           <input value={filter} onChange={(e)=>setFilter(e.target.value)} placeholder="Search…" className="rounded-xl border border-gray-300 px-2 py-1 text-sm" />
           <button onClick={load} className="rounded-xl border px-2 py-1 text-sm hover:bg-gray-50"><RotateCcw className="h-4 w-4" /></button>
@@ -1155,22 +1177,23 @@ function UsersView({ plannerEmail, onToast, onManage }){
                   </td>
                   <td className="py-1.5 px-2">
                     <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      <button
-                        onClick={()=>onManage?.(r.email)}
-                        className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
-                        title="Open Plan view for this user"
-                      >
-                        Plan
-                      </button>
-
                       {!isArchived && (
-                        <button
-                          onClick={()=>doArchive(r.email, true)}
-                          className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
-                          title="Archive this user connection"
-                        >
-                          Archive user
-                        </button>
+                        <>
+                          <button
+                            onClick={()=>onManage?.(r.email)}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                            title="Open Plan view for this user"
+                          >
+                            Plan
+                          </button>
+                          <button
+                            onClick={()=>doArchive(r.email, true)}
+                            className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                            title="Archive this user connection"
+                          >
+                            Archive user
+                          </button>
+                        </>
                       )}
                       {isArchived && (
                         <>
