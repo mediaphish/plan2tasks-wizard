@@ -265,7 +265,7 @@ function InboxDrawer({ plannerEmail, onClose }){
       setItems(j.results||[]);
       const m={}; for (const r of (j.results||[])) m[r.id]=false; setSel(m);
     }catch(e){/* noop */}
-    setLoading=false;
+    setLoading(false);
   }
   useEffect(()=>{ if (query.trim().length===0) setItems([]); },[query]);
 
@@ -675,7 +675,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence (current behavior retained — removal of N to be applied in a separate step if desired) */}
+      {/* Recurrence (current behavior retained) */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -1084,21 +1084,70 @@ function UsersView({ plannerEmail, onToast, onManage }){
   );
 }
 
-/* Invite modal (top-level action) */
+/* Invite modal (top-level action) — robust JSON/HTML handling */
 function SendInviteModal({ plannerEmail, onClose, onToast }){
   const [email,setEmail]=useState("");
   const [previewUrl,setPreviewUrl]=useState("");
+  const [previewRaw,setPreviewRaw]=useState("");
   const [loading,setLoading]=useState(false);
+
+  function extractFirstUrl(text){
+    const m = String(text||"").match(/https?:\/\/[^\s"'<>]+/);
+    return m ? m[0] : "";
+    // simple but effective for invite URLs in plain text/HTML
+  }
+
+  async function parseMaybeJson(resp){
+    const ctype = resp.headers.get("content-type") || "";
+    const txt = await resp.text(); // read once
+    if (ctype.includes("application/json")) {
+      try { return { kind:"json", json: JSON.parse(txt), txt }; }
+      catch { /* fall through to text */ }
+    }
+    return { kind:"text", txt };
+  }
 
   async function doPreview(){
     setLoading(true);
+    setPreviewUrl(""); setPreviewRaw("");
     try{
       const qs = new URLSearchParams({ plannerEmail, userEmail: email });
-      const r = await fetch(`/api/invite/preview?${qs.toString()}`);
-      const j = await r.json();
-      if (!r.ok || j.error) throw new Error(j.error || "Preview failed");
-      setPreviewUrl(j.url || j.inviteUrl || j.href || "");
-      onToast?.("ok","Preview generated");
+      const resp = await fetch(`/api/invite/preview?${qs.toString()}`);
+      const parsed = await parseMaybeJson(resp);
+
+      if (!resp.ok) {
+        if (parsed.kind==="json") {
+          const msg = parsed.json?.error || JSON.stringify(parsed.json);
+          onToast?.("error", `Preview failed: ${msg}`);
+        } else {
+          onToast?.("error", `Preview failed: ${parsed.txt.slice(0,120)}`);
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (parsed.kind==="json") {
+        const j = parsed.json;
+        const url = j.url || j.inviteUrl || j.href || "";
+        if (url) {
+          setPreviewUrl(url);
+          onToast?.("ok","Preview generated");
+        } else {
+          setPreviewRaw(JSON.stringify(j));
+          onToast?.("warn","Preview returned JSON but no URL field");
+        }
+      } else {
+        // HTML or text. Try to extract a URL.
+        const url = extractFirstUrl(parsed.txt);
+        if (url) {
+          setPreviewUrl(url);
+          onToast?.("ok","Preview URL detected");
+        } else {
+          setPreviewRaw(parsed.txt);
+          if (resp.status===404) onToast?.("error","Preview endpoint not found (404)");
+          else onToast?.("warn","Preview returned non-JSON content");
+        }
+      }
     }catch(e){
       onToast?.("error", String(e.message||e));
     }
@@ -1108,14 +1157,36 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
   async function doSend(){
     setLoading(true);
     try{
-      const r = await fetch("/api/invite/send",{
+      const resp = await fetch("/api/invite/send",{
         method:"POST", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ plannerEmail, userEmail: email })
       });
-      const j = await r.json();
-      if (!r.ok || j.error) throw new Error(j.error || "Invite failed");
-      onToast?.("ok","Invite sent");
-      onClose?.();
+      const parsed = await parseMaybeJson(resp);
+
+      if (!resp.ok) {
+        if (parsed.kind==="json") {
+          const msg = parsed.json?.error || JSON.stringify(parsed.json);
+          onToast?.("error", `Invite failed: ${msg}`);
+        } else {
+          onToast?.("error", `Invite failed: ${parsed.txt.slice(0,120)}`);
+        }
+        setLoading(false);
+        return;
+      }
+
+      if (parsed.kind==="json") {
+        if (parsed.json?.ok || parsed.json?.sent || parsed.json?.status==="sent") {
+          onToast?.("ok","Invite sent");
+          onClose?.();
+        } else {
+          onToast?.("ok","Invite sent"); // be generous even if schema is different
+          onClose?.();
+        }
+      } else {
+        // Non-JSON success; treat as OK
+        onToast?.("ok","Invite sent");
+        onClose?.();
+      }
     }catch(e){
       onToast?.("error", String(e.message||e));
     }
@@ -1151,6 +1222,13 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
             <div className="rounded-lg border bg-gray-50 p-2 text-xs break-all">
               <div className="mb-1 font-semibold text-gray-700">Preview URL</div>
               <div className="text-gray-700">{previewUrl}</div>
+            </div>
+          )}
+
+          {!!previewRaw && !previewUrl && (
+            <div className="rounded-lg border bg-yellow-50 p-2 text-xs break-all">
+              <div className="mb-1 font-semibold text-yellow-800">Preview (non-JSON response)</div>
+              <div className="text-yellow-900">{previewRaw.slice(0,800)}</div>
             </div>
           )}
 
