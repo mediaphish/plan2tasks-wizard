@@ -52,37 +52,7 @@ function lastWeekdayOfMonthLocal(y,m0,weekday){
   return new Date(y,m0,lastD-shift);
 }
 
-/* time parsing/formatting */
-function parseTimeHuman(str){
-  if (!str) return "";
-  let s = String(str).trim().toLowerCase();
-  if (s==="noon") return "12:00";
-  if (s==="midnight") return "00:00";
-  s = s.replace(/\./g, ":").replace(/\s+/g,"");
-  const hasAm = /am$/.test(s); const hasPm = /pm$/.test(s);
-  s = s.replace(/(am|pm)$/,"");
-  let h=0, m=0;
-
-  if (s.includes(":")){
-    const [hh,mm="0"]=s.split(":");
-    if (!/^\d+$/.test(hh) || !/^\d+$/.test(mm)) return null;
-    h = Number(hh); m = Number(mm);
-  } else {
-    if (!/^\d+$/.test(s)) return null;
-    if (s.length<=2) { h=Number(s); m=0; }
-    else if (s.length===3) { h=Number(s.slice(0,1)); m=Number(s.slice(1)); }
-    else { h=Number(s.slice(0,2)); m=Number(s.slice(2,4)); }
-  }
-  if (m<0||m>59) return null;
-  if (hasAm||hasPm){
-    if (h<1||h>12) return null;
-    if (hasPm && h<12) h+=12;
-    if (hasAm && h===12) h=0;
-  } else {
-    if (h<0||h>23) return null;
-  }
-  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
-}
+/* time formatting (display only) */
 function to12hDisplay(hhmm){
   if (!hhmm) return "";
   const [h,m] = hhmm.split(":").map(Number);
@@ -90,38 +60,33 @@ function to12hDisplay(hhmm){
   const h12 = h%12 || 12;
   return `${h12}:${String(m).padStart(2,"0")} ${ampm}`;
 }
-function TimeInput({ value, onChange, placeholder="e.g., 2:30 pm" }){
-  const [text,setText]=useState(() => to12hDisplay(value));
-  const [bad,setBad]=useState(false);
-  useEffect(()=>{ setText(to12hDisplay(value)); },[value]);
-  function commit(){
-    const parsed = parseTimeHuman(text);
-    if (parsed===null){ setBad(true); return; }
-    setBad(false);
-    onChange(parsed || "");
-    setText(to12hDisplay(parsed));
+
+/* New: Dropdown time selector (15-minute steps) */
+const TIME_OPTIONS = (() => {
+  const out = [{ value: "", label: "— none —" }];
+  for (let h=0; h<24; h++){
+    for (let m=0; m<60; m+=15){
+      const v = `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
+      const h12 = (h%12) || 12;
+      const ampm = h>=12 ? "pm" : "am";
+      const label = `${h12}:${String(m).padStart(2,"0")} ${ampm}`;
+      out.push({ value: v, label });
+    }
   }
+  return out;
+})();
+
+function TimeSelect({ value, onChange }){
   return (
-    <div className="relative">
-      <input
-        value={text}
-        onChange={(e)=>{ setText(e.target.value); setBad(false); }}
-        onBlur={commit}
-        onKeyDown={(e)=>{ if (e.key==="Enter") { e.preventDefault(); commit(); } }}
-        placeholder={placeholder}
-        className={cn("w-full rounded-xl border px-3 py-2 text-sm h-10", bad?"border-red-400":"border-gray-300")}
-      />
-      {value && (
-        <button
-          type="button"
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-          title="Clear"
-          onClick={()=>{ onChange(""); setText(""); setBad(false); }}
-        >
-          <X className="h-4 w-4" />
-        </button>
-      )}
-    </div>
+    <select
+      value={value || ""}
+      onChange={(e)=>onChange(e.target.value)}
+      className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm h-10"
+    >
+      {TIME_OPTIONS.map(opt=>(
+        <option key={opt.value || "none"} value={opt.value}>{opt.label}</option>
+      ))}
+    </select>
   );
 }
 
@@ -175,7 +140,7 @@ function MainApp(){
         setPrefs(p||{});
         setView((p&&p.default_view) || "users");
       }
-    }catch(e){/* noop */} // keep build happy
+    }catch(e){/* noop */}
   })(); },[plannerEmail]);
 
   async function loadBadge(){
@@ -694,7 +659,7 @@ function TaskEditor({ planStartDate, onAdd }){
 
         <label className="block min-w-0">
           <div className="mb-1 text-sm font-medium">Time (optional)</div>
-          <TimeInput value={time} onChange={setTime} />
+          <TimeSelect value={time} onChange={setTime} />
         </label>
 
         <label className="block min-w-0">
@@ -713,7 +678,7 @@ function TaskEditor({ planStartDate, onAdd }){
         </Modal>
       )}
 
-      {/* Recurrence — wording updated to match Google Calendar style */}
+      {/* Recurrence — wording already modernized */}
       <div className="mt-2 rounded-xl border border-gray-200 bg-white p-2 sm:p-3">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="text-sm font-medium">Repeat</div>
@@ -777,10 +742,8 @@ function TaskEditor({ planStartDate, onAdd }){
           {endMode==="until" && (
             <>
               <span className="text-sm">Date</span>
-              <button type="button" onClick={()=>setUntilOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
-                <Calendar className="h-4 w-4" />
-                {untilDate ? format(parseYMDLocal(untilDate)||new Date(),"MMM d, yyyy") : "Pick date"}
-              </button>
+              {/* using same calendar modal pattern */}
+              <UntilDatePicker value={untilDate} setValue={setUntilDate} planStartDate={planStartDate} />
             </>
           )}
 
@@ -809,16 +772,6 @@ function TaskEditor({ planStartDate, onAdd }){
         </div>
       </div>
 
-      {untilOpen && (
-        <Modal title="Choose Until Date" onClose={()=>setUntilOpen(false)}>
-          <CalendarGridFree
-            initialDate={untilDate || planStartDate}
-            selectedDate={untilDate || planStartDate}
-            onPick={(ymd)=>{ setUntilDate(ymd); setUntilOpen(false); }}
-          />
-        </Modal>
-      )}
-
       <div className="mt-3 flex items-center justify-between">
         <button onClick={generate} className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-3 sm:px-4 py-2 text-sm font-semibold text-white hover:bg-black">
           <Plus className="h-4 w-4" /> Add to Plan
@@ -830,6 +783,30 @@ function TaskEditor({ planStartDate, onAdd }){
     </div>
   );
 }
+
+/* helper for until date picking */
+function UntilDatePicker({ value, setValue, planStartDate }){
+  const [open,setOpen]=useState(false);
+  const label = value ? format(parseYMDLocal(value)||new Date(),"MMM d, yyyy") : "Pick date";
+  return (
+    <>
+      <button type="button" onClick={()=>setOpen(true)} className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-1.5 text-sm hover:bg-gray-50">
+        <Calendar className="h-4 w-4" />
+        {label}
+      </button>
+      {open && (
+        <Modal title="Choose Until Date" onClose={()=>setOpen(false)}>
+          <CalendarGridFree
+            initialDate={value || planStartDate}
+            selectedDate={value || planStartDate}
+            onPick={(ymd)=>{ setValue(ymd); setOpen(false); }}
+          />
+        </Modal>
+      )}
+    </>
+  );
+}
+
 function pill(on){ return cn("rounded-full border px-2 py-1 text-xs sm:text-sm", on?"border-gray-800 bg-gray-900 text-white":"border-gray-300 bg-white hover:bg-gray-50"); }
 
 /* ───────── Preview / Deliver ───────── */
@@ -859,7 +836,7 @@ function ComposerPreview({ plannerEmail, selectedUserEmail, plan, tasks, setTask
       const j = await resp.json();
       if (!resp.ok || j.error) throw new Error(j.error || "Push failed");
 
-      // 2) Snapshot to History (new backend)
+      // 2) Snapshot to History (backend)
       try{
         const snap = await fetch("/api/history/snapshot",{
           method:"POST", headers:{ "Content-Type":"application/json" },
