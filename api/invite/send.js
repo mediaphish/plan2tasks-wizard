@@ -1,8 +1,6 @@
 // /api/invite/send.js
-// POST: creates invite + emails it via Resend (JSON result).
-// GET with ?debug=1: creates invite and returns the URL without sending (browser-friendly).
-//
-// ENV required by /api/debug/config: RESEND_API_KEY, RESEND_FROM, SITE_URL (optional; we fall back to Host)
+// POST: reuse/create invite + send via Resend (JSON).
+// GET ?debug=1: reuse/create invite and return URL (no email).
 
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
@@ -16,12 +14,41 @@ function siteBase(req) {
   return host ? `${proto}://${host}` : "https://www.plan2tasks.com";
 }
 
+async function getExistingInvite(plannerEmail, userEmail) {
+  return await supabaseAdmin
+    .from("invites")
+    .select("id, used_at")
+    .eq("planner_email", plannerEmail)
+    .eq("user_email", userEmail)
+    .limit(1)
+    .maybeSingle();
+}
+
 async function createInvite(plannerEmail, userEmail) {
   return await supabaseAdmin
     .from("invites")
     .insert({ planner_email: plannerEmail, user_email: userEmail })
-    .select("id")
+    .select("id, used_at")
     .single();
+}
+
+async function getOrCreateInvite(plannerEmail, userEmail) {
+  let { data: exist } = await getExistingInvite(plannerEmail, userEmail);
+  if (exist) return { row: exist, reused: true };
+
+  const ins = await createInvite(plannerEmail, userEmail);
+  if (ins.error) {
+    const msg = ins.error?.message || "";
+    const detail = ins.error?.details || "";
+    if (/duplicate key/i.test(msg) || /duplicate key/i.test(detail)) {
+      const again = await getExistingInvite(plannerEmail, userEmail);
+      if (again.error) throw again.error;
+      if (!again.data) throw new Error("Invite unique key exists but row not found");
+      return { row: again.data, reused: true };
+    }
+    throw ins.error;
+  }
+  return { row: ins.data, reused: false };
 }
 
 async function sendEmail({ to, from, subject, html, text, apiKey }) {
@@ -49,49 +76,34 @@ async function sendEmail({ to, from, subject, html, text, apiKey }) {
 export default async function handler(req, res) {
   try {
     const method = req.method;
-
     if (method !== "POST" && method !== "GET") {
       res.setHeader("Allow", "GET, POST");
       return res.status(405).json({ ok:false, error: "Method Not Allowed" });
     }
 
-    // Accept both JSON body (POST) and query (GET debug)
     const isDebugGet = method === "GET" && String(req.query.debug || "") === "1";
     const src = isDebugGet ? req.query : (req.body || {});
     const plannerEmail = lowerEmail(src.plannerEmail);
     const userEmail = lowerEmail(src.userEmail);
-
     if (!plannerEmail || !userEmail) {
       return res.status(400).json({ ok:false, error: "Missing plannerEmail or userEmail" });
     }
 
-    // Create invite
-    const ins = await createInvite(plannerEmail, userEmail);
-    if (ins.error) {
-      return res.status(500).json({
-        ok:false,
-        error: ins.error.message || "Failed to create invite",
-        detail: ins.error.details || null,
-        hint: ins.error.hint || null
-      });
-    }
-    const id = ins.data?.id;
-    if (!id) return res.status(500).json({ ok:false, error: "Invite created without id" });
-
+    const { row, reused } = await getOrCreateInvite(plannerEmail, userEmail);
     const base = siteBase(req);
-    const inviteUrl = `${base}/api/google/start?invite=${encodeURIComponent(id)}`;
+    const inviteUrl = `${base}/api/google/start?invite=${encodeURIComponent(row.id)}`;
 
-    // Debug GET path: don't send, just return JSON so you can click-test in a browser
     if (isDebugGet) {
       return res.status(200).json({
         ok: true,
         debug: true,
-        inviteId: id,
-        url: inviteUrl
+        inviteId: row.id,
+        url: inviteUrl,
+        reused,
+        used: !!row.used_at
       });
     }
 
-    // POST: actually send via Resend
     const apiKey = norm(process.env.RESEND_API_KEY);
     const from = norm(process.env.RESEND_FROM || "notices@plan2tasks.com");
     if (!apiKey || !from) {
@@ -123,20 +135,15 @@ Connect: ${inviteUrl}
 After connecting, you'll see a "Connected" confirmation (no route back to the app).
 `;
 
-    await sendEmail({
-      to: userEmail,
-      from,
-      subject,
-      html,
-      text,
-      apiKey
-    });
+    await sendEmail({ to: userEmail, from, subject, html, text, apiKey });
 
     return res.status(200).json({
       ok: true,
       sent: true,
-      inviteId: id,
-      url: inviteUrl
+      inviteId: row.id,
+      url: inviteUrl,
+      reused,
+      used: !!row.used_at
     });
   } catch (e) {
     console.error("invite/send error:", e);
