@@ -7,6 +7,7 @@ function normEmail(e) {
 function deriveStatus(row) {
   const explicit = String(row.status || "").toLowerCase();
   if (explicit === "archived") return "archived";
+  if (explicit === "deleted") return "deleted";
   if (row.google_refresh_token) return "connected";
   return explicit || "pending";
 }
@@ -19,14 +20,14 @@ export default async function handler(req, res) {
         return res.status(400).json({ ok: false, error: "Missing plannerEmail" });
       }
 
-      // 1) Always pull ALL connections for this planner (no status filter here)
+      // 1) Pull ALL connections (we filter later)
       const { data: allConn, error: ucErr } = await supabaseAdmin
         .from("user_connections")
         .select("user_email, groups, status, google_refresh_token, updated_at")
         .ilike("planner_email", plannerEmail);
       if (ucErr) throw ucErr;
 
-      // Map of ANY connection by normalized email
+      // Map connections by normalized email
       const connMap = new Map();
       for (const r of allConn || []) {
         const emailRaw = r.user_email || "";
@@ -41,9 +42,10 @@ export default async function handler(req, res) {
         });
       }
 
-      // 2) Merge invites ONLY if viewing active/all, and NEVER if a connection exists (even archived)
+      // 2) Merge invites only for views where it makes sense: active/all
+      //    Never merge invites for archived or deleted views.
       const usersMap = new Map(connMap);
-      if (status !== "archived") {
+      if (status !== "archived" && status !== "deleted") {
         const { data: invRows, error: invErr } = await supabaseAdmin
           .from("invites")
           .select("user_email, used_at")
@@ -55,7 +57,7 @@ export default async function handler(req, res) {
           const key = normEmail(emailRaw);
           if (!key) continue;
 
-          // Skip if *any* connection row exists for this email (even archived)
+          // If any connection row exists (even archived/deleted), do not add an invite-only duplicate
           if (connMap.has(key)) continue;
 
           const used = !!r.used_at;
@@ -71,9 +73,11 @@ export default async function handler(req, res) {
       // 3) Final filter by requested status
       let users = Array.from(usersMap.values());
       if (status === "archived") {
-        users = users.filter((u) => u.status === "archived");
+        users = users.filter(u => u.status === "archived");
+      } else if (status === "deleted") {
+        users = users.filter(u => u.status === "deleted");
       } else if (status === "active") {
-        users = users.filter((u) => u.status !== "archived");
+        users = users.filter(u => u.status !== "archived" && u.status !== "deleted");
       }
 
       users.sort((a, b) => a.email.localeCompare(b.email));
@@ -81,14 +85,13 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST") {
-      // Upsert groups to user_connections
+      // Upsert groups
       const { plannerEmail, userEmail, groups } = req.body || {};
       if (!plannerEmail || !userEmail) {
         return res.status(400).json({ ok: false, error: "Missing plannerEmail or userEmail" });
       }
       const list = Array.isArray(groups) ? groups : [];
 
-      // Check existence
       const { data: existing, error: selErr } = await supabaseAdmin
         .from("user_connections")
         .select("planner_email, user_email")
