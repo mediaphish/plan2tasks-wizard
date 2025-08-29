@@ -1002,14 +1002,14 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   );
 }
 
-/* ───────── Users view — Active/Archived toggle + clearer labels ───────── */
+/* ───────── Users view — Active/Archived toggle + immediate state updates ───────── */
 function UsersView({ plannerEmail, onToast, onManage }){
   const [rows,setRows]=useState([]);
   const [filter,setFilter]=useState("");
   const [groups,setGroups]=useState({});
   const [inviteOpen,setInviteOpen]=useState(false);
 
-  // NEW: Active / Archived tab
+  // Active / Archived tab
   const [tab,setTab]=useState("active"); // "active" | "archived"
 
   // Category modal state
@@ -1045,7 +1045,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
       const r=await fetch("/api/users",{ method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
       const j=await r.json();
       if (!r.ok || j.error) throw new Error(j.error||"Save failed");
-      onToast?.("ok", "Saved categories");
+      onToast?.("ok", `Categories saved for ${email}`);
     }catch(e){ onToast?.("error", String(e.message||e)); }
   }
 
@@ -1056,11 +1056,6 @@ function UsersView({ plannerEmail, onToast, onManage }){
     setCatOpen(true);
   }
 
-  function onCatsSaved(email, nextList){
-    setGroups(prev=>({ ...prev, [email]: nextList }));
-    saveGroups(email, nextList);
-  }
-
   async function doArchive(email, archived){
     try{
       const r = await fetch("/api/users/archive",{
@@ -1069,15 +1064,20 @@ function UsersView({ plannerEmail, onToast, onManage }){
       });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Archive failed");
-      onToast?.("ok", archived ? "User archived" : "User restored");
-      await load(); // reload current tab
+
+      // Immediate UI update: remove from current tab
+      setRows(prev => prev.filter(x => x.email !== email));
+      onToast?.("ok", `${archived ? "User archived" : "User restored"}: ${email}`);
+
+      // Gentle background refresh to stay in sync
+      setTimeout(()=>{ load(); }, 400);
     } catch(e){
       onToast?.("error", String(e.message||e));
     }
   }
 
   async function doDelete(email){
-    if (!confirm("Delete this user connection? This cannot be undone.")) return;
+    if (!confirm(`Permanently delete ${email}? This cannot be undone.`)) return;
     try{
       const r = await fetch("/api/users/remove",{
         method:"POST", headers:{ "Content-Type":"application/json" },
@@ -1085,11 +1085,17 @@ function UsersView({ plannerEmail, onToast, onManage }){
       });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Delete failed");
-      onToast?.("ok","User deleted");
-      await load();
+      setRows(prev => prev.filter(x => x.email !== email));
+      onToast?.("ok", `User deleted: ${email}`);
+      setTimeout(()=>{ load(); }, 400);
     } catch(e){
       onToast?.("error", String(e.message||e));
     }
+  }
+
+  function onCatsSaved(email, nextList){
+    setGroups(prev=>({ ...prev, [email]: nextList }));
+    saveGroups(email, nextList);
   }
 
   const visible = rows.filter(r=>!filter || (r.email||"").toLowerCase().includes(filter.toLowerCase()));
@@ -1099,7 +1105,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold">Users</div>
-          {/* NEW: Active / Archived toggle */}
+          {/* Active / Archived toggle */}
           <div className="ml-2 inline-flex rounded-xl border overflow-hidden">
             <button
               onClick={()=>setTab("active")}
@@ -1455,7 +1461,7 @@ function SendInviteModal({ plannerEmail, onClose, onToast }){
         else onToast?.("error", `Invite failed: ${parsed.txt.slice(0,120)}`);
         setLoading=false; return;
       }
-      onToast?.("ok","Invite sent");
+      onToast?.("ok", `Invite sent to ${email}`);
       onClose?.();
     }catch(e){ onToast?.("error", String(e.message||e)); }
     setLoading(false);
