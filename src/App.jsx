@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
+
+const APP_VERSION = "2025-09-02 · C4";
 /* ───────────── utils (LOCAL DATE ONLY) ───────────── */
 function cn(...a){ return a.filter(Boolean).join(" "); }
 function uid(){ return Math.random().toString(36).slice(2,10); }
@@ -162,6 +164,7 @@ function MainApp(){
         <div className="mb-3 sm:mb-6 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="text-lg sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
+            <span className="text-[10px] sm:text-xs text-gray-500 whitespace-nowrap select-none ml-1 sm:ml-2">{APP_VERSION}</span>
             <nav className="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
               <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}><span className="hidden sm:inline">Users</span></NavBtn>
               <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}><span className="hidden sm:inline">Plan</span></NavBtn>
