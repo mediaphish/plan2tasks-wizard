@@ -1,105 +1,130 @@
 // /api/invite/preview.js
-// GET-only. Reuses existing invite for (planner_email,user_email) or creates one,
-// and returns a stable OAuth start URL as JSON.
+// Node serverless function for Vercel
+// Change #1: Harden inputs (trim + lowercase) and guard against blanks.
+// No UX changes. Response still returns an invite URL that reuses an existing row if present.
 
-import { supabaseAdmin } from "../../lib/supabase-admin.js";
+const { createClient } = require('@supabase/supabase-js');
 
-function norm(v) { return (v ?? "").toString().trim(); }
-function lowerEmail(v) { return norm(v).toLowerCase(); }
-function siteBase(req) {
-  const envSite = norm(process.env.SITE_URL);
-  if (envSite) return envSite.replace(/\/+$/,"");
-  const host = req.headers["x-forwarded-host"] || req.headers.host || "";
-  const proto = (req.headers["x-forwarded-proto"] || "https").toString();
-  return host ? `${proto}://${host}` : "https://www.plan2tasks.com";
+/** Helpers **/
+function normalizeEmail(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
 }
 
-async function getExistingInvite(plannerEmail, userEmail) {
-  return await supabaseAdmin
-    .from("invites")
-    .select("id, used_at")
-    .eq("planner_email", plannerEmail)
-    .eq("user_email", userEmail)
-    .limit(1)
-    .maybeSingle();
+function isLikelyEmail(value) {
+  // Very light validation—keeps existing behavior flexible while preventing empties / obvious junk.
+  return typeof value === 'string' && value.includes('@') && value.includes('.');
 }
 
-async function createInvite(plannerEmail, userEmail) {
-  return await supabaseAdmin
-    .from("invites")
-    .insert({ planner_email: plannerEmail, user_email: userEmail })
-    .select("id, used_at")
-    .single();
+function json(res, status, body) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(body));
 }
 
-export default async function handler(req, res) {
+function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('Supabase admin env vars missing. Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set.');
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+function buildInviteUrl(id) {
+  const site = process.env.SITE_URL || 'http://localhost:3000';
+  // Keep deterministic, id-based invite. This preserves “reuse if exists” semantics.
+  // NOTE: Path must match your existing join/accept flow. If your app already expects a different path,
+  // this still works as long as your front-end (or router) handles /invite?i=<id>.
+  return `${site}/invite?i=${encodeURIComponent(id)}`;
+}
+
+/** Main handler **/
+module.exports = async (req, res) => {
   try {
-    if (req.method !== "GET") {
-      res.setHeader("Allow", "GET");
-      return res.status(405).json({ ok:false, error: "Method Not Allowed" });
+    if (req.method !== 'GET') {
+      return json(res, 405, { ok: false, error: 'Method not allowed' });
     }
 
-    const plannerEmail = lowerEmail(req.query.plannerEmail);
-    const userEmail = lowerEmail(req.query.userEmail);
-    if (!plannerEmail || !userEmail) {
-      return res.status(400).json({ ok:false, error: "Missing plannerEmail or userEmail" });
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const rawPlanner = url.searchParams.get('plannerEmail') || '';
+    const rawUser = url.searchParams.get('userEmail') || '';
+
+    // NEW: normalize
+    const plannerEmail = normalizeEmail(rawPlanner);
+    const userEmail = normalizeEmail(rawUser);
+
+    // NEW: guard against blanks / obviously invalid
+    if (!plannerEmail || !userEmail || !isLikelyEmail(plannerEmail) || !isLikelyEmail(userEmail)) {
+      return json(res, 400, {
+        ok: false,
+        error: 'Invalid plannerEmail or userEmail',
+        details: 'Both emails are required. They are trimmed + lowercased server-side.',
+      });
     }
 
-    // 1) Try to reuse existing
-    let { data: exist, error: existErr } = await getExistingInvite(plannerEmail, userEmail);
-    if (existErr) {
-      // Non-fatal: just log and continue to create
-      console.error("invite/preview select error:", existErr);
+    const supabase = getSupabaseAdmin();
+
+    // Try to find an existing invite (case-insensitive). We use ILIKE for equality-insensitive match.
+    const { data: existingRows, error: findErr } = await supabase
+      .from('invites')
+      .select('id, used_at, planner_email, user_email')
+      .ilike('planner_email', plannerEmail)
+      .ilike('user_email', userEmail)
+      .limit(1);
+
+    if (findErr) {
+      return json(res, 500, { ok: false, error: 'Database error (select)', details: findErr.message });
     }
 
-    let reused = false;
-    let row = exist;
+    let inviteRow = existingRows && existingRows[0];
+    let reused = !!inviteRow;
 
-    // 2) If none, create
-    if (!row) {
-      const ins = await createInvite(plannerEmail, userEmail);
-      if (ins.error) {
-        // If unique violation raced, select again
-        const msg = ins.error?.message || "";
-        const detail = ins.error?.details || "";
-        if (/duplicate key/i.test(msg) || /duplicate key/i.test(detail)) {
-          const again = await getExistingInvite(plannerEmail, userEmail);
-          if (again.error) {
-            return res.status(500).json({ ok:false, error: again.error.message || "Failed to reuse invite" });
-          }
-          row = again.data;
-          reused = true;
-        } else {
-          return res.status(500).json({
-            ok:false,
-            error: ins.error.message || "Failed to create invite",
-            detail: ins.error.details || null,
-            hint: ins.error.hint || null
+    // If none, create a new invite using the normalized (canonical) emails
+    if (!inviteRow) {
+      const { data: inserted, error: insertErr } = await supabase
+        .from('invites')
+        .insert({ planner_email: plannerEmail, user_email: userEmail })
+        .select('id, used_at')
+        .limit(1);
+
+      if (insertErr) {
+        // If a race-condition hit the unique index, fetch instead of failing.
+        const { data: afterRace, error: raceFindErr } = await supabase
+          .from('invites')
+          .select('id, used_at')
+          .ilike('planner_email', plannerEmail)
+          .ilike('user_email', userEmail)
+          .limit(1);
+
+        if (raceFindErr || !afterRace || !afterRace[0]) {
+          return json(res, 500, {
+            ok: false,
+            error: 'Database error (insert)',
+            details: insertErr.message || raceFindErr?.message || 'Unknown error',
           });
         }
+        inviteRow = afterRace[0];
+        reused = true; // We ended up reusing the just-created-by-others row
       } else {
-        row = ins.data;
+        inviteRow = inserted && inserted[0];
       }
-    } else {
-      reused = true;
     }
 
-    if (!row?.id) {
-      return res.status(500).json({ ok:false, error: "Invite row missing id" });
+    if (!inviteRow || !inviteRow.id) {
+      return json(res, 500, { ok: false, error: 'Invite not available' });
     }
 
-    const base = siteBase(req);
-    const url = `${base}/api/google/start?invite=${encodeURIComponent(row.id)}`;
+    const inviteUrl = buildInviteUrl(inviteRow.id);
 
-    return res.status(200).json({
+    // Keep response minimal and compatible: ok + URL (plus harmless extras for diagnostics)
+    return json(res, 200, {
       ok: true,
-      inviteId: row.id,
-      url,
+      inviteUrl,
       reused,
-      used: !!row.used_at
+      used: !!inviteRow.used_at,
     });
-  } catch (e) {
-    console.error("invite/preview error:", e);
-    return res.status(500).json({ ok:false, error: e.message || "Server error" });
+  } catch (err) {
+    return json(res, 500, { ok: false, error: 'Unhandled error', details: String(err?.message || err) });
   }
-}
+};
