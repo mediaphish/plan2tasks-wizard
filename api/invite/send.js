@@ -1,94 +1,211 @@
 // /api/invite/send.js
-import { supabaseAdmin } from "../../lib/supabase-admin.js";
+// Vercel Serverless Function (ESM)
+// Change #2: Normalize emails + env-driven invite URL + include inviteUrl in JSON + use it in the email
+// Assumes RESEND_API_KEY and RESEND_FROM are configured (see /api/debug/config)
 
-const SITE_URL = process.env.SITE_URL || "https://www.plan2tasks.com";
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const RESEND_FROM = process.env.RESEND_FROM;
+import { createClient } from '@supabase/supabase-js';
+import { Resend } from 'resend';
 
-async function ensureInvite(plannerEmail, userEmail) {
-  // Find invite case-insensitively
-  let { data: row, error } = await supabaseAdmin
-    .from("invites")
-    .select("id, planner_email, user_email, used_at")
-    .ilike("planner_email", plannerEmail)
-    .ilike("user_email", userEmail)
-    .maybeSingle();
-  if (error && error.code !== "PGRST116") throw error;
-
-  if (!row) {
-    // Create the single invite row for this pair (unique on planner_email+user_email)
-    const { data: ins, error: insErr } = await supabaseAdmin
-      .from("invites")
-      .insert([{ planner_email: plannerEmail, user_email: userEmail }])
-      .select("id, used_at")
-      .single();
-    if (insErr) throw insErr;
-    row = ins;
-  }
-
-  return { id: row.id, used: !!row.used_at, url: `${SITE_URL}/api/google/start?invite=${row.id}` };
+/** Helpers **/
+function normalizeEmail(value) {
+  if (typeof value !== 'string') return '';
+  return value.trim().toLowerCase();
 }
 
-async function sendEmail({ to, url }) {
-  if (!RESEND_API_KEY || !RESEND_FROM) {
-    throw new Error("Email not configured (missing RESEND_API_KEY or RESEND_FROM).");
-  }
-  const subject = "Connect your Google Tasks to Plan2Tasks";
-  const html = `
-    <div style="font-family:Arial,sans-serif;line-height:1.5">
-      <h2>Plan2Tasks Connection</h2>
-      <p>Click the button below to connect your Google Tasks:</p>
-      <p><a href="${url}" style="background:#111;color:#fff;padding:10px 16px;border-radius:8px;text-decoration:none">Connect Google Tasks</a></p>
-      <p>If the button doesn't work, copy & paste this link:</p>
-      <p><a href="${url}">${url}</a></p>
-      <hr/>
-      <p style="color:#666;font-size:12px">You received this because a planner invited you to Plan2Tasks.</p>
-    </div>
-  `;
-  const payload = {
-    from: RESEND_FROM,
-    to: [to],
-    subject,
-    html,
-  };
-
-  const resp = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${RESEND_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const text = await resp.text();
-  if (!resp.ok) {
-    let msg = text;
-    try { const j = JSON.parse(text); msg = j?.message || j?.error || text; } catch {}
-    throw new Error(`Resend API error: ${msg}`);
-  }
-  return true;
+function isLikelyEmail(value) {
+  return typeof value === 'string' && value.includes('@') && value.includes('.');
 }
 
-export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ ok: false, error: "POST only" });
-  }
+function sendJson(res, status, body) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(body));
+}
 
+function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    throw new Error('Supabase admin env vars missing. Ensure SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set.');
+  }
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+function normalizePath(p) {
+  if (!p) return '/join';
+  return p.startsWith('/') ? p : `/${p}`;
+}
+
+function buildInviteUrl(id) {
+  const site = process.env.SITE_URL || 'http://localhost:3000';
+  const path = normalizePath(process.env.INVITE_PATH || '/join');  // e.g. '/invite'
+  const key = process.env.INVITE_QUERY_KEY || 'i';                 // e.g. 'token'
+  return `${site}${path}?${encodeURIComponent(key)}=${encodeURIComponent(id)}`;
+}
+
+async function readJsonBody(req) {
+  // Works whether body parsing is provided or not
+  if (req.body && typeof req.body === 'object') return req.body;
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const raw = Buffer.concat(chunks).toString('utf8') || '';
+  if (!raw) return {};
   try {
-    const { plannerEmail, userEmail } = req.body || {};
-    if (!plannerEmail || !userEmail) {
-      return res.status(400).json({ ok: false, error: "Missing plannerEmail or userEmail" });
+    return JSON.parse(raw);
+  } catch {
+    // Try URL-encoded fallback (not expected for our SPA, but safe)
+    const params = new URLSearchParams(raw);
+    const obj = {};
+    for (const [k, v] of params.entries()) obj[k] = v;
+    return obj;
+  }
+}
+
+function buildEmailHtml({ plannerEmail, userEmail, inviteUrl }) {
+  // Keep simple, brand-neutral; your SPA theme handles the join UX.
+  return `
+  <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.4">
+    <h2 style="margin:0 0 12px">You're invited to connect on Plan2Tasks</h2>
+    <p style="margin:0 0 16px">
+      <strong>${plannerEmail}</strong> invited <strong>${userEmail}</strong> to connect and receive task plans.
+    </p>
+    <p style="margin:0 0 16px">
+      Click the secure link below to accept the invite:
+    </p>
+    <p style="margin:0 0 24px">
+      <a href="${inviteUrl}" style="display:inline-block;padding:10px 16px;text-decoration:none;border-radius:8px;border:1px solid #e2e8f0">
+        Accept Invite
+      </a>
+    </p>
+    <p style="margin:0 0 8px">If the button doesn't work, paste this URL in your browser:</p>
+    <p style="margin:0 0 16px;word-break:break-all"><a href="${inviteUrl}">${inviteUrl}</a></p>
+    <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0" />
+    <p style="color:#6b7280;margin:0">Sent by Plan2Tasks</p>
+  </div>`;
+}
+
+function buildEmailText({ inviteUrl, plannerEmail, userEmail }) {
+  return [
+    `You're invited to connect on Plan2Tasks`,
+    ``,
+    `Planner: ${plannerEmail}`,
+    `User: ${userEmail}`,
+    ``,
+    `Accept the invite: ${inviteUrl}`,
+  ].join('\n');
+}
+
+/** Main handler **/
+export default async function handler(req, res) {
+  try {
+    if (req.method !== 'POST') {
+      return sendJson(res, 405, { ok: false, error: 'Method not allowed' });
     }
 
-    const { id, used, url } = await ensureInvite(plannerEmail, userEmail);
+    const body = await readJsonBody(req);
+    const plannerEmail = normalizeEmail(body.plannerEmail || '');
+    const userEmail = normalizeEmail(body.userEmail || '');
 
-    // Always send, even if previously used. The same link can start OAuth again.
-    const emailed = await sendEmail({ to: userEmail, url });
+    // Normalize & validate
+    if (!plannerEmail || !userEmail || !isLikelyEmail(plannerEmail) || !isLikelyEmail(userEmail)) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: 'Invalid plannerEmail or userEmail',
+        details: 'Both emails are required. They are trimmed + lowercased server-side.',
+      });
+    }
 
-    return res.json({ ok: true, emailed: !!emailed, inviteId: id, url, reused: true, used });
-  } catch (e) {
-    console.error("invite/send error", e);
-    return res.status(500).json({ ok: false, error: e.message || "Server error" });
+    const supabase = getSupabaseAdmin();
+
+    // Find existing invite (case-insensitive exact match)
+    const { data: existingRows, error: findErr } = await supabase
+      .from('invites')
+      .select('id, used_at, planner_email, user_email')
+      .ilike('planner_email', plannerEmail)
+      .ilike('user_email', userEmail)
+      .limit(1);
+
+    if (findErr) {
+      return sendJson(res, 500, { ok: false, error: 'Database error (select)', details: findErr.message });
+    }
+
+    let inviteRow = existingRows && existingRows[0];
+    let reused = !!inviteRow;
+
+    // Create if none
+    if (!inviteRow) {
+      const { data: inserted, error: insertErr } = await supabase
+        .from('invites')
+        .insert({ planner_email: plannerEmail, user_email: userEmail })
+        .select('id, used_at')
+        .limit(1);
+
+      if (insertErr) {
+        // Unique index race: fetch instead
+        const { data: afterRace, error: raceFindErr } = await supabase
+          .from('invites')
+          .select('id, used_at')
+          .ilike('planner_email', plannerEmail)
+          .ilike('user_email', userEmail)
+          .limit(1);
+
+        if (raceFindErr || !afterRace || !afterRace[0]) {
+          return sendJson(res, 500, {
+            ok: false,
+            error: 'Database error (insert)',
+            details: insertErr.message || raceFindErr?.message || 'Unknown error',
+          });
+        }
+        inviteRow = afterRace[0];
+        reused = true;
+      } else {
+        inviteRow = inserted && inserted[0];
+      }
+    }
+
+    if (!inviteRow || !inviteRow.id) {
+      return sendJson(res, 500, { ok: false, error: 'Invite not available' });
+    }
+
+    const inviteUrl = buildInviteUrl(inviteRow.id);
+
+    // Send email via Resend
+    const resendKey = process.env.RESEND_API_KEY;
+    const resendFrom = process.env.RESEND_FROM;
+    if (!resendKey || !resendFrom) {
+      return sendJson(res, 500, {
+        ok: false,
+        error: 'Email not configured',
+        details: 'RESEND_API_KEY or RESEND_FROM missing',
+      });
+    }
+
+    const resend = new Resend(resendKey);
+    const subject = 'Your Plan2Tasks Invite';
+    const html = buildEmailHtml({ plannerEmail, userEmail, inviteUrl });
+    const text = buildEmailText({ plannerEmail, userEmail, inviteUrl });
+
+    const emailResp = await resend.emails.send({
+      from: resendFrom,
+      to: userEmail,
+      subject,
+      html,
+      text,
+    });
+
+    if (emailResp?.error) {
+      return sendJson(res, 500, { ok: false, error: 'Email send failed', details: String(emailResp.error) });
+    }
+
+    // Success
+    return sendJson(res, 200, {
+      ok: true,
+      inviteUrl,
+      reused,
+      used: !!inviteRow.used_at,
+      emailId: emailResp?.data?.id || null,
+    });
+  } catch (err) {
+    return sendJson(res, 500, { ok: false, error: 'Unhandled error', details: String(err?.message || err) });
   }
 }
