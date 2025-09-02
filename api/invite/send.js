@@ -1,10 +1,10 @@
 // /api/invite/send.js
 // Vercel Serverless Function (ESM)
-// Change 2: Normalize emails + env-driven invite URL + include inviteUrl in JSON + use it in the email
-// Patch: Pin Node runtime + simple body parser to avoid runtime quirks
+// Patch: Use supported runtime value ("nodejs") so builds pass
+// Behavior unchanged: normalize emails, env-driven invite URL, email via Resend
 
 export const config = {
-  runtime: 'nodejs18.x',
+  runtime: 'nodejs',
 };
 
 import { Buffer } from 'node:buffer';
@@ -27,7 +27,7 @@ function sendJson(res, status, body) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.end(JSON.stringify(body));
   } catch {
-    // fallthrough
+    // no-op
   }
 }
 
@@ -53,7 +53,7 @@ function buildInviteUrl(id) {
 }
 
 async function readJsonBody(req) {
-  // Robust body parser for Node API routes (no framework middleware assumptions)
+  // Robust body parser for Node API routes
   return await new Promise((resolve) => {
     let raw = '';
     req.on('data', (chunk) => {
