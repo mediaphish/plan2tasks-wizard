@@ -1,9 +1,8 @@
 // /api/invite/preview.js
-// Node serverless function for Vercel
-// Change #1a: Configurable invite link path/query via env (INVITE_PATH, INVITE_QUERY_KEY)
-// + previously shipped hardening (trim + lowercase) and blank guards.
+// Vercel Serverless Function (ESM)
+// Change 1b: ESM export + input hardening + env-driven invite URL
 
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 /** Helpers **/
 function normalizeEmail(value) {
@@ -15,7 +14,7 @@ function isLikelyEmail(value) {
   return typeof value === 'string' && value.includes('@') && value.includes('.');
 }
 
-function json(res, status, body) {
+function sendJson(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(body));
@@ -37,17 +36,16 @@ function normalizePath(p) {
 
 function buildInviteUrl(id) {
   const site = process.env.SITE_URL || 'http://localhost:3000';
-  // NEW: allow overriding path and query key via env for zero-code alignment with your SPA route.
-  const path = normalizePath(process.env.INVITE_PATH || '/join');     // e.g. '/invite', '/accept-invite'
-  const key = process.env.INVITE_QUERY_KEY || 'i';                     // e.g. 'token'
+  const path = normalizePath(process.env.INVITE_PATH || '/join'); // e.g. '/invite'
+  const key = process.env.INVITE_QUERY_KEY || 'i';                // e.g. 'token'
   return `${site}${path}?${encodeURIComponent(key)}=${encodeURIComponent(id)}`;
 }
 
-/** Main handler **/
-module.exports = async (req, res) => {
+/** Main handler (ESM default export) **/
+export default async function handler(req, res) {
   try {
     if (req.method !== 'GET') {
-      return json(res, 405, { ok: false, error: 'Method not allowed' });
+      return sendJson(res, 405, { ok: false, error: 'Method not allowed' });
     }
 
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -58,7 +56,7 @@ module.exports = async (req, res) => {
     const plannerEmail = normalizeEmail(rawPlanner);
     const userEmail = normalizeEmail(rawUser);
     if (!plannerEmail || !userEmail || !isLikelyEmail(plannerEmail) || !isLikelyEmail(userEmail)) {
-      return json(res, 400, {
+      return sendJson(res, 400, {
         ok: false,
         error: 'Invalid plannerEmail or userEmail',
         details: 'Both emails are required. They are trimmed + lowercased server-side.',
@@ -67,7 +65,7 @@ module.exports = async (req, res) => {
 
     const supabase = getSupabaseAdmin();
 
-    // Find existing (case-insensitive)
+    // Find existing (case-insensitive exact match)
     const { data: existingRows, error: findErr } = await supabase
       .from('invites')
       .select('id, used_at, planner_email, user_email')
@@ -76,7 +74,7 @@ module.exports = async (req, res) => {
       .limit(1);
 
     if (findErr) {
-      return json(res, 500, { ok: false, error: 'Database error (select)', details: findErr.message });
+      return sendJson(res, 500, { ok: false, error: 'Database error (select)', details: findErr.message });
     }
 
     let inviteRow = existingRows && existingRows[0];
@@ -91,7 +89,7 @@ module.exports = async (req, res) => {
         .limit(1);
 
       if (insertErr) {
-        // Handle race against unique index
+        // Unique index race: fetch instead
         const { data: afterRace, error: raceFindErr } = await supabase
           .from('invites')
           .select('id, used_at')
@@ -100,7 +98,7 @@ module.exports = async (req, res) => {
           .limit(1);
 
         if (raceFindErr || !afterRace || !afterRace[0]) {
-          return json(res, 500, {
+          return sendJson(res, 500, {
             ok: false,
             error: 'Database error (insert)',
             details: insertErr.message || raceFindErr?.message || 'Unknown error',
@@ -114,18 +112,18 @@ module.exports = async (req, res) => {
     }
 
     if (!inviteRow || !inviteRow.id) {
-      return json(res, 500, { ok: false, error: 'Invite not available' });
+      return sendJson(res, 500, { ok: false, error: 'Invite not available' });
     }
 
     const inviteUrl = buildInviteUrl(inviteRow.id);
 
-    return json(res, 200, {
+    return sendJson(res, 200, {
       ok: true,
       inviteUrl,
       reused,
       used: !!inviteRow.used_at,
     });
   } catch (err) {
-    return json(res, 500, { ok: false, error: 'Unhandled error', details: String(err?.message || err) });
+    return sendJson(res, 500, { ok: false, error: 'Unhandled error', details: String(err?.message || err) });
   }
-};
+}
