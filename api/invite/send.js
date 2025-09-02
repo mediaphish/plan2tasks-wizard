@@ -1,8 +1,13 @@
 // /api/invite/send.js
 // Vercel Serverless Function (ESM)
-// Change #2: Normalize emails + env-driven invite URL + include inviteUrl in JSON + use it in the email
-// Assumes RESEND_API_KEY and RESEND_FROM are configured (see /api/debug/config)
+// Change 2: Normalize emails + env-driven invite URL + include inviteUrl in JSON + use it in the email
+// Patch: Pin Node runtime + simple body parser to avoid runtime quirks
 
+export const config = {
+  runtime: 'nodejs18.x',
+};
+
+import { Buffer } from 'node:buffer';
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
 
@@ -17,9 +22,13 @@ function isLikelyEmail(value) {
 }
 
 function sendJson(res, status, body) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(body));
+  try {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(body));
+  } catch {
+    // fallthrough
+  }
 }
 
 function getSupabaseAdmin() {
@@ -44,34 +53,39 @@ function buildInviteUrl(id) {
 }
 
 async function readJsonBody(req) {
-  // Works whether body parsing is provided or not
-  if (req.body && typeof req.body === 'object') return req.body;
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString('utf8') || '';
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // Try URL-encoded fallback (not expected for our SPA, but safe)
-    const params = new URLSearchParams(raw);
-    const obj = {};
-    for (const [k, v] of params.entries()) obj[k] = v;
-    return obj;
-  }
+  // Robust body parser for Node API routes (no framework middleware assumptions)
+  return await new Promise((resolve) => {
+    let raw = '';
+    req.on('data', (chunk) => {
+      raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    });
+    req.on('end', () => {
+      if (!raw) return resolve({});
+      try {
+        resolve(JSON.parse(raw));
+      } catch {
+        try {
+          const params = new URLSearchParams(raw);
+          const obj = {};
+          for (const [k, v] of params.entries()) obj[k] = v;
+          resolve(obj);
+        } catch {
+          resolve({});
+        }
+      }
+    });
+    req.on('error', () => resolve({}));
+  });
 }
 
 function buildEmailHtml({ plannerEmail, userEmail, inviteUrl }) {
-  // Keep simple, brand-neutral; your SPA theme handles the join UX.
   return `
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.4">
     <h2 style="margin:0 0 12px">You're invited to connect on Plan2Tasks</h2>
     <p style="margin:0 0 16px">
       <strong>${plannerEmail}</strong> invited <strong>${userEmail}</strong> to connect and receive task plans.
     </p>
-    <p style="margin:0 0 16px">
-      Click the secure link below to accept the invite:
-    </p>
+    <p style="margin:0 0 16px">Click the secure link below to accept the invite:</p>
     <p style="margin:0 0 24px">
       <a href="${inviteUrl}" style="display:inline-block;padding:10px 16px;text-decoration:none;border-radius:8px;border:1px solid #e2e8f0">
         Accept Invite
@@ -106,7 +120,6 @@ export default async function handler(req, res) {
     const plannerEmail = normalizeEmail(body.plannerEmail || '');
     const userEmail = normalizeEmail(body.userEmail || '');
 
-    // Normalize & validate
     if (!plannerEmail || !userEmail || !isLikelyEmail(plannerEmail) || !isLikelyEmail(userEmail)) {
       return sendJson(res, 400, {
         ok: false,
@@ -185,13 +198,18 @@ export default async function handler(req, res) {
     const html = buildEmailHtml({ plannerEmail, userEmail, inviteUrl });
     const text = buildEmailText({ plannerEmail, userEmail, inviteUrl });
 
-    const emailResp = await resend.emails.send({
-      from: resendFrom,
-      to: userEmail,
-      subject,
-      html,
-      text,
-    });
+    let emailResp;
+    try {
+      emailResp = await resend.emails.send({
+        from: resendFrom,
+        to: userEmail,
+        subject,
+        html,
+        text,
+      });
+    } catch (e) {
+      return sendJson(res, 500, { ok: false, error: 'Email send failed', details: String(e?.message || e) });
+    }
 
     if (emailResp?.error) {
       return sendJson(res, 500, { ok: false, error: 'Email send failed', details: String(emailResp.error) });
