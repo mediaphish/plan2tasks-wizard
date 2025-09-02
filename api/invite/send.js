@@ -25,21 +25,36 @@ function getSupabaseAdmin() {
 }
 
 function normalizePath(p) {
-  if (!p) return '/join';
+  if (!p) return '/api/invite/accept';
   return p.startsWith('/') ? p : `/${p}`;
 }
 
+function siteUrl() {
+  return process.env.SITE_URL || 'https://www.plan2tasks.com';
+}
+
 function buildInviteUrl(id) {
-  const site = process.env.SITE_URL || 'http://localhost:3000';
-  const path = normalizePath(process.env.INVITE_PATH || '/join');
+  const site = siteUrl();
+  const path = normalizePath(process.env.INVITE_PATH || '/api/invite/accept');
   const key = process.env.INVITE_QUERY_KEY || 'i';
   return `${site}${path}?${encodeURIComponent(key)}=${encodeURIComponent(id)}`;
+}
+
+function buildAcceptByEmailUrl(plannerEmail, userEmail) {
+  const site = siteUrl();
+  const qs = new URLSearchParams({
+    plannerEmail: plannerEmail,
+    userEmail: userEmail,
+  });
+  return `${site}/api/invite/accept-by-email?${qs.toString()}`;
 }
 
 async function readJsonBody(req) {
   return await new Promise((resolve) => {
     let raw = '';
-    req.on('data', (chunk) => { raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'); });
+    req.on('data', (chunk) => {
+      raw += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+    });
     req.on('end', () => {
       if (!raw) return resolve({});
       try { resolve(JSON.parse(raw)); }
@@ -56,30 +71,41 @@ async function readJsonBody(req) {
   });
 }
 
-function buildEmailHtml({ plannerEmail, userEmail, inviteUrl }) {
+function buildEmailHtml({ plannerEmail, userEmail, primaryUrl, fallbackUrl }) {
   return `
-  <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.4">
+  <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;line-height:1.45">
     <h2 style="margin:0 0 12px">You're invited to connect on Plan2Tasks</h2>
-    <p style="margin:0 0 16px"><strong>${plannerEmail}</strong> invited <strong>${userEmail}</strong> to connect and receive task plans.</p>
-    <p style="margin:0 0 16px">Click the secure link below to accept the invite:</p>
-    <p style="margin:0 0 24px">
-      <a href="${inviteUrl}" style="display:inline-block;padding:10px 16px;text-decoration:none;border-radius:8px;border:1px solid #e2e8f0">Accept Invite</a>
+    <p style="margin:0 0 10px">
+      <strong>${plannerEmail}</strong> invited <strong>${userEmail}</strong> to receive organized task plans.
     </p>
-    <p style="margin:0 0 8px">If the button doesn't work, paste this URL in your browser:</p>
-    <p style="margin:0 0 16px;word-break:break-all"><a href="${inviteUrl}">${inviteUrl}</a></p>
-    <hr style="border:none;border-top:1px solid #e2e8f0;margin:24px 0" />
-    <p style="color:#6b7280;margin:0">Sent by Plan2Tasks</p>
+    <p style="margin:0 12px 18px 0">
+      <a href="${primaryUrl}" style="display:inline-block;padding:10px 14px;text-decoration:none;border-radius:10px;border:1px solid #e5e7eb;background:#f9fafb;color:#111">
+        Accept Invite
+      </a>
+    </p>
+    <p style="margin:0 0 8px;color:#374151;font-size:14px">Having trouble with the button?</p>
+    <p style="margin:0 0 18px">
+      <a href="${fallbackUrl}" style="color:#111">Try this link instead</a>
+    </p>
+    <p style="margin:0 0 6px;color:#6b7280;font-size:12px">If neither link works, paste this URL in your browser:</p>
+    <p style="margin:0 0 4px;word-break:break-all;font-size:12px">
+      <a href="${primaryUrl}">${primaryUrl}</a>
+    </p>
+    <p style="margin:0;word-break:break-all;font-size:12px">
+      <a href="${fallbackUrl}">${fallbackUrl}</a>
+    </p>
   </div>`;
 }
 
-function buildEmailText({ inviteUrl, plannerEmail, userEmail }) {
+function buildEmailText({ plannerEmail, userEmail, primaryUrl, fallbackUrl }) {
   return [
     `You're invited to connect on Plan2Tasks`,
     ``,
     `Planner: ${plannerEmail}`,
     `User: ${userEmail}`,
     ``,
-    `Accept the invite: ${inviteUrl}`,
+    `Accept the invite: ${primaryUrl}`,
+    `Having trouble? Try this link: ${fallbackUrl}`,
   ].join('\n');
 }
 
@@ -133,7 +159,8 @@ export default async function handler(req, res) {
 
     if (!inviteRow || !inviteRow.id) return sendJson(res, 500, { ok: false, error: 'Invite not available' });
 
-    const inviteUrl = buildInviteUrl(inviteRow.id);
+    const primaryUrl = buildInviteUrl(inviteRow.id);
+    const fallbackUrl = buildAcceptByEmailUrl(plannerEmail, userEmail);
 
     const resendKey = process.env.RESEND_API_KEY;
     const resendFrom = process.env.RESEND_FROM;
@@ -142,8 +169,8 @@ export default async function handler(req, res) {
     }
 
     const subject = 'Your Plan2Tasks Invite';
-    const html = buildEmailHtml({ plannerEmail, userEmail, inviteUrl });
-    const text = buildEmailText({ plannerEmail, userEmail, inviteUrl });
+    const html = buildEmailHtml({ plannerEmail, userEmail, primaryUrl, fallbackUrl });
+    const text = buildEmailText({ plannerEmail, userEmail, primaryUrl, fallbackUrl });
 
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -173,12 +200,13 @@ export default async function handler(req, res) {
 
     return sendJson(res, 200, {
       ok: true,
-      inviteUrl,
+      inviteUrl: primaryUrl,
+      fallbackUrl,
       reused,
       used: !!inviteRow.used_at,
       emailId,
     });
-  } catch (err) {
+  } catch {
     return sendJson(res, 500, { ok: false, error: 'Unhandled error' });
   }
 }
