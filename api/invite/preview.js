@@ -1,7 +1,7 @@
 // /api/invite/preview.js
 // Node serverless function for Vercel
-// Change #1: Harden inputs (trim + lowercase) and guard against blanks.
-// No UX changes. Response still returns an invite URL that reuses an existing row if present.
+// Change #1a: Configurable invite link path/query via env (INVITE_PATH, INVITE_QUERY_KEY)
+// + previously shipped hardening (trim + lowercase) and blank guards.
 
 const { createClient } = require('@supabase/supabase-js');
 
@@ -12,7 +12,6 @@ function normalizeEmail(value) {
 }
 
 function isLikelyEmail(value) {
-  // Very light validation—keeps existing behavior flexible while preventing empties / obvious junk.
   return typeof value === 'string' && value.includes('@') && value.includes('.');
 }
 
@@ -31,12 +30,17 @@ function getSupabaseAdmin() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function normalizePath(p) {
+  if (!p) return '/join';
+  return p.startsWith('/') ? p : `/${p}`;
+}
+
 function buildInviteUrl(id) {
   const site = process.env.SITE_URL || 'http://localhost:3000';
-  // Keep deterministic, id-based invite. This preserves “reuse if exists” semantics.
-  // NOTE: Path must match your existing join/accept flow. If your app already expects a different path,
-  // this still works as long as your front-end (or router) handles /invite?i=<id>.
-  return `${site}/invite?i=${encodeURIComponent(id)}`;
+  // NEW: allow overriding path and query key via env for zero-code alignment with your SPA route.
+  const path = normalizePath(process.env.INVITE_PATH || '/join');     // e.g. '/invite', '/accept-invite'
+  const key = process.env.INVITE_QUERY_KEY || 'i';                     // e.g. 'token'
+  return `${site}${path}?${encodeURIComponent(key)}=${encodeURIComponent(id)}`;
 }
 
 /** Main handler **/
@@ -50,11 +54,9 @@ module.exports = async (req, res) => {
     const rawPlanner = url.searchParams.get('plannerEmail') || '';
     const rawUser = url.searchParams.get('userEmail') || '';
 
-    // NEW: normalize
+    // Normalize & validate
     const plannerEmail = normalizeEmail(rawPlanner);
     const userEmail = normalizeEmail(rawUser);
-
-    // NEW: guard against blanks / obviously invalid
     if (!plannerEmail || !userEmail || !isLikelyEmail(plannerEmail) || !isLikelyEmail(userEmail)) {
       return json(res, 400, {
         ok: false,
@@ -65,7 +67,7 @@ module.exports = async (req, res) => {
 
     const supabase = getSupabaseAdmin();
 
-    // Try to find an existing invite (case-insensitive). We use ILIKE for equality-insensitive match.
+    // Find existing (case-insensitive)
     const { data: existingRows, error: findErr } = await supabase
       .from('invites')
       .select('id, used_at, planner_email, user_email')
@@ -80,7 +82,7 @@ module.exports = async (req, res) => {
     let inviteRow = existingRows && existingRows[0];
     let reused = !!inviteRow;
 
-    // If none, create a new invite using the normalized (canonical) emails
+    // Create if none
     if (!inviteRow) {
       const { data: inserted, error: insertErr } = await supabase
         .from('invites')
@@ -89,7 +91,7 @@ module.exports = async (req, res) => {
         .limit(1);
 
       if (insertErr) {
-        // If a race-condition hit the unique index, fetch instead of failing.
+        // Handle race against unique index
         const { data: afterRace, error: raceFindErr } = await supabase
           .from('invites')
           .select('id, used_at')
@@ -105,7 +107,7 @@ module.exports = async (req, res) => {
           });
         }
         inviteRow = afterRace[0];
-        reused = true; // We ended up reusing the just-created-by-others row
+        reused = true;
       } else {
         inviteRow = inserted && inserted[0];
       }
@@ -117,7 +119,6 @@ module.exports = async (req, res) => {
 
     const inviteUrl = buildInviteUrl(inviteRow.id);
 
-    // Keep response minimal and compatible: ok + URL (plus harmless extras for diagnostics)
     return json(res, 200, {
       ok: true,
       inviteUrl,
