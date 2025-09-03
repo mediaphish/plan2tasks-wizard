@@ -2,20 +2,18 @@ export const config = { runtime: 'nodejs' };
 
 import { createClient } from '@supabase/supabase-js';
 
-function n(v) {
-  if (typeof v !== 'string') return '';
-  return v.trim().toLowerCase();
-}
+function n(v) { return (typeof v === 'string' ? v : '').trim().toLowerCase(); }
 function send(res, status, body) {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.end(JSON.stringify(body));
 }
+
 function admin() {
   const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error('Missing Supabase env');
-  return createClient(url, key, { auth: { persistSession: false } });
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE; // support both names
+  if (!url || !key) throw new Error('Missing Supabase env vars');
+  return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
 }
 
 export default async function handler(req, res) {
@@ -24,71 +22,66 @@ export default async function handler(req, res) {
 
     const url = new URL(req.url, `http://${req.headers.host}`);
     const plannerEmail = n(url.searchParams.get('plannerEmail') || '');
-    const status = (url.searchParams.get('status') || 'active').toLowerCase();
+    const status = (url.searchParams.get('status') || 'active').toLowerCase(); // active|archived|deleted|all
 
     if (!plannerEmail || !plannerEmail.includes('@')) {
       return send(res, 400, { ok: false, error: 'Invalid plannerEmail' });
     }
-    if (!['active','archived','deleted'].includes(status)) {
+    if (!['active','archived','deleted','all'].includes(status)) {
       return send(res, 400, { ok: false, error: 'Invalid status' });
     }
 
     const sb = admin();
-
-    // Connections
-    const wantedStatus =
-      status === 'active' ? 'connected' :
-      status === 'archived' ? 'archived' :
-      'deleted';
-
-    const { data: conns, error: connErr } = await sb
-      .from('user_connections')
-      .select('user_email, groups, status, updated_at')
-      .ilike('planner_email', plannerEmail)
-      .eq('status', wantedStatus);
-
-    if (connErr) return send(res, 500, { ok: false, error: 'Database error (connections)' });
-
     const byEmail = new Map();
-    for (const c of conns || []) {
-      const email = n(c.user_email || '');
-      if (!email) continue;
-      byEmail.set(email, {
-        email,
-        groups: Array.isArray(c.groups) ? c.groups : [],
-        status: c.status || wantedStatus,
-        updated_at: c.updated_at || null,
-        __source: 'connection',
-      });
+
+    const priority = { connected: 3, invited: 2, archived: 2, deleted: 1 };
+
+    async function addConnections(statuses) {
+      const { data, error } = await sb
+        .from('user_connections')
+        .select('user_email, groups, status, updated_at')
+        .ilike('planner_email', plannerEmail)
+        .in('status', statuses);
+      if (error) throw new Error('Database error (connections)');
+
+      for (const c of data || []) {
+        const email = n(c.user_email || '');
+        if (!email) continue;
+        const next = { email, groups: Array.isArray(c.groups) ? c.groups : [], status: c.status, updated_at: c.updated_at || null, __source: 'connection' };
+        const prev = byEmail.get(email);
+        if (!prev || (priority[next.status] || 0) >= (priority[prev.status] || 0)) byEmail.set(email, next);
+      }
     }
 
-    // Invites: include only for Active, and only pending (used_at IS NULL).
-    if (status === 'active') {
-      const { data: invs, error: invErr } = await sb
+    async function addPendingInvites() {
+      const { data, error } = await sb
         .from('invites')
         .select('user_email, used_at')
         .ilike('planner_email', plannerEmail)
         .is('used_at', null);
+      if (error) throw new Error('Database error (invites)');
 
-      if (invErr) return send(res, 500, { ok: false, error: 'Database error (invites)' });
-
-      for (const r of invs || []) {
-        const email = n(r.user_email || '');
+      for (const inv of data || []) {
+        const email = n(inv.user_email || '');
         if (!email) continue;
-        if (byEmail.has(email)) continue; // dedupe: connection wins
-        byEmail.set(email, {
-          email,
-          groups: [],
-          status: 'invited',
-          updated_at: null,
-          __source: 'invite',
-        });
+        if (!byEmail.has(email)) {
+          byEmail.set(email, { email, groups: [], status: 'invited', updated_at: null, __source: 'invite' });
+        }
       }
+    }
+
+    if (status === 'all') {
+      await addConnections(['connected','archived','deleted']);
+      await addPendingInvites();
+    } else {
+      const wanted = status === 'active' ? ['connected'] : status === 'archived' ? ['archived'] : ['deleted'];
+      await addConnections(wanted);
+      if (status === 'active') await addPendingInvites();
     }
 
     const users = Array.from(byEmail.values());
     return send(res, 200, { ok: true, users });
   } catch (e) {
-    return send(res, 500, { ok: false, error: 'Unhandled error' });
+    return send(res, 500, { ok: false, error: e.message || 'Unhandled error' });
   }
 }
