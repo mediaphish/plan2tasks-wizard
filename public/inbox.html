@@ -4,27 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Plan2Tasks · Inbox</title>
-  <!-- Tailwind CDN to mirror your app’s utility classes -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['ui-sans-serif','system-ui','-apple-system','Segoe UI','Roboto','Helvetica','Arial','sans-serif']
-          }
-        }
-      }
-    }
-  </script>
 </head>
 <body class="min-h-screen bg-gray-100 text-gray-900">
   <div class="mx-auto max-w-6xl p-4">
-    <!-- Header -->
     <div class="mb-3 sm:mb-6 flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-2 sm:gap-3">
         <div class="text-lg sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
-        <span id="version" class="text-[10px] sm:text-xs text-gray-500 whitespace-nowrap select-none ml-1 sm:ml-2">Inbox</span>
+        <span class="text-[10px] sm:text-xs text-gray-500 whitespace-nowrap select-none ml-1 sm:ml-2">Inbox</span>
       </div>
       <div class="relative">
         <button class="relative rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">
@@ -34,21 +21,13 @@
       </div>
     </div>
 
-    <!-- Controls -->
     <div class="mb-3 sm:mb-4 flex flex-wrap items-center gap-2">
-      <input id="planner" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm w-72"
-             placeholder="Planner email" />
-      <input id="search" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm w-60"
-             placeholder="Filter by title…" />
-      <button id="refresh" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">
-        Refresh
-      </button>
+      <input id="planner" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm w-72" placeholder="Planner email" />
+      <input id="search" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm w-60" placeholder="Filter by title…" />
+      <button id="refresh" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">Refresh</button>
     </div>
 
-    <!-- List -->
     <div id="list" class="grid gap-2"></div>
-
-    <!-- Empty state -->
     <div id="empty" class="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-6 text-center text-sm text-gray-600 hidden">
       No new bundles. When GPT sends a bundle, it will appear here automatically.
     </div>
@@ -58,10 +37,10 @@
     const $ = s => document.querySelector(s);
     const plannerInput = $('#planner');
     const searchInput  = $('#search');
-    const listEl       = $('#list');
-    const emptyEl      = $('#empty');
-    const badgeEl      = $('#badge');
-    const refreshBtn   = $('#refresh');
+    const listEl = $('#list');
+    const emptyEl = $('#empty');
+    const badgeEl = $('#badge');
+    const refreshBtn = $('#refresh');
 
     const state = {
       plannerEmail: localStorage.getItem('p2t:plannerEmail') || 'bartpaden@gmail.com',
@@ -82,19 +61,6 @@
       const res = await fetch(url, { credentials: 'include' });
       if(!res.ok) throw new Error('HTTP '+res.status);
       return await res.json();
-    }
-    async function postJSON(url, body){
-      const res = await fetch(url, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await res.json().catch(()=>({}));
-      if(!res.ok || (data && data.ok === false)){
-        const msg = (data && (data.error || data.message)) || ('HTTP '+res.status);
-        throw new Error(msg);
-      }
-      return data;
     }
     function fmtDate(iso){
       const d = new Date(iso);
@@ -144,7 +110,12 @@
         const reviewBtn = document.createElement('button');
         reviewBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50';
         reviewBtn.textContent = 'Review';
-        reviewBtn.onclick = () => onReview(b);
+        reviewBtn.onclick = () => {
+          const url = new URL('/review.html', window.location.origin);
+          url.searchParams.set('inboxId', b.id);
+          url.searchParams.set('plannerEmail', state.plannerEmail);
+          window.location.assign(url.toString());
+        };
 
         const archiveBtn = document.createElement('button');
         archiveBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-600 hover:bg-gray-50';
@@ -176,12 +147,13 @@
       const user = b.suggested_user || prompt('Assign to user email:');
       if(!user) return;
       try{
-        await postJSON('/api/inbox/assign', {
-          plannerEmail: state.plannerEmail,
-          inboxId: b.id,           // <-- IMPORTANT: API expects inboxId
-          userEmail: user
+        const res = await fetch('/api/inbox/assign', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ plannerEmail: state.plannerEmail, inboxId: b.id, userEmail: user })
         });
-        // optimistic remove
+        const j = await res.json().catch(()=>({}));
+        if(!res.ok || !j || j.ok === false){ throw new Error((j && j.error) || 'Assign failed'); }
         state.items = state.items.filter(x => x.id !== b.id);
         render();
       }catch(e){
@@ -189,39 +161,16 @@
       }
     }
 
-    async function onReview(b){
-      try{
-        let user = b.suggested_user;
-        if(!user){
-          user = prompt('Assign to user email before review:');
-          if(!user) return;
-        }
-        // Assign first (so the bundle is not lost and shows in the correct place)
-        await postJSON('/api/inbox/assign', {
-          plannerEmail: state.plannerEmail,
-          inboxId: b.id,           // <-- IMPORTANT: API expects inboxId
-          userEmail: user
-        });
-
-        // Remove from list and go to main app
-        state.items = state.items.filter(x => x.id !== b.id);
-        render();
-
-        // Redirect into the app; SPA currently has no deep-link for a specific user/bundle,
-        // so we land on the home view where you continue your normal Review/Push flow.
-        window.location.assign('/');
-      }catch(e){
-        alert('Review setup failed: ' + (e.message || e));
-      }
-    }
-
     async function onArchive(b){
       if(!confirm('Archive this bundle?')) return;
       try{
-        await postJSON('/api/inbox/archive', {
-          plannerEmail: state.plannerEmail,
-          inboxId: b.id            // archive also expects inboxId on your API
+        const res = await fetch('/api/inbox/archive', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ plannerEmail: state.plannerEmail, inboxId: b.id })
         });
+        const j = await res.json().catch(()=>({}));
+        if(!res.ok || j.ok === false) throw new Error((j && j.error) || 'Archive failed');
         state.items = state.items.filter(x => x.id !== b.id);
         render();
       }catch(e){
@@ -229,9 +178,8 @@
       }
     }
 
-    // Initial load + light polling so new GPT bundles pop in automatically
     fetchAndRender();
-    state.timer = setInterval(fetchAndRender, 15000);
+    setInterval(fetchAndRender, 15000);
   </script>
 </body>
 </html>
