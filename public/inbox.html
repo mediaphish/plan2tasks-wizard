@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Plan2Tasks · Inbox</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0b0b0c;--card:#121214;--muted:#9aa0a6;--text:#e8eaed;--accent:#4f46e5;--good:#16a34a;--warn:#f59e0b;--bad:#ef4444;--border:#1f1f23}
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:#0b0b0c;color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    a{color:var(--text);text-decoration:none}
+    .container{max-width:980px;margin:0 auto;padding:24px}
+    .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+    .h-title{font-weight:600;font-size:20px;letter-spacing:.2px}
+    .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0 16px}
+    .input,.select{background:var(--card);border:1px solid var(--border);color:var(--text);border-radius:10px;padding:10px 12px;outline:none}
+    .input::placeholder{color:#6b7280}
+    .btn{background:#1a1a1f;border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;cursor:pointer}
+    .btn:hover{border-color:#2a2a31}
+    .btn-primary{background:var(--accent);border-color:transparent;color:white}
+    .btn-ghost{background:transparent;border:1px dashed var(--border);color:var(--muted)}
+    .list{display:grid;gap:10px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+    .meta{font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap}
+    .title{font-weight:600}
+    .badge{display:inline-flex;align-items:center;gap:6px;background:#0f172a;border:1px solid #1f2937;color:#c7d2fe;border-radius:999px;padding:4px 10px;font-size:12px}
+    .count{font-variant-numeric:tabular-nums;background:#0a2512;color:#bbf7d0;border:1px solid #134e4a;border-radius:999px;padding:2px 8px;font-size:12px}
+    .actions{display:flex;gap:8px;align-items:center}
+    .empty{opacity:.7;border:1px dashed var(--border);border-radius:14px;padding:20px;text-align:center}
+    .spacer{height:6px}
+    @media (max-width:720px){
+      .row{grid-template-columns:1fr}
+      .row2{grid-template-columns:1fr}
+      .header{flex-direction:column;align-items:flex-start;gap:8px}
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="h-title">Inbox — New Bundles</div>
+      <div id="badge" class="badge" hidden>0 new</div>
+    </div>
+
+    <div class="controls">
+      <input id="planner" class="input" style="min-width:280px" placeholder="Planner email" />
+      <input id="search" class="input" placeholder="Filter by title…" />
+      <button id="refresh" class="btn">Refresh</button>
+    </div>
+
+    <div id="list" class="list"></div>
+    <div id="empty" class="empty" hidden>No new bundles. When GPT sends a bundle, it will appear here automatically.</div>
+  </div>
+
+  <script>
+    const $ = sel => document.querySelector(sel);
+    const plannerInput = $('#planner');
+    const searchInput = $('#search');
+    const listEl = $('#list');
+    const emptyEl = $('#empty');
+    const badgeEl = $('#badge');
+    const refreshBtn = $('#refresh');
+
+    const state = {
+      plannerEmail: localStorage.getItem('p2t:plannerEmail') || 'bartpaden@gmail.com',
+      items: [],
+      timer: null
+    };
+
+    plannerInput.value = state.plannerEmail;
+
+    plannerInput.addEventListener('change', () => {
+      state.plannerEmail = (plannerInput.value || '').trim().toLowerCase();
+      localStorage.setItem('p2t:plannerEmail', state.plannerEmail);
+      fetchAndRender();
+    });
+
+    searchInput.addEventListener('input', () => render());
+
+    refreshBtn.addEventListener('click', () => fetchAndRender());
+
+    async function getJSON(url){
+      const res = await fetch(url, { credentials: 'include' });
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return await res.json();
+    }
+
+    function fmtDate(iso){
+      const d = new Date(iso);
+      return d.toLocaleString(undefined,{ month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    }
+
+    function render(){
+      const q = (searchInput.value||'').toLowerCase().trim();
+      const data = q ? state.items.filter(x => (x.title||'').toLowerCase().includes(q)) : state.items;
+
+      listEl.innerHTML = '';
+      if(!data.length){
+        emptyEl.hidden = false;
+        badgeEl.hidden = data.length === 0;
+        badgeEl.textContent = '0 new';
+        return;
+      }
+      emptyEl.hidden = true;
+      badgeEl.hidden = false;
+      badgeEl.textContent = `${data.length} new`;
+
+      for(const b of data){
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const left = document.createElement('div');
+        left.style.flex = '1';
+        left.innerHTML = `
+          <div class="title">${escapeHtml(b.title || '(untitled)')}</div>
+          <div class="spacer"></div>
+          <div class="meta">
+            <span>Created ${fmtDate(b.created_at)}</span>
+            <span>Bundle ID ${b.id.slice(0,8)}…</span>
+            ${b.suggested_user ? `<span>Suggested: ${escapeHtml(b.suggested_user)}</span>` : ``}
+            <span class="count">${b.count || 0} tasks</span>
+          </div>
+        `;
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+
+        const assignBtn = document.createElement('button');
+        assignBtn.className = 'btn btn-primary';
+        assignBtn.textContent = b.suggested_user ? `Assign to ${b.suggested_user}` : 'Assign…';
+        assignBtn.onclick = () => onAssign(b);
+
+        const planBtn = document.createElement('button');
+        planBtn.className = 'btn';
+        planBtn.textContent = 'Plan';
+        planBtn.onclick = () => onPlan(b);
+
+        const archiveBtn = document.createElement('button');
+        archiveBtn.className = 'btn btn-ghost';
+        archiveBtn.textContent = 'Archive';
+        archiveBtn.onclick = () => onArchive(b);
+
+        actions.append(assignBtn, planBtn, archiveBtn);
+        card.append(left, actions);
+        listEl.append(card);
+      }
+    }
+
+    async function fetchAndRender(){
+      if(!state.plannerEmail){ listEl.innerHTML=''; emptyEl.hidden=false; badgeEl.hidden=true; return; }
+      try{
+        const url = `/api/inbox?plannerEmail=${encodeURIComponent(state.plannerEmail)}&status=new`;
+        const j = await getJSON(url);
+        state.items = (j && j.bundles) ? j.bundles : [];
+        render();
+      }catch(e){
+        console.error('fetch error', e);
+        listEl.innerHTML = `<div class="empty">Could not load inbox (${e.message}).</div>`;
+        badgeEl.hidden = true;
+      }
+    }
+
+    async function onAssign(b){
+      const user = b.suggested_user || prompt('Assign to user email:');
+      if(!user) return;
+      try{
+        const res = await fetch('/api/inbox/assign', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ plannerEmail: state.plannerEmail, bundleId: b.id, userEmail: user })
+        });
+        const j = await res.json().catch(()=>({}));
+        if(!res.ok || !j || j.ok === false){ throw new Error(j && j.error || 'Assign failed'); }
+        // optimistic remove
+        state.items = state.items.filter(x => x.id !== b.id);
+        render();
+      }catch(e){
+        alert('Assign failed: ' + (e.message || e));
+      }
+    }
+
+    async function onPlan(b){
+      // lightweight handoff: store the selection in localStorage for your SPA to read
+      try{
+        localStorage.setItem('p2t:selectedBundleId', b.id);
+        alert('Bundle selected for planning. Open the app Plan view to continue.');
+      }catch{}
+    }
+
+    async function onArchive(b){
+      if(!confirm('Archive this bundle?')) return;
+      try{
+        const res = await fetch('/api/inbox/archive', {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({ plannerEmail: state.plannerEmail, bundleId: b.id })
+        });
+        const j = await res.json().catch(()=>({}));
+        if(!res.ok || j.ok === false) throw new Error(j && j.error || 'Archive failed');
+        state.items = state.items.filter(x => x.id !== b.id);
+        render();
+      }catch(e){
+        alert('Archive failed: ' + (e.message || e));
+      }
+    }
+
+    function escapeHtml(s){
+      return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
+
+    // initial load + light polling so new GPT bundles pop in
+    fetchAndRender();
+    state.timer = setInterval(fetchAndRender, 15000);
+  </script>
+</body>
+</html>
