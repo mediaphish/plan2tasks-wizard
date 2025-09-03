@@ -128,17 +128,17 @@
         assignBtn.textContent = b.suggested_user ? `Assign to ${b.suggested_user}` : 'Assign…';
         assignBtn.onclick = () => onAssign(b);
 
-        const planBtn = document.createElement('button');
-        planBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50';
-        planBtn.textContent = 'Plan';
-        planBtn.onclick = () => onPlan(b);
+        const reviewBtn = document.createElement('button');
+        reviewBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50';
+        reviewBtn.textContent = 'Review';
+        reviewBtn.onclick = () => onReview(b);
 
         const archiveBtn = document.createElement('button');
         archiveBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-600 hover:bg-gray-50';
         archiveBtn.textContent = 'Archive';
         archiveBtn.onclick = () => onArchive(b);
 
-        actions.append(assignBtn, planBtn, archiveBtn);
+        actions.append(assignBtn, reviewBtn, archiveBtn);
         card.append(left, actions);
         listEl.append(card);
       }
@@ -178,11 +178,18 @@
       }
     }
 
-    async function onPlan(b){
+    function onReview(b){
       try{
+        // Persist for SPA pickup AND navigate to the planning view
         localStorage.setItem('p2t:selectedBundleId', b.id);
-        alert('Bundle selected for planning. Open the app Plan view to continue.');
-      }catch{}
+        const url = new URL(window.location.origin + '/');
+        url.searchParams.set('view','plan');
+        url.searchParams.set('bundleId', b.id);
+        window.location.assign(url.toString());
+      }catch{
+        // Fallback: just navigate
+        window.location.assign('/?view=plan&bundleId=' + encodeURIComponent(b.id));
+      }
     }
 
     async function onArchive(b){
