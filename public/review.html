@@ -8,7 +8,6 @@
 </head>
 <body class="min-h-screen bg-gray-100 text-gray-900">
   <div class="mx-auto max-w-5xl p-4">
-    <!-- Header -->
     <div class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <div class="text-xl sm:text-2xl font-bold">Plan2Tasks</div>
@@ -17,12 +16,10 @@
       <a href="/inbox.html" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">Inbox</a>
     </div>
 
-    <!-- Controls -->
     <div class="mb-4 grid gap-2 sm:grid-cols-2">
       <div class="rounded-xl border border-gray-300 bg-white p-3">
         <label class="block text-xs text-gray-500 mb-1">Planner</label>
-        <input id="planner" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
-               placeholder="Planner email" />
+        <input id="planner" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="Planner email" />
       </div>
       <div class="rounded-xl border border-gray-300 bg-white p-3">
         <label class="block text-xs text-gray-500 mb-1">Assigned User</label>
@@ -30,7 +27,6 @@
       </div>
     </div>
 
-    <!-- Bundle panel -->
     <div class="rounded-xl border border-gray-300 bg-white p-4 mb-3">
       <div class="flex items-center justify-between gap-3">
         <div class="font-semibold text-base" id="btitle">(loading…)</div>
@@ -42,13 +38,12 @@
       <div class="mt-2 text-xs text-gray-600" id="bdesc"></div>
     </div>
 
-    <!-- Tasks table -->
     <div class="rounded-xl border border-gray-300 bg-white p-2">
       <table class="w-full text-sm">
         <thead>
           <tr class="text-left text-xs text-gray-500">
             <th class="px-2 py-2">Task</th>
-            <th class="px-2 py-2">Day Offset</th>
+            <th class="px-2 py-2">Date</th>
             <th class="px-2 py-2">Time</th>
             <th class="px-2 py-2">Duration</th>
             <th class="px-2 py-2">Notes</th>
@@ -58,7 +53,6 @@
       <div id="rows" class="divide-y divide-gray-200"></div>
     </div>
 
-    <!-- Action bar -->
     <div class="mt-4 flex flex-wrap items-center gap-2">
       <label class="text-xs text-gray-500">List Title</label>
       <input id="listTitle" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm w-64" placeholder="e.g. Weekly Plan" />
@@ -70,7 +64,6 @@
       <button id="pushBtn" class="ml-auto rounded-xl bg-indigo-600 text-white px-4 py-2 text-sm">Push to User</button>
     </div>
 
-    <!-- Status -->
     <div id="status" class="mt-3 text-sm text-gray-700"></div>
   </div>
 
@@ -78,15 +71,8 @@
     const $ = s => document.querySelector(s);
     const plannerInput = $('#planner');
     const userSelect   = $('#user');
-    const btitle = $('#btitle');
-    const bmeta  = $('#bmeta');
-    const bcount = $('#bcount');
-    const bdesc  = $('#bdesc');
-    const rows   = $('#rows');
-    const pushBtn= $('#pushBtn');
-    const listTitle = $('#listTitle');
-    const modeSel   = $('#mode');
-    const statusEl  = $('#status');
+    const btitle = $('#btitle'), bmeta  = $('#bmeta'), bcount = $('#bcount'), bdesc  = $('#bdesc');
+    const rows   = $('#rows'), pushBtn= $('#pushBtn'), listTitle = $('#listTitle'), modeSel = $('#mode'), statusEl  = $('#status');
 
     const qs = new URLSearchParams(location.search);
     const inboxId = qs.get('inboxId') || '';
@@ -118,6 +104,13 @@
     }
     function esc(s){ return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
+    function ymd(d){ return d.toISOString().slice(0,10); }
+    function addDays(ymdStr, n){
+      const d = new Date(ymdStr + 'T00:00:00');
+      d.setUTCDate(d.getUTCDate() + (n||0));
+      return ymd(d);
+    }
+
     async function loadUsers(){
       const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(state.plannerEmail)}&status=all`;
       const j = await getJSON(url);
@@ -141,20 +134,22 @@
 
       rows.innerHTML = '';
       for(const t of state.tasks){
+        // derive human date: prefer absolute date; else compute from startDate + dayOffset
+        const date = t.date || addDays(b.startDate, t.dayOffset || 0);
         const row = document.createElement('div');
         row.className = 'grid grid-cols-1 sm:grid-cols-5 text-sm';
         row.innerHTML = `
           <div class="px-2 py-2">${esc(t.title)}</div>
-          <div class="px-2 py-2">${t.dayOffset ?? 0}</div>
+          <div class="px-2 py-2">${esc(date)}</div>
           <div class="px-2 py-2">${t.time || ''}</div>
           <div class="px-2 py-2">${t.durationMins || 60} min</div>
           <div class="px-2 py-2">${esc(t.notes || '')}</div>
         `;
         rows.appendChild(row);
       }
-      // Defaults for push
       listTitle.value = (b.title ? `Plan: ${b.title}` : 'Weekly Plan');
-      // preselect user: assigned_user > suggested_user > first in list
+
+      // preselect user
       setTimeout(() => {
         userSelect.value = b.assigned_user || b.suggested_user || (state.users[0]?.email || '');
       }, 0);
@@ -164,7 +159,7 @@
       statusEl.textContent = 'Loading…';
       try{
         await loadUsers();
-        const url = `/api/inbox/get?plannerEmail=${encodeURIComponent(state.plannerEmail)}&inboxId=${encodeURIComponent(inboxId)}`;
+        const url = `/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}&plannerEmail=${encodeURIComponent(state.plannerEmail)}`;
         const j = await getJSON(url);
         state.bundle = {
           id: j.bundle.id,
@@ -186,6 +181,16 @@
       const b = state.bundle;
       const userEmail = userSelect.value || '';
       if(!userEmail){ alert('Choose a user'); return; }
+
+      // build items with absolute dates only (no offsets shown or sent)
+      const items = state.tasks.map(t => ({
+        title: t.title,
+        date: t.date || addDays(b.startDate, t.dayOffset || 0),
+        time: t.time || null,
+        durationMins: t.durationMins || 60,
+        notes: t.notes || ""
+      }));
+
       try{
         statusEl.textContent = 'Pushing…';
         await postJSON('/api/push', {
@@ -194,8 +199,8 @@
           listTitle: listTitle.value || 'Weekly Plan',
           timezone: b.timezone,
           startDate: b.startDate,
-          mode: modeSel.value,       // "append" or "replace"
-          items: state.tasks         // already shaped for /api/push
+          mode: modeSel.value,     // "append" or "replace"
+          items
         });
         statusEl.textContent = '✅ Pushed to Google Tasks';
       }catch(e){
@@ -203,7 +208,6 @@
       }
     });
 
-    // boot
     if(!inboxId){
       statusEl.textContent = 'Missing inboxId in the URL.';
     }else{
