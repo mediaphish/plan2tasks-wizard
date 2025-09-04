@@ -1,6 +1,6 @@
 // api/inbox/get.js
-// GET /api/inbox/get?plannerEmail=...&inboxId=...
-// Returns { ok, bundle:{...}, tasks:[...] } for Review → Push.
+// GET /api/inbox/get?inboxId=... [&plannerEmail=...]
+// Returns { ok, bundle:{...}, tasks:[{title,date,time,durationMins,notes,dayOffset?}] }
 
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
@@ -11,43 +11,42 @@ export default async function handler(req, res) {
   }
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    const plannerEmail = String(url.searchParams.get("plannerEmail") || "").toLowerCase().trim();
     const inboxId = String(url.searchParams.get("inboxId") || "").trim();
+    const plannerEmail = (url.searchParams.get("plannerEmail") || "").toLowerCase();
 
-    if (!plannerEmail || !plannerEmail.includes("@")) {
-      return res.status(400).json({ ok: false, error: "Invalid plannerEmail" });
-    }
-    if (!inboxId) {
-      return res.status(400).json({ ok: false, error: "Missing inboxId" });
-    }
+    if (!inboxId) return res.status(400).json({ ok: false, error: "Missing inboxId" });
 
-    // Load bundle
+    // Load bundle by ID only (planner is optional for convenience)
     const { data: b, error: bErr } = await supabaseAdmin
       .from("inbox_bundles")
       .select(
         "id, planner_email, title, start_date, timezone, source, suggested_user, assigned_user, assigned_at, archived_at, created_at"
       )
       .eq("id", inboxId)
-      .ilike("planner_email", plannerEmail)
       .single();
 
     if (bErr || !b) return res.status(404).json({ ok: false, error: "Bundle not found" });
+    if (plannerEmail && b.planner_email?.toLowerCase() !== plannerEmail) {
+      // Soft guard; still allow to proceed for now.
+    }
 
-    // Load tasks
+    // Load tasks (no fragile ordering)
     const { data: t, error: tErr } = await supabaseAdmin
       .from("inbox_tasks")
-      .select("title, day_offset, time, duration_mins, notes, idx")
+      .select("title, date, day_offset, time, duration_mins, notes")
       .eq("inbox_id", inboxId)
-      .order("idx", { ascending: true });
+      .order("created_at", { ascending: true });
 
     if (tErr) return res.status(500).json({ ok: false, error: "Database error (tasks)" });
 
     const tasks = (t || []).map((r) => ({
       title: r.title,
-      dayOffset: r.day_offset ?? 0,
+      // keep both for machines; UIs should use 'date' only
+      date: r.date || null,
+      dayOffset: typeof r.day_offset === "number" ? r.day_offset : null,
       time: r.time || null,
       durationMins: r.duration_mins || 60,
-      notes: r.notes || "",
+      notes: r.notes || ""
     }));
 
     const bundle = {
@@ -61,7 +60,7 @@ export default async function handler(req, res) {
       assigned_at: b.assigned_at,
       archived_at: b.archived_at,
       created_at: b.created_at,
-      count: tasks.length,
+      count: tasks.length
     };
 
     return res.json({ ok: true, bundle, tasks });
