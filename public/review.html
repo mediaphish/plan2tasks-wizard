@@ -2,131 +2,123 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Plan2Tasks — Review Bundle</title>
+  <title>Review</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --fg:#0f172a; --muted:#475569; --bg:#ffffff; --card:#f8fafc; --accent:#0ea5e9; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
-    header { padding:16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
-    h1 { font-size:18px; margin:0; }
-    .meta { color:var(--muted); font-size:12px; }
-    main { padding:16px; display:grid; gap:16px; max-width:900px; margin:0 auto; }
-    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:14px; padding:12px; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .btn { appearance:none; border:1px solid #e2e8f0; background:#fff; padding:8px 10px; border-radius:10px; cursor:pointer; font-size:14px; }
-    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-    select, input { padding:8px 10px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; background:#fff; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; }
+    input, select, button { font-size:14px; padding:6px 10px; }
     table { width:100%; border-collapse:collapse; font-size:14px; }
-    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
-    .status { white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; background:#0b1020; color:#e2e8f0; padding:10px; border-radius:10px; }
-    .pill { font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; color:var(--muted); }
+    th, td { padding:8px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
+    .meta { color:#6b7280; font-size:12px; }
   </style>
 </head>
 <body>
-  <header>
+  <div class="wrap">
     <h1>Review Bundle</h1>
+
     <div class="row">
-      <span class="pill" id="bundleId">inboxId: —</span>
-      <span class="pill" id="planner">planner: bartpaden@gmail.com</span>
+      <div id="bundleTitle" style="font-weight:600;">—</div>
+      <div class="meta" id="bundleMeta">Start: — • Timezone: —</div>
     </div>
-  </header>
 
-  <main>
-    <section class="card" id="bundleInfo">
-      <div class="row" style="justify-content:space-between;">
-        <div>
-          <div id="title" style="font-weight:600;">—</div>
-          <div class="meta" id="startMeta">Start: — • Timezone: —</div>
-        </div>
-        <div class="row">
-          <label for="mode" class="meta">Push mode:</label>
-          <select id="mode">
-            <option value="append" selected>append</option>
-            <option value="replace">replace</option>
-          </select>
-          <label for="listTitle" class="meta">List title:</label>
-          <input id="listTitle" type="text" placeholder="Plan: &lt;bundle.title&gt;" />
-          <label for="userEmail" class="meta">User:</label>
-          <input id="userEmail" type="email" placeholder="user@example.com" />
-          <button class="btn primary" id="pushBtn">Push</button>
-        </div>
-      </div>
-    </section>
+    <div class="row">
+      <label for="mode">Push mode:</label>
+      <select id="mode">
+        <option value="append" selected>append</option>
+        <option value="replace">replace</option>
+      </select>
 
-    <section class="card">
-      <table>
-        <thead>
-          <tr>
-            <th style="width:22%;">Date (YYYY-MM-DD)</th>
-            <th style="width:12%;">Time (HH:MM)</th>
-            <th style="width:12%;">Duration</th>
-            <th>Title</th>
-            <th style="width:28%;">Notes</th>
-          </tr>
-        </thead>
-        <tbody id="tasksBody">
-          <tr><td colspan="5" class="meta">Loading bundle…</td></tr>
-        </tbody>
-      </table>
-    </section>
+      <label for="listTitle">List title:</label>
+      <input id="listTitle" type="text" placeholder="Plan: —" />
 
-    <section class="card">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <strong>Status</strong>
-        <button class="btn" id="clearStatus">clear</button>
-      </div>
-      <pre class="status" id="statusBox">Ready.</pre>
-    </section>
-  </main>
+      <label for="userEmail">User:</label>
+      <input id="userEmail" type="email" placeholder="user@example.com" />
+
+      <button id="btnPush">Push</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th style="width:22%;">Date (YYYY-MM-DD)</th>
+          <th style="width:12%;">Time (HH:MM)</th>
+          <th style="width:12%;">Duration</th>
+          <th>Title</th>
+          <th style="width:28%;">Notes</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="5">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <script>
-    // Defaults from your rules
+    // Defaults per your rules
     const plannerEmail = "bartpaden@gmail.com";
-    const timezone = "America/Chicago";
+    const defaultUserEmail = "bart@midwesternbuilt.com";
+    const defaultTimezone = "America/Chicago";
 
     const q = new URLSearchParams(window.location.search);
     const inboxId = q.get('inboxId') || "";
 
     const els = {
-      bundleId: document.getElementById('bundleId'),
-      planner: document.getElementById('planner'),
-      title: document.getElementById('title'),
-      startMeta: document.getElementById('startMeta'),
-      tasksBody: document.getElementById('tasksBody'),
-      statusBox: document.getElementById('statusBox'),
-      clearStatus: document.getElementById('clearStatus'),
+      title: document.getElementById('bundleTitle'),
+      meta: document.getElementById('bundleMeta'),
+      tbody: document.getElementById('tbody'),
       mode: document.getElementById('mode'),
       listTitle: document.getElementById('listTitle'),
       userEmail: document.getElementById('userEmail'),
-      pushBtn: document.getElementById('pushBtn'),
+      btnPush: document.getElementById('btnPush'),
     };
 
-    function setStatus(text){ els.statusBox.textContent = text; }
-
+    // --- Helper: date math done locally, no offset display ---
     function pad(n){ return String(n).padStart(2,'0'); }
     function addDays(yyyyMmDd, offsetDays){
-      // Treat the input date as local date to avoid TZ surprises for display purposes
-      const [y,m,d] = yyyyMmDd.split('-').map(Number);
+      const [y,m,d] = (yyyyMmDd||"").split('-').map(Number);
+      if (!y || !m || !d) return "";
       const dt = new Date(y, m-1, d);
-      dt.setDate(dt.getDate() + Number(offsetDays || 0));
-      const yyyy = dt.getFullYear();
-      const mm = pad(dt.getMonth()+1);
-      const dd = pad(dt.getDate());
-      return `${yyyy}-${mm}-${dd}`;
+      dt.setDate(dt.getDate() + Number(offsetDays||0));
+      return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
+    }
+    function hhmm(t){
+      if (t === null || t === undefined || t === "") return "";
+      // Normalize "HH:MM:SS" → "HH:MM"
+      return String(t).slice(0,5);
+    }
+
+    // Current bundle cache (for push)
+    let bundleCache = {
+      title: "",
+      startDate: "",
+      timezone: defaultTimezone,
+      tasks: [],
+      userEmail: ""
+    };
+
+    function normalizeBundleShape(body) {
+      // API can return { bundle: {...} } or a flat object
+      const b = body?.bundle || body || {};
+      return {
+        title: b.title || "",
+        startDate: b.start_date || b.startDate || "",
+        timezone: b.timezone || defaultTimezone,
+        userEmail: b.userEmail || b.suggested_user || "",
+        tasks: b.tasks || body?.tasks || []
+      };
     }
 
     function normalizeTasks(tasks, startDate){
-      // Return tasks with absolute date + simple HH:MM time
       return (tasks || []).map(t => {
-        const date = t.date ? t.date : (t.dayOffset != null ? addDays(startDate, t.dayOffset) : "");
-        const time = (t.time === null || t.time === undefined || t.time === "") ? "" : t.time.slice(0,5);
-        const durationMins = (t.durationMins != null) ? t.durationMins : "";
+        const date = t.date || (t.dayOffset != null ? addDays(startDate, t.dayOffset) : "");
         return {
           title: t.title || "",
           date,
-          time,
-          durationMins,
+          time: hhmm(t.time),
+          durationMins: (t.durationMins != null) ? t.durationMins : null,
           notes: t.notes || ""
         };
       });
@@ -134,109 +126,97 @@
 
     function renderTasks(rows){
       if (!rows.length){
-        els.tasksBody.innerHTML = `<tr><td colspan="5" class="meta">No tasks in this bundle.</td></tr>`;
+        els.tbody.innerHTML = `<tr><td colspan="5">No tasks.</td></tr>`;
         return;
       }
-      els.tasksBody.innerHTML = rows.map(r => `
+      els.tbody.innerHTML = rows.map(r => `
         <tr>
           <td>${r.date}</td>
           <td>${r.time || ""}</td>
-          <td>${r.durationMins ? `${r.durationMins} mins` : ""}</td>
+          <td>${r.durationMins ? r.durationMins + " mins" : ""}</td>
           <td>${r.title}</td>
           <td>${r.notes}</td>
         </tr>
       `).join('');
     }
 
-    async function loadBundle() {
-      if (!inboxId){
-        setStatus(`GET /api/inbox/get?inboxId=…\nHTTP 400\n{"error":"inboxId is required"}\n\nNext step: Open this page via /review.html?inboxId=<id>.`);
+    async function loadBundle(){
+      if (!inboxId) {
+        els.tbody.innerHTML = `<tr><td colspan="5">Missing inboxId.</td></tr>`;
         return;
       }
-      els.bundleId.textContent = `inboxId: ${inboxId}`;
       try {
         const url = `/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
         const r = await fetch(url);
         const body = await r.json().catch(()=> ({}));
-        if (!r.ok) {
-          els.tasksBody.innerHTML = `<tr><td colspan="5" class="meta">Failed to load.</td></tr>`;
-          setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Verify inboxId exists in NEW or ASSIGNED via /inbox.html.`);
-          return;
-        }
-        // Expect: { title, startDate, timezone, tasks:[…], userEmail? }
-        const bundle = body?.bundle || body; // support either shape
-        const title = bundle?.title || "—";
-        const startDate = bundle?.startDate || "—";
-        const tz = bundle?.timezone || timezone;
 
-        els.title.textContent = title;
-        els.startMeta.textContent = `Start: ${startDate} • Timezone: ${tz}`;
-        els.listTitle.placeholder = `Plan: ${title}`;
-        if (bundle?.userEmail) els.userEmail.value = bundle.userEmail;
+        const b = normalizeBundleShape(body);
+        bundleCache.title = b.title;
+        bundleCache.startDate = b.startDate;
+        bundleCache.timezone = b.timezone || defaultTimezone;
+        bundleCache.userEmail = b.userEmail || defaultUserEmail;
+        bundleCache.tasks = normalizeTasks(b.tasks, b.startDate);
 
-        const normalized = normalizeTasks(bundle?.tasks || body?.tasks || [], bundle?.startDate);
-        renderTasks(normalized);
+        els.title.textContent = b.title || "—";
+        els.meta.textContent = `Start: ${b.startDate || "—"} • Timezone: ${bundleCache.timezone}`;
+        els.listTitle.placeholder = `Plan: ${b.title || ""}`;
+        els.userEmail.value = bundleCache.userEmail;
 
-        setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}`);
+        renderTasks(bundleCache.tasks);
       } catch (e) {
-        els.tasksBody.innerHTML = `<tr><td colspan="5" class="meta">Error.</td></tr>`;
-        setStatus(`GET /api/inbox/get … ERROR: ${e.message}`);
+        els.tbody.innerHTML = `<tr><td colspan="5">Failed to load.</td></tr>`;
       }
     }
 
-    async function pushBundle() {
-      // Build payload in absolute dates only (no offsets ever sent/displayed)
+    async function pushBundle(){
+      // Read the table to guarantee only absolute dates go out
+      const rows = Array.from(els.tbody.querySelectorAll('tr')).map(tr => {
+        const tds = tr.querySelectorAll('td');
+        if (tds.length < 5) return null;
+        const date = tds[0].textContent.trim();
+        const time = tds[1].textContent.trim() || null;
+        const durTxt = tds[2].textContent.trim();
+        const title = tds[3].textContent.trim();
+        const notes = tds[4].textContent.trim();
+        const durationMins = durTxt ? parseInt(durTxt.replace(/\D+/g,''),10) : null;
+        return { title, date, time, durationMins, notes };
+      }).filter(Boolean);
+
+      if (rows.some(r => !r.date)) {
+        // Quietly abort if any date missing (no debug surface)
+        return;
+      }
+
+      const payload = {
+        plannerEmail,
+        userEmail: (els.userEmail.value || defaultUserEmail).trim(),
+        listTitle: (els.listTitle.value || els.listTitle.placeholder || `Plan: ${bundleCache.title}`).trim(),
+        timezone: bundleCache.timezone || defaultTimezone,
+        startDate: bundleCache.startDate,
+        mode: els.mode.value === "replace" ? "replace" : "append",
+        items: rows.map(r => ({
+          title: r.title,
+          date: r.date,
+          time: r.time,                 // may be null
+          durationMins: r.durationMins, // may be null
+          notes: r.notes || undefined
+        }))
+      };
+
       try {
-        // For safety, re-read the table rather than the original bundle object
-        const rows = Array.from(els.tasksBody.querySelectorAll('tr')).map(tr => {
-          const tds = tr.querySelectorAll('td');
-          if (tds.length < 5) return null;
-          const date = tds[0].textContent.trim();
-          const time = tds[1].textContent.trim() || null;
-          const durationText = tds[2].textContent.trim();
-          const title = tds[3].textContent.trim();
-          const notes = tds[4].textContent.trim();
-          const durationMins = durationText ? parseInt(durationText.replace(/\D+/g,''),10) : null;
-          return { title, date, time, durationMins, notes };
-        }).filter(Boolean);
-
-        const anyMissingDate = rows.some(r => !r.date);
-        if (anyMissingDate) {
-          setStatus(`POST /api/push\nHTTP 400\n{"error":"All tasks must have absolute 'date' before push."}\n\nNext step: Ensure each task displays a Date in the table, then retry.`);
-          return;
-        }
-
-        const payload = {
-          plannerEmail,
-          userEmail: els.userEmail.value || "bart@midwesternbuilt.com",
-          listTitle: els.listTitle.value || els.listTitle.placeholder || "Plan",
-          timezone,
-          startDate: (els.startMeta.textContent.match(/Start:\s(\d{4}-\d{2}-\d{2})/) || [])[1] || "",
-          mode: els.mode.value === "replace" ? "replace" : "append",
-          items: rows.map(r => ({
-            title: r.title,
-            date: r.date,
-            time: r.time,                    // may be null
-            durationMins: r.durationMins,    // may be null
-            notes: r.notes || undefined
-          }))
-        };
-
-        const r = await fetch('/api/push', {
+        await fetch('/api/push', {
           method: 'POST',
           headers: { 'Content-Type':'application/json' },
           body: JSON.stringify(payload)
         });
-        const body = await r.json().catch(()=> ({}));
-        setStatus(`POST /api/push\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}`);
+        // No debug/status surface shown per your instruction
       } catch (e) {
-        setStatus(`POST /api/push\nERROR: ${e.message}`);
+        // Silent failure per your “no status” preference
       }
     }
 
     // Events
-    els.clearStatus.addEventListener('click', () => setStatus('Ready.'));
-    els.pushBtn.addEventListener('click', pushBundle);
+    els.btnPush.addEventListener('click', pushBundle);
 
     // Init
     loadBundle();
