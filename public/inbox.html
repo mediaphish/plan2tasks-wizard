@@ -2,220 +2,163 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Plan2Tasks — Inbox</title>
+  <title>Inbox</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root { --fg:#0f172a; --muted:#475569; --bg:#ffffff; --card:#f8fafc; --accent:#0ea5e9; --danger:#ef4444; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
-    header { padding:16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; }
-    h1 { font-size:18px; margin:0; }
-    main { padding:16px; display:grid; gap:16px; max-width:900px; margin:0 auto; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:14px; padding:12px; }
-    .bundle { display:flex; flex-direction:column; gap:8px; }
-    .bundle-header { display:flex; justify-content:space-between; gap:12px; align-items:center; }
-    .meta { color:var(--muted); font-size:12px; }
-    .btn { appearance:none; border:1px solid #e2e8f0; background:#fff; padding:8px 10px; border-radius:10px; cursor:pointer; font-size:14px; }
-    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-    .btn.link { background:transparent; border:none; color:var(--accent); padding:0; }
-    .btn:disabled { opacity:0.6; cursor:not-allowed; }
-    select, input { padding:8px 10px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; background:#fff; }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
-    .status { white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; background:#0b1020; color:#e2e8f0; padding:10px; border-radius:10px; }
-    .pill { font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; color:var(--muted); }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+    select, button { font-size: 14px; padding: 6px 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
   </style>
 </head>
 <body>
-  <header>
+  <div class="wrap">
     <h1>Inbox — New Bundles</h1>
+
     <div class="row">
-      <span class="pill" id="planner-pill">planner: bartpaden@gmail.com</span>
-      <button class="btn" id="refresh">Refresh</button>
+      <label for="userSelect">Assign to:</label>
+      <select id="userSelect">
+        <option value="" disabled selected>Loading…</option>
+      </select>
+
+      <button id="btnLoadNew">Load NEW</button>
+      <button id="btnLoadAssigned">Load ASSIGNED</button>
+      <button id="btnRefresh">Refresh</button>
     </div>
-  </header>
 
-  <main>
-    <section class="card">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <div class="row" style="gap:12px;">
-          <label for="userSelect" class="meta">Assign to:</label>
-          <select id="userSelect">
-            <option value="" disabled selected>Loading users…</option>
-          </select>
-        </div>
-        <div class="row">
-          <button class="btn" id="loadNew">Load NEW</button>
-          <button class="btn" id="loadAssigned">Load ASSIGNED</button>
-        </div>
-      </div>
-    </section>
-
-    <section id="bundles" class="card">
-      <table id="bundlesTable">
-        <thead>
-          <tr>
-            <th>Title</th>
-            <th>Start Date</th>
-            <th>Timezone</th>
-            <th>Inbox ID</th>
-            <th style="width:260px;">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="bundlesBody">
-          <tr><td colspan="5" class="meta">Loading…</td></tr>
-        </tbody>
-      </table>
-    </section>
-
-    <section class="card">
-      <div class="row" style="justify-content:space-between; align-items:center;">
-        <strong>Status</strong>
-        <button class="btn link" id="clearStatus">clear</button>
-      </div>
-      <pre class="status" id="statusBox">Ready.</pre>
-    </section>
-  </main>
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Start Date</th>
+          <th>Timezone</th>
+          <th>Inbox ID</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="5">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <script>
-    // Config — keep to your provided defaults
+    // Defaults per your rules
     const plannerEmail = "bartpaden@gmail.com";
-    const API = {
-      listInbox: (status) => `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`,
-      listUsers: `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`,
-      assign: `/api/inbox/assign`
-    };
 
     const els = {
-      refresh: document.getElementById('refresh'),
-      bundlesBody: document.getElementById('bundlesBody'),
-      loadNew: document.getElementById('loadNew'),
-      loadAssigned: document.getElementById('loadAssigned'),
-      statusBox: document.getElementById('statusBox'),
-      clearStatus: document.getElementById('clearStatus'),
-      userSelect: document.getElementById('userSelect')
+      tbody: document.getElementById('tbody'),
+      userSelect: document.getElementById('userSelect'),
+      btnLoadNew: document.getElementById('btnLoadNew'),
+      btnLoadAssigned: document.getElementById('btnLoadAssigned'),
+      btnRefresh: document.getElementById('btnRefresh'),
     };
 
-    function setStatus(text) {
-      els.statusBox.textContent = text;
+    function fmt(v){ return v ?? ""; }
+
+    function mapBundle(b){
+      // Support both snake_case and camelCase from your API
+      return {
+        id: b.id || b.inboxId,
+        title: b.title,
+        startDate: b.start_date || b.startDate,
+        timezone: b.timezone,
+      };
     }
 
-    function fmt(s){ return s ?? ""; }
-
-    function rowTemplate(b, assignedMode) {
-      const inboxId = fmt(b.inboxId || b.id);
-      const title = fmt(b.title);
-      const startDate = fmt(b.startDate);
-      const timezone = fmt(b.timezone);
-
+    function rowTemplate(b, assignedMode){
       return `
-        <tr data-id="${inboxId}">
-          <td>${title}</td>
-          <td>${startDate}</td>
-          <td>${timezone}</td>
-          <td><code>${inboxId}</code></td>
+        <tr data-id="${b.id}">
+          <td>${fmt(b.title)}</td>
+          <td>${fmt(b.startDate)}</td>
+          <td>${fmt(b.timezone)}</td>
+          <td><code>${fmt(b.id)}</code></td>
           <td>
-            <div class="row">
-              <button class="btn" data-action="review" data-id="${inboxId}">Review</button>
-              <button class="btn primary" data-action="assign" data-id="${inboxId}" ${assignedMode ? "disabled" : ""}>Assign</button>
-            </div>
+            <button data-action="review" data-id="${b.id}">Review</button>
+            <button data-action="assign" data-id="${b.id}" ${assignedMode ? "disabled" : ""}>Assign</button>
           </td>
         </tr>
       `;
     }
 
-    async function loadUsers() {
+    async function loadUsers(){
       try {
-        const r = await fetch(API.listUsers);
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          setStatus(`GET ${API.listUsers}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Verify users exist via /api/users and that plannerEmail is correct.`);
-          return;
-        }
-        const users = body?.users || body?.data || [];
-        els.userSelect.innerHTML = `<option value="" disabled selected>Select user…</option>` +
-          users.map(u => `<option value="${u.email}">${u.email}</option>`).join('');
-        if (users.length === 0) {
-          setStatus(`GET ${API.listUsers}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Users list is empty — ensure connections/invites exist.`);
+        const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`;
+        const r = await fetch(url);
+        const body = await r.json().catch(()=> ({}));
+        const list = body?.users || body?.data || [];
+        els.userSelect.innerHTML = `<option value="" disabled selected>Select…</option>` +
+          list.map(u => `<option value="${u.email}">${u.email}</option>`).join('');
+        if (!list.length) {
+          // Nothing shown to user beyond empty dropdown (per your “no debug” rule)
         }
       } catch (e) {
-        setStatus(`GET ${API.listUsers}\nERROR: ${e.message}`);
+        // Silent failure per your “no debug UI” preference
       }
     }
 
-    async function loadInbox(status = "new") {
-      els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">Loading ${status.toUpperCase()}…</td></tr>`;
+    async function loadInbox(status = "new"){
+      els.tbody.innerHTML = `<tr><td colspan="5">Loading ${status.toUpperCase()}…</td></tr>`;
       try {
-        const url = API.listInbox(status);
+        const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`;
         const r = await fetch(url);
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">No data.</td></tr>`;
-          setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Confirm bundles exist for this status in /inbox.html.`);
-          return;
-        }
-        const items = Array.isArray(body) ? body : (body?.data || []);
-        if (!items.length) {
-          els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">No bundles.</td></tr>`;
-          setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}`);
+        const body = await r.json().catch(()=> ({}));
+        const bundles = body?.bundles || body?.data || body || [];
+        if (!Array.isArray(bundles) || bundles.length === 0) {
+          els.tbody.innerHTML = `<tr><td colspan="5">No bundles.</td></tr>`;
           return;
         }
         const assignedMode = status === "assigned";
-        els.bundlesBody.innerHTML = items.map(b => rowTemplate(b, assignedMode)).join('');
+        els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
       } catch (e) {
-        els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">Error.</td></tr>`;
-        setStatus(`GET /api/inbox … ERROR: ${e.message}`);
+        els.tbody.innerHTML = `<tr><td colspan="5">Error loading.</td></tr>`;
       }
     }
 
-    async function assignBundle(inboxId) {
+    async function assignBundle(inboxId){
       const userEmail = els.userSelect.value;
-      if (!userEmail) {
-        setStatus(`POST ${API.assign}\nHTTP 400\n{"error":"userEmail is required for assign"}\n\nNext step: choose a user in the dropdown and retry.`);
-        return;
-      }
+      if (!userEmail) return; // no debug text; planner must choose a user first
       const payload = { plannerEmail, inboxId, userEmail };
       try {
-        const r = await fetch(API.assign, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        await fetch('/api/inbox/assign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const body = await r.json().catch(() => ({}));
-        setStatus(`POST ${API.assign}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}${r.status===404 ? `\n\nNext step: Inbox ID is wrong — copy it from this table and retry.`:""}`);
-        if (r.ok) {
-          // After successful assign, reload NEW to reflect change
-          loadInbox("new");
-        }
+        // On success, quietly refresh NEW to reflect movement
+        loadInbox('new');
       } catch (e) {
-        setStatus(`POST ${API.assign}\nERROR: ${e.message}`);
+        // Silent; per rules, we avoid exposing internal errors in UI
       }
     }
 
-    function handleTableClick(e) {
+    function onTableClick(e){
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
       const id = btn.dataset.id;
       const action = btn.dataset.action;
-      if (action === "review") {
-        // No offsets are shown on /review.html — that page converts internally if needed
+      if (action === 'review') {
         window.location.href = `/review.html?inboxId=${encodeURIComponent(id)}`;
-      } else if (action === "assign") {
+      } else if (action === 'assign') {
         assignBundle(id);
       }
     }
 
     // Events
-    els.refresh.addEventListener('click', () => loadInbox("new"));
-    els.loadNew.addEventListener('click', () => loadInbox("new"));
-    els.loadAssigned.addEventListener('click', () => loadInbox("assigned"));
-    els.clearStatus.addEventListener('click', () => setStatus("Ready."));
-    document.getElementById('bundlesTable').addEventListener('click', handleTableClick);
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#btnLoadNew')) loadInbox('new');
+      if (e.target.closest('#btnLoadAssigned')) loadInbox('assigned');
+      if (e.target.closest('#btnRefresh')) loadInbox('new');
+      if (e.target.closest('table')) onTableClick(e);
+    });
 
     // Init
     loadUsers();
-    loadInbox("new");
+    loadInbox('new');
   </script>
 </body>
 </html>
