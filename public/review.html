@@ -21,7 +21,7 @@
 
     <div class="row">
       <div id="bundleTitle" style="font-weight:600;">—</div>
-      <div class="meta" id="bundleMeta">Start: — • Timezone: —</div>
+      <div class="meta" id="bundleMeta">Start: — • Timezone: America/Chicago</div>
     </div>
 
     <div class="row">
@@ -56,177 +56,191 @@
     </table>
   </div>
 
-  <script>
-    // Defaults per your rules
-    const plannerEmail = "bartpaden@gmail.com";
-    const defaultUserEmail = "bart@midwesternbuilt.com";
-    const defaultTimezone = "America/Chicago";
+  <script defer>
+    (function () {
+      // Defaults per your rules
+      var plannerEmail = "bartpaden@gmail.com";
+      var defaultUserEmail = "bart@midwesternbuilt.com";
+      var defaultTimezone = "America/Chicago";
 
-    const q = new URLSearchParams(window.location.search);
-    const inboxId = q.get('inboxId') || "";
-
-    const els = {
-      title: document.getElementById('bundleTitle'),
-      meta: document.getElementById('bundleMeta'),
-      tbody: document.getElementById('tbody'),
-      mode: document.getElementById('mode'),
-      listTitle: document.getElementById('listTitle'),
-      userEmail: document.getElementById('userEmail'),
-      btnPush: document.getElementById('btnPush'),
-    };
-
-    // --- Helpers (no offset display) ---
-    function pad(n){ return String(n).padStart(2,'0'); }
-    function addDays(yyyyMmDd, offsetDays){
-      const [y,m,d] = (yyyyMmDd||"").split('-').map(Number);
-      if (!y || !m || !d) return "";
-      const dt = new Date(y, m-1, d);
-      dt.setDate(dt.getDate() + Number(offsetDays||0));
-      return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}`;
-    }
-    function hhmm(t){
-      if (t === null || t === undefined || t === "") return "";
-      return String(t).slice(0,5); // "HH:MM:SS" → "HH:MM"
-    }
-
-    // Current bundle cache (for push)
-    let bundleCache = {
-      title: "",
-      startDate: "",
-      timezone: defaultTimezone,
-      tasks: [],
-      userEmail: ""
-    };
-
-    // Be robust to wrapper shapes and snake_case names
-    function normalizeBundleShape(body) {
-      const data = body?.data || body || {};
-      const bundle = data.bundle || data.inbox || data.record || data;
-
-      // Tasks can appear in several places/keys
-      const tasks =
-        data.tasks ||
-        data.items ||
-        bundle.tasks ||
-        bundle.items ||
-        [];
-
-      return {
-        title: bundle.title || "",
-        startDate: bundle.start_date || bundle.startDate || "",
-        timezone: bundle.timezone || defaultTimezone,
-        userEmail: bundle.userEmail || bundle.suggested_user || bundle.assigned_user || "",
-        tasks
+      function $(id){ return document.getElementById(id); }
+      var els = {
+        title: $("bundleTitle"),
+        meta: $("bundleMeta"),
+        tbody: $("tbody"),
+        mode: $("mode"),
+        listTitle: $("listTitle"),
+        userEmail: $("userEmail"),
+        btnPush: $("btnPush")
       };
-    }
 
-    function normalizeTasks(tasks, startDate){
-      return (tasks || []).map(t => {
-        const offset = (t.dayOffset != null) ? t.dayOffset
-                     : (t.day_offset != null) ? t.day_offset
-                     : null;
-        const date = t.date || (offset != null ? addDays(startDate, offset) : "");
-        const durationMins = (t.durationMins != null) ? t.durationMins
-                           : (t.duration_mins != null) ? t.duration_mins
-                           : (t.minutes != null) ? t.minutes
-                           : null;
+      function pad(n){ return String(n).padStart(2, '0'); }
+      function addDays(yyyyMmDd, offsetDays){
+        var parts = (yyyyMmDd || "").split("-");
+        var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+        if (!y || !m || !d) return "";
+        var dt = new Date(y, m - 1, d);
+        dt.setDate(dt.getDate() + Number(offsetDays || 0));
+        return dt.getFullYear() + "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+      }
+      function hhmm(t){
+        if (t === null || t === undefined || t === "") return "";
+        var s = String(t);
+        return s.length >= 5 ? s.slice(0,5) : s;
+      }
+
+      // Safe getters to handle different shapes/keys
+      function firstKey(obj, keys) {
+        if (!obj) return undefined;
+        for (var i=0; i<keys.length; i++){
+          if (Object.prototype.hasOwnProperty.call(obj, keys[i])) return obj[keys[i]];
+        }
+        return undefined;
+      }
+
+      function normalizeBundleShape(body) {
+        var root = body || {};
+        var data = firstKey(root, ["data"]) || root;
+        var bundle = firstKey(data, ["bundle", "inbox", "record"]) || data;
+
+        var tasks = firstKey(data, ["tasks", "items"]);
+        if (!Array.isArray(tasks)) {
+          tasks = firstKey(bundle, ["tasks", "items"]);
+        }
+        if (!Array.isArray(tasks)) tasks = [];
 
         return {
-          title: t.title || "",
-          date,
-          time: hhmm(t.time || t.start_time || t.at),
-          durationMins,
-          notes: t.notes || t.note || t.description || ""
+          title: firstKey(bundle, ["title"]) || "",
+          startDate: firstKey(bundle, ["start_date", "startDate"]) || "",
+          timezone: firstKey(bundle, ["timezone"]) || defaultTimezone,
+          userEmail: firstKey(bundle, ["userEmail", "suggested_user", "assigned_user"]) || "",
+          tasks: tasks
         };
-      });
-    }
-
-    function renderTasks(rows){
-      if (!rows.length){
-        els.tbody.innerHTML = `<tr><td colspan="5">No tasks.</td></tr>`;
-        return;
       }
-      els.tbody.innerHTML = rows.map(r => `
-        <tr>
-          <td>${r.date}</td>
-          <td>${r.time || ""}</td>
-          <td>${r.durationMins ? r.durationMins + " mins" : ""}</td>
-          <td>${r.title}</td>
-          <td>${r.notes}</td>
-        </tr>
-      `).join('');
-    }
 
-    async function loadBundle(){
-      if (!inboxId) {
-        els.tbody.innerHTML = `<tr><td colspan="5">Missing inboxId.</td></tr>`;
-        return;
-      }
-      try {
-        const url = `/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
-        const r = await fetch(url);
-        const body = await r.json().catch(()=> ({}));
+      function normalizeTasks(tasks, startDate){
+        return (tasks || []).map(function (t) {
+          var offset = undefined;
+          if (Object.prototype.hasOwnProperty.call(t, "dayOffset")) offset = t.dayOffset;
+          else if (Object.prototype.hasOwnProperty.call(t, "day_offset")) offset = t.day_offset;
 
-        const b = normalizeBundleShape(body);
-        bundleCache.title = b.title;
-        bundleCache.startDate = b.startDate;
-        bundleCache.timezone = b.timezone || defaultTimezone;
-        bundleCache.userEmail = b.userEmail || defaultUserEmail;
-        bundleCache.tasks = normalizeTasks(b.tasks, b.startDate);
+          var date = t.date || (offset !== undefined ? addDays(startDate, offset) : "");
+          var durationMins = null;
+          if (Object.prototype.hasOwnProperty.call(t, "durationMins")) durationMins = t.durationMins;
+          else if (Object.prototype.hasOwnProperty.call(t, "duration_mins")) durationMins = t.duration_mins;
+          else if (Object.prototype.hasOwnProperty.call(t, "minutes")) durationMins = t.minutes;
 
-        els.title.textContent = b.title || "—";
-        els.meta.textContent = `Start: ${b.startDate || "—"} • Timezone: ${bundleCache.timezone}`;
-        els.listTitle.placeholder = `Plan: ${b.title || ""}`;
-        els.userEmail.value = bundleCache.userEmail;
+          var time = firstKey(t, ["time", "start_time", "at"]);
+          var notes = firstKey(t, ["notes", "note", "description"]) || "";
 
-        renderTasks(bundleCache.tasks);
-      } catch (e) {
-        els.tbody.innerHTML = `<tr><td colspan="5">Failed to load.</td></tr>`;
-      }
-    }
-
-    async function pushBundle(){
-      // Read the table so only absolute dates go out
-      const rows = Array.from(els.tbody.querySelectorAll('tr')).map(tr => {
-        const tds = tr.querySelectorAll('td');
-        if (tds.length < 5) return null;
-        const date = tds[0].textContent.trim();
-        const time = tds[1].textContent.trim() || null;
-        const durTxt = tds[2].textContent.trim();
-        const title = tds[3].textContent.trim();
-        const notes = tds[4].textContent.trim();
-        const durationMins = durTxt ? parseInt(durTxt.replace(/\D+/g,''),10) : null;
-        return { title, date, time, durationMins, notes };
-      }).filter(Boolean);
-
-      if (rows.some(r => !r.date)) return; // silently abort if any missing
-
-      const payload = {
-        plannerEmail,
-        userEmail: (els.userEmail.value || defaultUserEmail).trim(),
-        listTitle: (els.listTitle.value || els.listTitle.placeholder || `Plan: ${bundleCache.title}`).trim(),
-        timezone: bundleCache.timezone || defaultTimezone,
-        startDate: bundleCache.startDate,
-        mode: els.mode.value === "replace" ? "replace" : "append",
-        items: rows.map(r => ({
-          title: r.title,
-          date: r.date,
-          time: r.time,                 // may be null
-          durationMins: r.durationMins, // may be null
-          notes: r.notes || undefined
-        }))
-      };
-
-      try {
-        await fetch('/api/push', {
-          method: 'POST',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify(payload)
+          return {
+            title: t.title || "",
+            date: date,
+            time: hhmm(time),
+            durationMins: durationMins,
+            notes: notes
+          };
         });
-      } catch (e) {
-        // silent per your rule
       }
-    }
 
-    // Events
-    els.
+      function renderTasks(rows){
+        if (!rows || !rows.length){
+          els.tbody.innerHTML = '<tr><td colspan="5">No tasks.</td></tr>';
+          return;
+        }
+        var html = rows.map(function (r) {
+          return '<tr>'
+            + '<td>' + (r.date || "") + '</td>'
+            + '<td>' + (r.time || "") + '</td>'
+            + '<td>' + (r.durationMins ? (r.durationMins + " mins") : "") + '</td>'
+            + '<td>' + (r.title || "") + '</td>'
+            + '<td>' + (r.notes || "") + '</td>'
+            + '</tr>';
+        }).join('');
+        els.tbody.innerHTML = html;
+      }
+
+      function getInboxId() {
+        var q = new URLSearchParams(window.location.search || "");
+        return q.get("inboxId") || q.get("id") || "";
+      }
+
+      function loadBundle(){
+        var inboxId = getInboxId();
+        if (!inboxId) {
+          els.tbody.innerHTML = '<tr><td colspan="5">Missing inboxId.</td></tr>';
+          return;
+        }
+
+        var url = '/api/inbox/get?inboxId=' + encodeURIComponent(inboxId) + '&plannerEmail=' + encodeURIComponent(plannerEmail);
+        fetch(url)
+          .then(function (r) { return r.json().catch(function(){ return {}; }).then(function (b){ return { ok:r.ok, status:r.status, body:b }; }); })
+          .then(function (resp){
+            if (!resp.ok) {
+              els.tbody.innerHTML = '<tr><td colspan="5">Failed to load.</td></tr>';
+              return;
+            }
+            var b = normalizeBundleShape(resp.body);
+
+            // Cache-like locals (kept simple; no global state)
+            var title = b.title || "—";
+            var startDate = b.startDate || "";
+            var tz = b.timezone || defaultTimezone;
+            var userEmail = b.userEmail || defaultUserEmail;
+
+            els.title.textContent = title;
+            els.meta.textContent = 'Start: ' + (startDate || '—') + ' • Timezone: ' + tz;
+            els.listTitle.placeholder = 'Plan: ' + title;
+            els.userEmail.value = userEmail;
+
+            var rows = normalizeTasks(b.tasks, b.startDate);
+            renderTasks(rows);
+
+            // Attach push handler now that we have meta
+            els.btnPush.onclick = function pushBundle(){
+              // Re-read visible table to guarantee absolute dates only
+              var trs = Array.prototype.slice.call(els.tbody.querySelectorAll('tr'));
+              var items = trs.map(function (tr) {
+                var tds = tr.querySelectorAll('td');
+                if (tds.length < 5) return null;
+                var date = (tds[0].textContent || "").trim();
+                var time = (tds[1].textContent || "").trim() || null;
+                var durTxt = (tds[2].textContent || "").trim();
+                var titleCell = (tds[3].textContent || "").trim();
+                var notes = (tds[4].textContent || "").trim();
+                var durationMins = durTxt ? parseInt(durTxt.replace(/\D+/g,''),10) : null;
+                return { title: titleCell, date: date, time: time, durationMins: durationMins, notes: notes };
+              }).filter(Boolean);
+
+              if (items.some(function (it){ return !it.date; })) {
+                // Abort silently if any row lacks a date
+                return;
+              }
+
+              var payload = {
+                plannerEmail: plannerEmail,
+                userEmail: (els.userEmail.value || defaultUserEmail).trim(),
+                listTitle: (els.listTitle.value || els.listTitle.placeholder || ('Plan: ' + title)).trim(),
+                timezone: tz,
+                startDate: startDate,
+                mode: (els.mode.value === 'replace' ? 'replace' : 'append'),
+                items: items
+              };
+
+              fetch('/api/push', {
+                method: 'POST',
+                headers: { 'Content-Type':'application/json' },
+                body: JSON.stringify(payload)
+              }).catch(function(){ /* silent per your rule */ });
+            };
+          })
+          .catch(function (){
+            els.tbody.innerHTML = '<tr><td colspan="5">Failed to load.</td></tr>';
+          });
+      }
+
+      document.addEventListener('DOMContentLoaded', loadBundle);
+    })();
+  </script>
+</body>
+</html>
