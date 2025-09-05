@@ -2,217 +2,244 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Plan2Tasks · Review</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Plan2Tasks — Review Bundle</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#0f172a; --muted:#475569; --bg:#ffffff; --card:#f8fafc; --accent:#0ea5e9; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+    header { padding:16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+    h1 { font-size:18px; margin:0; }
+    .meta { color:var(--muted); font-size:12px; }
+    main { padding:16px; display:grid; gap:16px; max-width:900px; margin:0 auto; }
+    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:14px; padding:12px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .btn { appearance:none; border:1px solid #e2e8f0; background:#fff; padding:8px 10px; border-radius:10px; cursor:pointer; font-size:14px; }
+    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    select, input { padding:8px 10px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; background:#fff; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+    .status { white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; background:#0b1020; color:#e2e8f0; padding:10px; border-radius:10px; }
+    .pill { font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; color:var(--muted); }
+  </style>
 </head>
-<body class="min-h-screen bg-gray-100 text-gray-900">
-  <div class="mx-auto max-w-5xl p-4">
-    <div class="mb-4 flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <div class="text-xl sm:text-2xl font-bold">Plan2Tasks</div>
-        <span class="text-xs text-gray-500">Review &amp; Push</span>
-      </div>
-      <a href="/inbox.html" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">Inbox</a>
+<body>
+  <header>
+    <h1>Review Bundle</h1>
+    <div class="row">
+      <span class="pill" id="bundleId">inboxId: —</span>
+      <span class="pill" id="planner">planner: bartpaden@gmail.com</span>
     </div>
+  </header>
 
-    <div class="mb-4 grid gap-2 sm:grid-cols-2">
-      <div class="rounded-xl border border-gray-300 bg-white p-3">
-        <label class="block text-xs text-gray-500 mb-1">Planner</label>
-        <input id="planner" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm" placeholder="Planner email" />
-      </div>
-      <div class="rounded-xl border border-gray-300 bg-white p-3">
-        <label class="block text-xs text-gray-500 mb-1">Assigned User</label>
-        <select id="user" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"></select>
-      </div>
-    </div>
-
-    <div class="rounded-xl border border-gray-300 bg-white p-4 mb-3">
-      <div class="flex items-center justify-between gap-3">
-        <div class="font-semibold text-base" id="btitle">(loading…)</div>
-        <div class="text-xs text-gray-600">
-          <span id="bmeta" class="mr-2"></span>
-          <span class="rounded-full border border-gray-300 bg-gray-50 px-2 py-[2px] text-[11px]" id="bcount">0 tasks</span>
+  <main>
+    <section class="card" id="bundleInfo">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <div id="title" style="font-weight:600;">—</div>
+          <div class="meta" id="startMeta">Start: — • Timezone: —</div>
+        </div>
+        <div class="row">
+          <label for="mode" class="meta">Push mode:</label>
+          <select id="mode">
+            <option value="append" selected>append</option>
+            <option value="replace">replace</option>
+          </select>
+          <label for="listTitle" class="meta">List title:</label>
+          <input id="listTitle" type="text" placeholder="Plan: &lt;bundle.title&gt;" />
+          <label for="userEmail" class="meta">User:</label>
+          <input id="userEmail" type="email" placeholder="user@example.com" />
+          <button class="btn primary" id="pushBtn">Push</button>
         </div>
       </div>
-      <div class="mt-2 text-xs text-gray-600" id="bdesc"></div>
-    </div>
+    </section>
 
-    <div class="rounded-xl border border-gray-300 bg-white p-2">
-      <table class="w-full text-sm">
+    <section class="card">
+      <table>
         <thead>
-          <tr class="text-left text-xs text-gray-500">
-            <th class="px-2 py-2">Task</th>
-            <th class="px-2 py-2">Date</th>
-            <th class="px-2 py-2">Time</th>
-            <th class="px-2 py-2">Duration</th>
-            <th class="px-2 py-2">Notes</th>
+          <tr>
+            <th style="width:22%;">Date (YYYY-MM-DD)</th>
+            <th style="width:12%;">Time (HH:MM)</th>
+            <th style="width:12%;">Duration</th>
+            <th>Title</th>
+            <th style="width:28%;">Notes</th>
           </tr>
         </thead>
+        <tbody id="tasksBody">
+          <tr><td colspan="5" class="meta">Loading bundle…</td></tr>
+        </tbody>
       </table>
-      <div id="rows" class="divide-y divide-gray-200"></div>
-    </div>
+    </section>
 
-    <div class="mt-4 flex flex-wrap items-center gap-2">
-      <label class="text-xs text-gray-500">List Title</label>
-      <input id="listTitle" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm w-64" placeholder="e.g. Weekly Plan" />
-      <label class="text-xs text-gray-500 ml-2">Mode</label>
-      <select id="mode" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm">
-        <option value="append">Append</option>
-        <option value="replace">Replace</option>
-      </select>
-      <button id="pushBtn" class="ml-auto rounded-xl bg-indigo-600 text-white px-4 py-2 text-sm">Push to User</button>
-    </div>
-
-    <div id="status" class="mt-3 text-sm text-gray-700"></div>
-  </div>
+    <section class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <strong>Status</strong>
+        <button class="btn" id="clearStatus">clear</button>
+      </div>
+      <pre class="status" id="statusBox">Ready.</pre>
+    </section>
+  </main>
 
   <script>
-    const $ = s => document.querySelector(s);
-    const plannerInput = $('#planner');
-    const userSelect   = $('#user');
-    const btitle = $('#btitle'), bmeta  = $('#bmeta'), bcount = $('#bcount'), bdesc  = $('#bdesc');
-    const rows   = $('#rows'), pushBtn= $('#pushBtn'), listTitle = $('#listTitle'), modeSel = $('#mode'), statusEl  = $('#status');
+    // Defaults from your rules
+    const plannerEmail = "bartpaden@gmail.com";
+    const timezone = "America/Chicago";
 
-    const qs = new URLSearchParams(location.search);
-    const inboxId = qs.get('inboxId') || '';
-    const state = {
-      plannerEmail: localStorage.getItem('p2t:plannerEmail') || 'bartpaden@gmail.com',
-      bundle: null,
-      tasks: [],
-      users: []
+    const q = new URLSearchParams(window.location.search);
+    const inboxId = q.get('inboxId') || "";
+
+    const els = {
+      bundleId: document.getElementById('bundleId'),
+      planner: document.getElementById('planner'),
+      title: document.getElementById('title'),
+      startMeta: document.getElementById('startMeta'),
+      tasksBody: document.getElementById('tasksBody'),
+      statusBox: document.getElementById('statusBox'),
+      clearStatus: document.getElementById('clearStatus'),
+      mode: document.getElementById('mode'),
+      listTitle: document.getElementById('listTitle'),
+      userEmail: document.getElementById('userEmail'),
+      pushBtn: document.getElementById('pushBtn'),
     };
-    plannerInput.value = state.plannerEmail;
 
-    plannerInput.addEventListener('change', () => {
-      state.plannerEmail = plannerInput.value.trim().toLowerCase();
-      localStorage.setItem('p2t:plannerEmail', state.plannerEmail);
-      reload();
-    });
+    function setStatus(text){ els.statusBox.textContent = text; }
 
-    async function getJSON(url){
-      const r = await fetch(url, { credentials: 'include' });
-      const j = await r.json().catch(()=>({}));
-      if(!r.ok || j.ok === false){ throw new Error(j.error || ('HTTP '+r.status)); }
-      return j;
-    }
-    async function postJSON(url, body){
-      const r = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-      const j = await r.json().catch(()=>({}));
-      if(!r.ok || j.ok === false){ throw new Error(j.error || ('HTTP '+r.status)); }
-      return j;
-    }
-    function esc(s){ return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-
-    function ymd(d){ return d.toISOString().slice(0,10); }
-    function addDays(ymdStr, n){
-      const d = new Date(ymdStr + 'T00:00:00');
-      d.setUTCDate(d.getUTCDate() + (n||0));
-      return ymd(d);
+    function pad(n){ return String(n).padStart(2,'0'); }
+    function addDays(yyyyMmDd, offsetDays){
+      // Treat the input date as local date to avoid TZ surprises for display purposes
+      const [y,m,d] = yyyyMmDd.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      dt.setDate(dt.getDate() + Number(offsetDays || 0));
+      const yyyy = dt.getFullYear();
+      const mm = pad(dt.getMonth()+1);
+      const dd = pad(dt.getDate());
+      return `${yyyy}-${mm}-${dd}`;
     }
 
-    async function loadUsers(){
-      const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(state.plannerEmail)}&status=all`;
-      const j = await getJSON(url);
-      state.users = (j.users||[]);
-      userSelect.innerHTML = '';
-      for(const u of state.users){
-        const opt = document.createElement('option');
-        opt.value = u.email;
-        opt.textContent = u.email;
-        userSelect.appendChild(opt);
-      }
-    }
-
-    function renderBundle(){
-      const b = state.bundle;
-      btitle.textContent = b.title || '(untitled)';
-      bmeta.textContent  = `Start ${b.startDate} • ${b.timezone}`;
-      bcount.textContent = `${state.tasks.length} tasks`;
-      bdesc.textContent  = b.assigned_user ? `Assigned to ${b.assigned_user}` :
-                           b.suggested_user ? `Suggested: ${b.suggested_user}` : 'Unassigned';
-
-      rows.innerHTML = '';
-      for(const t of state.tasks){
-        // derive human date: prefer absolute date; else compute from startDate + dayOffset
-        const date = t.date || addDays(b.startDate, t.dayOffset || 0);
-        const row = document.createElement('div');
-        row.className = 'grid grid-cols-1 sm:grid-cols-5 text-sm';
-        row.innerHTML = `
-          <div class="px-2 py-2">${esc(t.title)}</div>
-          <div class="px-2 py-2">${esc(date)}</div>
-          <div class="px-2 py-2">${t.time || ''}</div>
-          <div class="px-2 py-2">${t.durationMins || 60} min</div>
-          <div class="px-2 py-2">${esc(t.notes || '')}</div>
-        `;
-        rows.appendChild(row);
-      }
-      listTitle.value = (b.title ? `Plan: ${b.title}` : 'Weekly Plan');
-
-      // preselect user
-      setTimeout(() => {
-        userSelect.value = b.assigned_user || b.suggested_user || (state.users[0]?.email || '');
-      }, 0);
-    }
-
-    async function reload(){
-      statusEl.textContent = 'Loading…';
-      try{
-        await loadUsers();
-        const url = `/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}&plannerEmail=${encodeURIComponent(state.plannerEmail)}`;
-        const j = await getJSON(url);
-        state.bundle = {
-          id: j.bundle.id,
-          title: j.bundle.title,
-          startDate: j.bundle.startDate,
-          timezone: j.bundle.timezone,
-          assigned_user: j.bundle.assigned_user || null,
-          suggested_user: j.bundle.suggested_user || null
+    function normalizeTasks(tasks, startDate){
+      // Return tasks with absolute date + simple HH:MM time
+      return (tasks || []).map(t => {
+        const date = t.date ? t.date : (t.dayOffset != null ? addDays(startDate, t.dayOffset) : "");
+        const time = (t.time === null || t.time === undefined || t.time === "") ? "" : t.time.slice(0,5);
+        const durationMins = (t.durationMins != null) ? t.durationMins : "";
+        return {
+          title: t.title || "",
+          date,
+          time,
+          durationMins,
+          notes: t.notes || ""
         };
-        state.tasks = j.tasks || [];
-        renderBundle();
-        statusEl.textContent = '';
-      }catch(e){
-        statusEl.textContent = 'Error: ' + (e.message || e);
+      });
+    }
+
+    function renderTasks(rows){
+      if (!rows.length){
+        els.tasksBody.innerHTML = `<tr><td colspan="5" class="meta">No tasks in this bundle.</td></tr>`;
+        return;
+      }
+      els.tasksBody.innerHTML = rows.map(r => `
+        <tr>
+          <td>${r.date}</td>
+          <td>${r.time || ""}</td>
+          <td>${r.durationMins ? `${r.durationMins} mins` : ""}</td>
+          <td>${r.title}</td>
+          <td>${r.notes}</td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadBundle() {
+      if (!inboxId){
+        setStatus(`GET /api/inbox/get?inboxId=…\nHTTP 400\n{"error":"inboxId is required"}\n\nNext step: Open this page via /review.html?inboxId=<id>.`);
+        return;
+      }
+      els.bundleId.textContent = `inboxId: ${inboxId}`;
+      try {
+        const url = `/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
+        const r = await fetch(url);
+        const body = await r.json().catch(()=> ({}));
+        if (!r.ok) {
+          els.tasksBody.innerHTML = `<tr><td colspan="5" class="meta">Failed to load.</td></tr>`;
+          setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Verify inboxId exists in NEW or ASSIGNED via /inbox.html.`);
+          return;
+        }
+        // Expect: { title, startDate, timezone, tasks:[…], userEmail? }
+        const bundle = body?.bundle || body; // support either shape
+        const title = bundle?.title || "—";
+        const startDate = bundle?.startDate || "—";
+        const tz = bundle?.timezone || timezone;
+
+        els.title.textContent = title;
+        els.startMeta.textContent = `Start: ${startDate} • Timezone: ${tz}`;
+        els.listTitle.placeholder = `Plan: ${title}`;
+        if (bundle?.userEmail) els.userEmail.value = bundle.userEmail;
+
+        const normalized = normalizeTasks(bundle?.tasks || body?.tasks || [], bundle?.startDate);
+        renderTasks(normalized);
+
+        setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}`);
+      } catch (e) {
+        els.tasksBody.innerHTML = `<tr><td colspan="5" class="meta">Error.</td></tr>`;
+        setStatus(`GET /api/inbox/get … ERROR: ${e.message}`);
       }
     }
 
-    pushBtn.addEventListener('click', async () => {
-      const b = state.bundle;
-      const userEmail = userSelect.value || '';
-      if(!userEmail){ alert('Choose a user'); return; }
+    async function pushBundle() {
+      // Build payload in absolute dates only (no offsets ever sent/displayed)
+      try {
+        // For safety, re-read the table rather than the original bundle object
+        const rows = Array.from(els.tasksBody.querySelectorAll('tr')).map(tr => {
+          const tds = tr.querySelectorAll('td');
+          if (tds.length < 5) return null;
+          const date = tds[0].textContent.trim();
+          const time = tds[1].textContent.trim() || null;
+          const durationText = tds[2].textContent.trim();
+          const title = tds[3].textContent.trim();
+          const notes = tds[4].textContent.trim();
+          const durationMins = durationText ? parseInt(durationText.replace(/\D+/g,''),10) : null;
+          return { title, date, time, durationMins, notes };
+        }).filter(Boolean);
 
-      // build items with absolute dates only (no offsets shown or sent)
-      const items = state.tasks.map(t => ({
-        title: t.title,
-        date: t.date || addDays(b.startDate, t.dayOffset || 0),
-        time: t.time || null,
-        durationMins: t.durationMins || 60,
-        notes: t.notes || ""
-      }));
+        const anyMissingDate = rows.some(r => !r.date);
+        if (anyMissingDate) {
+          setStatus(`POST /api/push\nHTTP 400\n{"error":"All tasks must have absolute 'date' before push."}\n\nNext step: Ensure each task displays a Date in the table, then retry.`);
+          return;
+        }
 
-      try{
-        statusEl.textContent = 'Pushing…';
-        await postJSON('/api/push', {
-          plannerEmail: state.plannerEmail,
-          userEmail,
-          listTitle: listTitle.value || 'Weekly Plan',
-          timezone: b.timezone,
-          startDate: b.startDate,
-          mode: modeSel.value,     // "append" or "replace"
-          items
+        const payload = {
+          plannerEmail,
+          userEmail: els.userEmail.value || "bart@midwesternbuilt.com",
+          listTitle: els.listTitle.value || els.listTitle.placeholder || "Plan",
+          timezone,
+          startDate: (els.startMeta.textContent.match(/Start:\s(\d{4}-\d{2}-\d{2})/) || [])[1] || "",
+          mode: els.mode.value === "replace" ? "replace" : "append",
+          items: rows.map(r => ({
+            title: r.title,
+            date: r.date,
+            time: r.time,                    // may be null
+            durationMins: r.durationMins,    // may be null
+            notes: r.notes || undefined
+          }))
+        };
+
+        const r = await fetch('/api/push', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify(payload)
         });
-        statusEl.textContent = '✅ Pushed to Google Tasks';
-      }catch(e){
-        statusEl.textContent = 'Push failed: ' + (e.message || e);
+        const body = await r.json().catch(()=> ({}));
+        setStatus(`POST /api/push\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}`);
+      } catch (e) {
+        setStatus(`POST /api/push\nERROR: ${e.message}`);
       }
-    });
-
-    if(!inboxId){
-      statusEl.textContent = 'Missing inboxId in the URL.';
-    }else{
-      reload();
     }
+
+    // Events
+    els.clearStatus.addEventListener('click', () => setStatus('Ready.'));
+    els.pushBtn.addEventListener('click', pushBundle);
+
+    // Init
+    loadBundle();
   </script>
 </body>
 </html>
