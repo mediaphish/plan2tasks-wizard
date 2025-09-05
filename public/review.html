@@ -75,7 +75,7 @@
       btnPush: document.getElementById('btnPush'),
     };
 
-    // --- Helper: date math done locally, no offset display ---
+    // --- Helpers (no offset display) ---
     function pad(n){ return String(n).padStart(2,'0'); }
     function addDays(yyyyMmDd, offsetDays){
       const [y,m,d] = (yyyyMmDd||"").split('-').map(Number);
@@ -86,8 +86,7 @@
     }
     function hhmm(t){
       if (t === null || t === undefined || t === "") return "";
-      // Normalize "HH:MM:SS" → "HH:MM"
-      return String(t).slice(0,5);
+      return String(t).slice(0,5); // "HH:MM:SS" → "HH:MM"
     }
 
     // Current bundle cache (for push)
@@ -99,27 +98,45 @@
       userEmail: ""
     };
 
+    // Be robust to wrapper shapes and snake_case names
     function normalizeBundleShape(body) {
-      // API can return { bundle: {...} } or a flat object
-      const b = body?.bundle || body || {};
+      const data = body?.data || body || {};
+      const bundle = data.bundle || data.inbox || data.record || data;
+
+      // Tasks can appear in several places/keys
+      const tasks =
+        data.tasks ||
+        data.items ||
+        bundle.tasks ||
+        bundle.items ||
+        [];
+
       return {
-        title: b.title || "",
-        startDate: b.start_date || b.startDate || "",
-        timezone: b.timezone || defaultTimezone,
-        userEmail: b.userEmail || b.suggested_user || "",
-        tasks: b.tasks || body?.tasks || []
+        title: bundle.title || "",
+        startDate: bundle.start_date || bundle.startDate || "",
+        timezone: bundle.timezone || defaultTimezone,
+        userEmail: bundle.userEmail || bundle.suggested_user || bundle.assigned_user || "",
+        tasks
       };
     }
 
     function normalizeTasks(tasks, startDate){
       return (tasks || []).map(t => {
-        const date = t.date || (t.dayOffset != null ? addDays(startDate, t.dayOffset) : "");
+        const offset = (t.dayOffset != null) ? t.dayOffset
+                     : (t.day_offset != null) ? t.day_offset
+                     : null;
+        const date = t.date || (offset != null ? addDays(startDate, offset) : "");
+        const durationMins = (t.durationMins != null) ? t.durationMins
+                           : (t.duration_mins != null) ? t.duration_mins
+                           : (t.minutes != null) ? t.minutes
+                           : null;
+
         return {
           title: t.title || "",
           date,
-          time: hhmm(t.time),
-          durationMins: (t.durationMins != null) ? t.durationMins : null,
-          notes: t.notes || ""
+          time: hhmm(t.time || t.start_time || t.at),
+          durationMins,
+          notes: t.notes || t.note || t.description || ""
         };
       });
     }
@@ -169,7 +186,7 @@
     }
 
     async function pushBundle(){
-      // Read the table to guarantee only absolute dates go out
+      // Read the table so only absolute dates go out
       const rows = Array.from(els.tbody.querySelectorAll('tr')).map(tr => {
         const tds = tr.querySelectorAll('td');
         if (tds.length < 5) return null;
@@ -182,10 +199,7 @@
         return { title, date, time, durationMins, notes };
       }).filter(Boolean);
 
-      if (rows.some(r => !r.date)) {
-        // Quietly abort if any date missing (no debug surface)
-        return;
-      }
+      if (rows.some(r => !r.date)) return; // silently abort if any missing
 
       const payload = {
         plannerEmail,
@@ -209,17 +223,10 @@
           headers: { 'Content-Type':'application/json' },
           body: JSON.stringify(payload)
         });
-        // No debug/status surface shown per your instruction
       } catch (e) {
-        // Silent failure per your “no status” preference
+        // silent per your rule
       }
     }
 
     // Events
-    els.btnPush.addEventListener('click', pushBundle);
-
-    // Init
-    loadBundle();
-  </script>
-</body>
-</html>
+    els.
