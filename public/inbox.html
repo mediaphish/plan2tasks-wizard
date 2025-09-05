@@ -2,184 +2,220 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Plan2Tasks · Inbox</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Plan2Tasks — Inbox</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --fg:#0f172a; --muted:#475569; --bg:#ffffff; --card:#f8fafc; --accent:#0ea5e9; --danger:#ef4444; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--fg); background:var(--bg); }
+    header { padding:16px; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; justify-content:space-between; }
+    h1 { font-size:18px; margin:0; }
+    main { padding:16px; display:grid; gap:16px; max-width:900px; margin:0 auto; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .card { background:var(--card); border:1px solid #e2e8f0; border-radius:14px; padding:12px; }
+    .bundle { display:flex; flex-direction:column; gap:8px; }
+    .bundle-header { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .meta { color:var(--muted); font-size:12px; }
+    .btn { appearance:none; border:1px solid #e2e8f0; background:#fff; padding:8px 10px; border-radius:10px; cursor:pointer; font-size:14px; }
+    .btn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+    .btn.link { background:transparent; border:none; color:var(--accent); padding:0; }
+    .btn:disabled { opacity:0.6; cursor:not-allowed; }
+    select, input { padding:8px 10px; border:1px solid #e2e8f0; border-radius:10px; font-size:14px; background:#fff; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { text-align:left; padding:6px 8px; border-bottom:1px solid #e2e8f0; vertical-align:top; }
+    .status { white-space:pre-wrap; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; background:#0b1020; color:#e2e8f0; padding:10px; border-radius:10px; }
+    .pill { font-size:12px; padding:3px 8px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; color:var(--muted); }
+  </style>
 </head>
-<body class="min-h-screen bg-gray-100 text-gray-900">
-  <div class="mx-auto max-w-6xl p-4">
-    <div class="mb-3 sm:mb-6 flex flex-wrap items-center justify-between gap-2">
-      <div class="flex items-center gap-2 sm:gap-3">
-        <div class="text-lg sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
-        <span class="text-[10px] sm:text-xs text-gray-500 whitespace-nowrap select-none ml-1 sm:ml-2">Inbox</span>
-      </div>
-      <div class="relative">
-        <button class="relative rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">
-          Inbox
-          <span id="badge" class="absolute -top-2 -right-2 rounded-full bg-indigo-600 text-white px-1.5 py-[2px] text-[10px] font-bold hidden">0</span>
-        </button>
-      </div>
+<body>
+  <header>
+    <h1>Inbox — New Bundles</h1>
+    <div class="row">
+      <span class="pill" id="planner-pill">planner: bartpaden@gmail.com</span>
+      <button class="btn" id="refresh">Refresh</button>
     </div>
+  </header>
 
-    <div class="mb-3 sm:mb-4 flex flex-wrap items-center gap-2">
-      <input id="planner" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm w-72" placeholder="Planner email" />
-      <input id="search" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm w-60" placeholder="Filter by title…" />
-      <button id="refresh" class="rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50">Refresh</button>
-    </div>
+  <main>
+    <section class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <div class="row" style="gap:12px;">
+          <label for="userSelect" class="meta">Assign to:</label>
+          <select id="userSelect">
+            <option value="" disabled selected>Loading users…</option>
+          </select>
+        </div>
+        <div class="row">
+          <button class="btn" id="loadNew">Load NEW</button>
+          <button class="btn" id="loadAssigned">Load ASSIGNED</button>
+        </div>
+      </div>
+    </section>
 
-    <div id="list" class="grid gap-2"></div>
-    <div id="empty" class="rounded-xl border border-dashed border-gray-300 bg-white px-4 py-6 text-center text-sm text-gray-600 hidden">
-      No new bundles. When GPT sends a bundle, it will appear here automatically.
-    </div>
-  </div>
+    <section id="bundles" class="card">
+      <table id="bundlesTable">
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Start Date</th>
+            <th>Timezone</th>
+            <th>Inbox ID</th>
+            <th style="width:260px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="bundlesBody">
+          <tr><td colspan="5" class="meta">Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        <strong>Status</strong>
+        <button class="btn link" id="clearStatus">clear</button>
+      </div>
+      <pre class="status" id="statusBox">Ready.</pre>
+    </section>
+  </main>
 
   <script>
-    const $ = s => document.querySelector(s);
-    const plannerInput = $('#planner');
-    const searchInput  = $('#search');
-    const listEl = $('#list');
-    const emptyEl = $('#empty');
-    const badgeEl = $('#badge');
-    const refreshBtn = $('#refresh');
-
-    const state = {
-      plannerEmail: localStorage.getItem('p2t:plannerEmail') || 'bartpaden@gmail.com',
-      items: [],
-      timer: null
+    // Config — keep to your provided defaults
+    const plannerEmail = "bartpaden@gmail.com";
+    const API = {
+      listInbox: (status) => `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`,
+      listUsers: `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`,
+      assign: `/api/inbox/assign`
     };
-    plannerInput.value = state.plannerEmail;
 
-    plannerInput.addEventListener('change', () => {
-      state.plannerEmail = (plannerInput.value || '').trim().toLowerCase();
-      localStorage.setItem('p2t:plannerEmail', state.plannerEmail);
-      fetchAndRender();
-    });
-    searchInput.addEventListener('input', render);
-    refreshBtn.addEventListener('click', fetchAndRender);
+    const els = {
+      refresh: document.getElementById('refresh'),
+      bundlesBody: document.getElementById('bundlesBody'),
+      loadNew: document.getElementById('loadNew'),
+      loadAssigned: document.getElementById('loadAssigned'),
+      statusBox: document.getElementById('statusBox'),
+      clearStatus: document.getElementById('clearStatus'),
+      userSelect: document.getElementById('userSelect')
+    };
 
-    async function getJSON(url){
-      const res = await fetch(url, { credentials: 'include' });
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      return await res.json();
+    function setStatus(text) {
+      els.statusBox.textContent = text;
     }
-    function fmtDate(iso){
-      const d = new Date(iso);
-      return d.toLocaleString(undefined,{ month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+    function fmt(s){ return s ?? ""; }
+
+    function rowTemplate(b, assignedMode) {
+      const inboxId = fmt(b.inboxId || b.id);
+      const title = fmt(b.title);
+      const startDate = fmt(b.startDate);
+      const timezone = fmt(b.timezone);
+
+      return `
+        <tr data-id="${inboxId}">
+          <td>${title}</td>
+          <td>${startDate}</td>
+          <td>${timezone}</td>
+          <td><code>${inboxId}</code></td>
+          <td>
+            <div class="row">
+              <button class="btn" data-action="review" data-id="${inboxId}">Review</button>
+              <button class="btn primary" data-action="assign" data-id="${inboxId}" ${assignedMode ? "disabled" : ""}>Assign</button>
+            </div>
+          </td>
+        </tr>
+      `;
     }
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 
-    function render(){
-      const q = (searchInput.value||'').toLowerCase().trim();
-      const data = q ? state.items.filter(x => (x.title||'').toLowerCase().includes(q)) : state.items;
+    async function loadUsers() {
+      try {
+        const r = await fetch(API.listUsers);
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setStatus(`GET ${API.listUsers}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Verify users exist via /api/users and that plannerEmail is correct.`);
+          return;
+        }
+        const users = body?.users || body?.data || [];
+        els.userSelect.innerHTML = `<option value="" disabled selected>Select user…</option>` +
+          users.map(u => `<option value="${u.email}">${u.email}</option>`).join('');
+        if (users.length === 0) {
+          setStatus(`GET ${API.listUsers}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Users list is empty — ensure connections/invites exist.`);
+        }
+      } catch (e) {
+        setStatus(`GET ${API.listUsers}\nERROR: ${e.message}`);
+      }
+    }
 
-      listEl.innerHTML = '';
-      if(!data.length){
-        emptyEl.classList.remove('hidden');
-        badgeEl.classList.add('hidden');
+    async function loadInbox(status = "new") {
+      els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">Loading ${status.toUpperCase()}…</td></tr>`;
+      try {
+        const url = API.listInbox(status);
+        const r = await fetch(url);
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">No data.</td></tr>`;
+          setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}\n\nNext step: Confirm bundles exist for this status in /inbox.html.`);
+          return;
+        }
+        const items = Array.isArray(body) ? body : (body?.data || []);
+        if (!items.length) {
+          els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">No bundles.</td></tr>`;
+          setStatus(`GET ${url}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}`);
+          return;
+        }
+        const assignedMode = status === "assigned";
+        els.bundlesBody.innerHTML = items.map(b => rowTemplate(b, assignedMode)).join('');
+      } catch (e) {
+        els.bundlesBody.innerHTML = `<tr><td colspan="5" class="meta">Error.</td></tr>`;
+        setStatus(`GET /api/inbox … ERROR: ${e.message}`);
+      }
+    }
+
+    async function assignBundle(inboxId) {
+      const userEmail = els.userSelect.value;
+      if (!userEmail) {
+        setStatus(`POST ${API.assign}\nHTTP 400\n{"error":"userEmail is required for assign"}\n\nNext step: choose a user in the dropdown and retry.`);
         return;
       }
-      emptyEl.classList.add('hidden');
-      badgeEl.textContent = String(data.length);
-      badgeEl.classList.remove('hidden');
-
-      for(const b of data){
-        const card = document.createElement('div');
-        card.className = 'rounded-xl border border-gray-300 bg-white p-3 sm:p-4 flex items-start justify-between gap-3';
-
-        const left = document.createElement('div');
-        left.className = 'flex-1';
-        left.innerHTML = `
-          <div class="font-semibold text-sm sm:text-base">${escapeHtml(b.title || '(untitled)')}</div>
-          <div class="mt-1 flex flex-wrap items-center gap-3 text-xs text-gray-600">
-            <span>Created ${fmtDate(b.created_at)}</span>
-            <span class="text-gray-400">•</span>
-            <span>Bundle ${escapeHtml(b.id.slice(0,8))}…</span>
-            ${b.suggested_user ? `<span class="text-gray-400">•</span><span>Suggested: ${escapeHtml(b.suggested_user)}</span>` : ``}
-            <span class="ml-1 rounded-full border border-gray-300 bg-gray-50 px-2 py-[2px] text-[11px]">${b.count || 0} tasks</span>
-          </div>
-        `;
-
-        const actions = document.createElement('div');
-        actions.className = 'flex items-center gap-2';
-
-        const assignBtn = document.createElement('button');
-        assignBtn.className = 'rounded-xl bg-indigo-600 text-white px-3 py-2 text-xs sm:text-sm';
-        assignBtn.textContent = b.suggested_user ? `Assign to ${b.suggested_user}` : 'Assign…';
-        assignBtn.onclick = () => onAssign(b);
-
-        const reviewBtn = document.createElement('button');
-        reviewBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm hover:bg-gray-50';
-        reviewBtn.textContent = 'Review';
-        reviewBtn.onclick = () => {
-          const url = new URL('/review.html', window.location.origin);
-          url.searchParams.set('inboxId', b.id);
-          url.searchParams.set('plannerEmail', state.plannerEmail);
-          window.location.assign(url.toString());
-        };
-
-        const archiveBtn = document.createElement('button');
-        archiveBtn.className = 'rounded-xl border border-gray-300 bg-white px-3 py-2 text-xs sm:text-sm text-gray-600 hover:bg-gray-50';
-        archiveBtn.textContent = 'Archive';
-        archiveBtn.onclick = () => onArchive(b);
-
-        actions.append(assignBtn, reviewBtn, archiveBtn);
-        card.append(left, actions);
-        listEl.append(card);
-      }
-    }
-
-    async function fetchAndRender(){
-      if(!state.plannerEmail){
-        listEl.innerHTML=''; emptyEl.classList.remove('hidden'); badgeEl.classList.add('hidden'); return;
-      }
-      try{
-        const url = `/api/inbox?plannerEmail=${encodeURIComponent(state.plannerEmail)}&status=new`;
-        const j = await getJSON(url);
-        state.items = (j && j.bundles) ? j.bundles : [];
-        render();
-      }catch(e){
-        listEl.innerHTML = `<div class="rounded-xl border border-gray-300 bg-white px-4 py-6 text-center text-sm text-red-600">Could not load inbox (${e.message}).</div>`;
-        badgeEl.classList.add('hidden');
-      }
-    }
-
-    async function onAssign(b){
-      const user = b.suggested_user || prompt('Assign to user email:');
-      if(!user) return;
-      try{
-        const res = await fetch('/api/inbox/assign', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ plannerEmail: state.plannerEmail, inboxId: b.id, userEmail: user })
+      const payload = { plannerEmail, inboxId, userEmail };
+      try {
+        const r = await fetch(API.assign, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         });
-        const j = await res.json().catch(()=>({}));
-        if(!res.ok || !j || j.ok === false){ throw new Error((j && j.error) || 'Assign failed'); }
-        state.items = state.items.filter(x => x.id !== b.id);
-        render();
-      }catch(e){
-        alert('Assign failed: ' + (e.message || e));
+        const body = await r.json().catch(() => ({}));
+        setStatus(`POST ${API.assign}\nHTTP ${r.status}\n${JSON.stringify(body, null, 2)}${r.status===404 ? `\n\nNext step: Inbox ID is wrong — copy it from this table and retry.`:""}`);
+        if (r.ok) {
+          // After successful assign, reload NEW to reflect change
+          loadInbox("new");
+        }
+      } catch (e) {
+        setStatus(`POST ${API.assign}\nERROR: ${e.message}`);
       }
     }
 
-    async function onArchive(b){
-      if(!confirm('Archive this bundle?')) return;
-      try{
-        const res = await fetch('/api/inbox/archive', {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ plannerEmail: state.plannerEmail, inboxId: b.id })
-        });
-        const j = await res.json().catch(()=>({}));
-        if(!res.ok || j.ok === false) throw new Error((j && j.error) || 'Archive failed');
-        state.items = state.items.filter(x => x.id !== b.id);
-        render();
-      }catch(e){
-        alert('Archive failed: ' + (e.message || e));
+    function handleTableClick(e) {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if (action === "review") {
+        // No offsets are shown on /review.html — that page converts internally if needed
+        window.location.href = `/review.html?inboxId=${encodeURIComponent(id)}`;
+      } else if (action === "assign") {
+        assignBundle(id);
       }
     }
 
-    fetchAndRender();
-    setInterval(fetchAndRender, 15000);
+    // Events
+    els.refresh.addEventListener('click', () => loadInbox("new"));
+    els.loadNew.addEventListener('click', () => loadInbox("new"));
+    els.loadAssigned.addEventListener('click', () => loadInbox("assigned"));
+    els.clearStatus.addEventListener('click', () => setStatus("Ready."));
+    document.getElementById('bundlesTable').addEventListener('click', handleTableClick);
+
+    // Init
+    loadUsers();
+    loadInbox("new");
   </script>
 </body>
 </html>
