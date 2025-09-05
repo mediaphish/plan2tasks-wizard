@@ -45,20 +45,20 @@
         <tr>
           <th style="width:22%;">Date (YYYY-MM-DD)</th>
           <th style="width:12%;">Time (HH:MM)</th>
-          <th style="width:12%;">Duration</th>
-          <th>Title</th>
-          <th style="width:28%;">Notes</th>
+          <th style="width:14%;">Duration</th>
+          <th style="width:26%;">Title</th>
+          <th style="width:26%;">Notes</th>
         </tr>
       </thead>
       <tbody id="tbody">
-        <tr><td colspan="5">Loading…</td></tr>
+        <tr><td colspan="5" style="color:#6b7280;">Loading…</td></tr>
       </tbody>
     </table>
   </div>
 
-  <script defer>
-    (function () {
-      // Defaults per your rules
+  <script>
+    (function(){
+      // Defaults (used only if API omits values)
       var plannerEmail = "bartpaden@gmail.com"; // used only for defaults
       var defaultUserEmail = "bart@midwesternbuilt.com";
       var defaultTimezone = "America/Chicago";
@@ -75,13 +75,13 @@
       };
 
       function pad(n){ return String(n).padStart(2, '0'); }
-      function addDays(yyyyMmDd, offsetDays){
-        var parts = (yyyyMmDd || "").split("-");
-        var y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
-        if (!y || !m || !d) return "";
-        var dt = new Date(y, m - 1, d);
-        dt.setDate(dt.getDate() + Number(offsetDays || 0));
-        return dt.getFullYear() + "-" + pad(dt.getMonth() + 1) + "-" + pad(dt.getDate());
+      function addDays(ymd, n) {
+        if (!ymd) return "";
+        var parts = String(ymd).split("-");
+        var y = parseInt(parts[0],10), m = parseInt(parts[1]||1,10)-1, d = parseInt(parts[2]||1,10);
+        var dt = new Date(Date.UTC(y, m, d));
+        dt.setUTCDate(dt.getUTCDate() + (parseInt(n,10)||0));
+        return dt.getUTCFullYear() + "-" + pad(dt.getUTCMonth()+1) + "-" + pad(dt.getUTCDate());
       }
       function hhmm(t){
         if (t === null || t === undefined || t === "") return "";
@@ -189,6 +189,7 @@
             els.title.textContent = title;
             els.meta.textContent = 'Start: ' + (startDate || '—') + ' • Timezone: ' + tz;
             els.listTitle.placeholder = 'Plan: ' + title;
+            els.listTitle.value = 'Plan: ' + title; // <-- set actual value so it’s not empty
             els.userEmail.value = userEmail;
 
             // Tasks (convert offsets → absolute dates)
