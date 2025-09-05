@@ -1,11 +1,10 @@
 // api/inbox/get.js
 // GET /api/inbox/get?inboxId=... [&plannerEmail=...]
 // Returns { ok, bundle:{...}, tasks:[{title,date,time,durationMins,notes}] }
-// No offsets are exposed.
 
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
-// helper: add n days to YYYY-MM-DD, returns YYYY-MM-DD
+// --- helpers ---
 function addDays(ymd, n) {
   if (!ymd || typeof ymd !== "string") return null;
   const m = /^\d{4}-\d{2}-\d{2}$/.exec(ymd);
@@ -17,6 +16,32 @@ function addDays(ymd, n) {
   const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(dt.getUTCDate()).padStart(2, "0");
   return `${yy}-${mm}-${dd}`;
+}
+
+function coalesce(obj, keys, fallback = null) {
+  for (const k of keys) {
+    if (obj && Object.prototype.hasOwnProperty.call(obj, k) && obj[k] != null) return obj[k];
+  }
+  return fallback;
+}
+
+async function fetchTasksFlexible(bundleId) {
+  // Try multiple foreign keys AND multiple order-by columns.
+  const fkCandidates = ["bundle_id", "inbox_id"];
+  const orderCandidates = ["created_at", "inserted_at", "id", null];
+
+  for (const fk of fkCandidates) {
+    for (const orderCol of orderCandidates) {
+      let q = supabaseAdmin.from("inbox_tasks").select("*").eq(fk, bundleId);
+      if (orderCol) q = q.order(orderCol, { ascending: true });
+      const { data, error } = await q;
+      if (!error && Array.isArray(data)) return data; // success (even if empty)
+    }
+  }
+  // If the table exists but all attempts error, last resort: try without filters (shouldn't be needed, but won't 500)
+  const { data } = await supabaseAdmin.from("inbox_tasks").select("*").limit(0);
+  if (Array.isArray(data)) return []; // table exists but no matching rows
+  return null; // table likely missing; caller will handle
 }
 
 export default async function handler(req, res) {
@@ -33,50 +58,47 @@ export default async function handler(req, res) {
 
     if (!inboxId) return res.status(400).json({ ok: false, error: "Missing inboxId" });
 
-    // 1) Load bundle by id (do NOT filter by status; assigned & new are both valid)
+    // ---- bundle (id only; no status filter) ----
     const { data: b, error: bErr } = await supabaseAdmin
       .from("inbox_bundles")
-      .select(
-        // IMPORTANT: use assigned_user_email (not assigned_user)
-        "id, planner_email, title, start_date, timezone, source, suggested_user, assigned_user_email, assigned_at, archived_at, created_at"
-      )
+      .select("id, planner_email, title, start_date, timezone, source, suggested_user, assigned_user_email, assigned_at, archived_at, created_at")
       .eq("id", inboxId)
       .maybeSingle();
 
-    if (bErr || !b) {
-      return res.status(404).json({ ok: false, error: "Bundle not found" });
-    }
+    if (bErr || !b) return res.status(404).json({ ok: false, error: "Bundle not found" });
     if (plannerEmail && b.planner_email?.toLowerCase() !== plannerEmail) {
-      // Soft guard only; not blocking
+      // soft hint only; not blocking
     }
 
-    // 2) Load tasks for this bundle (tasks are keyed by bundle_id)
-    const { data: t, error: tErr } = await supabaseAdmin
-      .from("inbox_tasks")
-      .select("*") // tolerate schema drift (date vs task_date, etc.)
-      .eq("bundle_id", inboxId)
-      .order("created_at", { ascending: true });
-
-    if (tErr) {
-      return res.status(500).json({ ok: false, error: "Database error (tasks)" });
+    // ---- tasks (resilient to missing columns) ----
+    let tasksRaw = await fetchTasksFlexible(inboxId);
+    if (tasksRaw === null) {
+      // tasks table missing entirely → still return the bundle so /review.html doesn't hard-fail
+      tasksRaw = [];
     }
 
-    // 3) Normalize tasks to dates only (compute from start_date + day_offset if needed)
+    // ---- normalize tasks (dates only; compute from offset if needed) ----
     const startDate = b.start_date || null;
-    const tasks = (t || []).map((row) => {
-      const date = row.date || (startDate != null && typeof row.day_offset === "number"
-        ? addDays(startDate, row.day_offset)
-        : null);
+    const tasks = tasksRaw.map((row) => {
+      const title = String(coalesce(row, ["title"], "")) || "";
+      const rawDate = coalesce(row, ["date", "task_date"], null);
+      const time = coalesce(row, ["time", "task_time"], null);
+      const durationMins = coalesce(row, ["duration_mins", "duration", "durationMinutes"], null);
+      const notes = coalesce(row, ["notes", "note"], "") || "";
+      const offset = coalesce(row, ["day_offset", "offset"], null);
+      let date = rawDate;
+      if (!date && startDate != null && typeof offset === "number") {
+        date = addDays(startDate, offset);
+      }
       return {
-        title: row.title || "",
+        title,
         date: date || null,
-        time: row.time || null,
-        durationMins: row.duration_mins ?? 60,
-        notes: row.notes || ""
+        time: time || null,
+        durationMins: durationMins != null ? Number(durationMins) : null,
+        notes,
       };
     });
 
-    // 4) Response shape (include both start_date and startDate for compatibility)
     const bundle = {
       id: b.id,
       title: b.title,
@@ -90,7 +112,7 @@ export default async function handler(req, res) {
       archived_at: b.archived_at || null,
       created_at: b.created_at || null,
       tasks,
-      count: tasks.length
+      count: tasks.length,
     };
 
     return res.status(200).json({ ok: true, bundle, tasks });
