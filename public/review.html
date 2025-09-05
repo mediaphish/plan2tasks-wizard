@@ -59,7 +59,7 @@
   <script defer>
     (function () {
       // Defaults per your rules
-      var plannerEmail = "bartpaden@gmail.com";
+      var plannerEmail = "bartpaden@gmail.com"; // used only for defaults
       var defaultUserEmail = "bart@midwesternbuilt.com";
       var defaultTimezone = "America/Chicago";
 
@@ -89,7 +89,7 @@
         return s.length >= 5 ? s.slice(0,5) : s;
       }
 
-      // Safe getters to handle different shapes/keys
+      // Robust key access
       function firstKey(obj, keys) {
         if (!obj) return undefined;
         for (var i=0; i<keys.length; i++){
@@ -98,24 +98,25 @@
         return undefined;
       }
 
-      function normalizeBundleShape(body) {
-        var root = body || {};
-        var data = firstKey(root, ["data"]) || root;
-        var bundle = firstKey(data, ["bundle", "inbox", "record"]) || data;
+      function getInboxId() {
+        var q = new URLSearchParams(window.location.search || "");
+        return q.get("inboxId") || q.get("id") || "";
+      }
 
-        var tasks = firstKey(data, ["tasks", "items"]);
-        if (!Array.isArray(tasks)) {
-          tasks = firstKey(bundle, ["tasks", "items"]);
-        }
+      // Normalize bundle and tasks from any reasonable API shape
+      function normalizeFromResponse(body) {
+        var root = body || {};
+        var bundle = firstKey(root, ["bundle"]) || root;
+
+        var title = firstKey(bundle, ["title"]) || "";
+        var startDate = firstKey(bundle, ["start_date", "startDate"]) || "";
+        var timezone = firstKey(bundle, ["timezone"]) || defaultTimezone;
+        var userEmail = firstKey(bundle, ["userEmail", "suggested_user", "assigned_user"]) || "";
+
+        var tasks = firstKey(bundle, ["tasks", "items"]) || firstKey(root, ["tasks", "items"]) || [];
         if (!Array.isArray(tasks)) tasks = [];
 
-        return {
-          title: firstKey(bundle, ["title"]) || "",
-          startDate: firstKey(bundle, ["start_date", "startDate"]) || "",
-          timezone: firstKey(bundle, ["timezone"]) || defaultTimezone,
-          userEmail: firstKey(bundle, ["userEmail", "suggested_user", "assigned_user"]) || "",
-          tasks: tasks
-        };
+        return { title:title, startDate:startDate, timezone:timezone, userEmail:userEmail, tasks:tasks };
       }
 
       function normalizeTasks(tasks, startDate){
@@ -160,11 +161,6 @@
         els.tbody.innerHTML = html;
       }
 
-      function getInboxId() {
-        var q = new URLSearchParams(window.location.search || "");
-        return q.get("inboxId") || q.get("id") || "";
-      }
-
       function loadBundle(){
         var inboxId = getInboxId();
         if (!inboxId) {
@@ -172,17 +168,19 @@
           return;
         }
 
-        var url = '/api/inbox/get?inboxId=' + encodeURIComponent(inboxId) + '&plannerEmail=' + encodeURIComponent(plannerEmail);
-        fetch(url)
-          .then(function (r) { return r.json().catch(function(){ return {}; }).then(function (b){ return { ok:r.ok, status:r.status, body:b }; }); })
-          .then(function (resp){
-            if (!resp.ok) {
-              els.tbody.innerHTML = '<tr><td colspan="5">Failed to load.</td></tr>';
-              return;
-            }
-            var b = normalizeBundleShape(resp.body);
+        // Use only the documented param — no extras
+        var url = '/api/inbox/get?inboxId=' + encodeURIComponent(inboxId);
 
-            // Cache-like locals (kept simple; no global state)
+        fetch(url)
+          .then(function (r) {
+            // We avoid exposing status; treat non-200 as failure
+            if (!r.ok) throw new Error('http_' + r.status);
+            return r.json();
+          })
+          .then(function (json){
+            var b = normalizeFromResponse(json);
+
+            // Header fields
             var title = b.title || "—";
             var startDate = b.startDate || "";
             var tz = b.timezone || defaultTimezone;
@@ -193,12 +191,12 @@
             els.listTitle.placeholder = 'Plan: ' + title;
             els.userEmail.value = userEmail;
 
+            // Tasks (convert offsets → absolute dates)
             var rows = normalizeTasks(b.tasks, b.startDate);
             renderTasks(rows);
 
-            // Attach push handler now that we have meta
+            // Push handler (payload built from visible table so only absolute dates go out)
             els.btnPush.onclick = function pushBundle(){
-              // Re-read visible table to guarantee absolute dates only
               var trs = Array.prototype.slice.call(els.tbody.querySelectorAll('tr'));
               var items = trs.map(function (tr) {
                 var tds = tr.querySelectorAll('td');
@@ -212,10 +210,7 @@
                 return { title: titleCell, date: date, time: time, durationMins: durationMins, notes: notes };
               }).filter(Boolean);
 
-              if (items.some(function (it){ return !it.date; })) {
-                // Abort silently if any row lacks a date
-                return;
-              }
+              if (items.some(function (it){ return !it.date; })) return;
 
               var payload = {
                 plannerEmail: plannerEmail,
