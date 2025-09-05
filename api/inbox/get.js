@@ -1,10 +1,6 @@
 // api/inbox/get.js
 // GET /api/inbox/get?inboxId=...
-// Returns: { ok:true, bundle:{ title, start_date|startDate, timezone, tasks:[{title,date,time,durationMins,notes}] }, tasks:[...] }
-// Notes:
-// - No offsets are exposed
-// - Matches your schema exactly: inbox_bundles + inbox_tasks (day_offset, no date column)
-// - No UI/layout changes required
+// Returns: { ok:true, title, bundle:{ ...title aliases..., tasks:[{title,date,time,durationMins,notes}] }, tasks:[...] }
 
 import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
@@ -50,11 +46,9 @@ export default async function handler(req, res) {
       return res.status(404).json({ ok: false, error: "Bundle not found" });
     }
 
-    // 2) Tasks by bundle_id — order by day_offset then id (both exist)
+    // 2) Tasks by bundle_id — order by day_offset then id
     let taskRows = [];
     let tErr = null;
-
-    // primary (ordered)
     {
       const { data, error } = await supabaseAdmin
         .from("inbox_tasks")
@@ -62,18 +56,14 @@ export default async function handler(req, res) {
         .eq("bundle_id", inboxId)
         .order("day_offset", { ascending: true })
         .order("id", { ascending: true });
-
       taskRows = data || [];
       tErr = error || null;
     }
-
-    // fallback (unordered) – in case ordering ever errors
     if (tErr) {
       const { data, error } = await supabaseAdmin
         .from("inbox_tasks")
         .select("id, bundle_id, title, day_offset, time, duration_mins, notes")
         .eq("bundle_id", inboxId);
-
       if (error) {
         return res.status(500).json({ ok: false, error: "Database error (tasks)" });
       }
@@ -90,10 +80,12 @@ export default async function handler(req, res) {
       notes: r.notes ?? ""
     }));
 
-    // 4) Response (keep both start_date and startDate for compatibility)
+    // 4) Response (include aliases so review.html finds the title no matter what key it expects)
     const bundle = {
       id: b.id,
-      title: b.title,
+      title: b.title,                 // primary
+      plan_title: b.title,            // alias for older clients
+      list_title: b.title,            // alias for older clients
       start_date: startDate,
       startDate: startDate,
       timezone: b.timezone || null,
@@ -108,7 +100,8 @@ export default async function handler(req, res) {
       count: tasks.length
     };
 
-    return res.status(200).json({ ok: true, bundle, tasks });
+    // top-level title for ultra-legacy consumers
+    return res.status(200).json({ ok: true, title: b.title, bundle, tasks });
   } catch (e) {
     console.error("GET /api/inbox/get error", e);
     return res.status(500).json({ ok: false, error: "Server error" });
