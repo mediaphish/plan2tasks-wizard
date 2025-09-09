@@ -1,6 +1,6 @@
 // api/connections/google/start.js
 // GET /api/connections/google/start?userEmail=someone@example.com
-// Redirects to Google OAuth with the correct Tasks scope.
+// Redirects to Google OAuth with the Tasks scope.
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
