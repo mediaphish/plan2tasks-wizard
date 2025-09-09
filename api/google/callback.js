@@ -13,9 +13,9 @@ export default async function handler(req, res) {
     const url = new URL(req.url, `https://${req.headers.host}`);
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
-    const error = url.searchParams.get("error");
+    const err = url.searchParams.get("error");
 
-    if (error) return res.status(400).json({ ok: false, error });
+    if (err) return res.status(400).json({ ok: false, error: err });
     if (!code) return res.status(400).json({ ok: false, error: "Missing code" });
 
     let userEmail = null;
@@ -32,6 +32,7 @@ export default async function handler(req, res) {
 
     const redirectUri = `https://${req.headers.host}/api/connections/google/callback`;
 
+    // Exchange code for tokens
     const form = new URLSearchParams({
       code,
       client_id: CLIENT_ID,
@@ -45,7 +46,6 @@ export default async function handler(req, res) {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString()
     });
-
     const j = await r.json().catch(() => ({}));
     if (!r.ok) {
       return res.status(400).json({
@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     }
 
     const accessToken  = j.access_token || null;
-    const refreshToken = j.refresh_token || null; // should be present on first consent
+    const refreshToken = j.refresh_token || null;
     const tokenType    = j.token_type || "Bearer";
     const expiresIn    = Number(j.expires_in || 3600);
     const scope        = j.scope || "";
