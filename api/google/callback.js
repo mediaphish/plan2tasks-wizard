@@ -1,7 +1,7 @@
-// api/connections/google/callback.js
+// api/google/callback.js
 // Exchanges the auth code for tokens and upserts into public.user_connections.
 
-import { supabaseAdmin } from "../../../lib/supabase-admin.js";
+import { supabaseAdmin } from "../../lib/supabase-admin.js";
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -30,9 +30,8 @@ export default async function handler(req, res) {
       return res.status(500).json({ ok: false, error: "Missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET" });
     }
 
-    const redirectUri = `https://${req.headers.host}/api/connections/google/callback`;
+    const redirectUri = `https://${req.headers.host}/api/google/callback`; // <— locked path
 
-    // Exchange code for tokens
     const form = new URLSearchParams({
       code,
       client_id: CLIENT_ID,
@@ -67,7 +66,6 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "missing_tasks_scope", detail: scope });
     }
 
-    // Preserve existing refresh token if Google didn't return a new one
     const { data: existing } = await supabaseAdmin
       .from("user_connections")
       .select("*")
@@ -101,7 +99,7 @@ export default async function handler(req, res) {
       scopes: scope.split(" ")
     });
   } catch (e) {
-    console.error("GET /api/connections/google/callback error", e);
+    console.error("GET /api/google/callback error", e);
     return res.status(500).json({ ok: false, error: "Server error" });
   }
 }
