@@ -1,10 +1,6 @@
 // api/connections/google/start.js
-// Redirects to Google OAuth with the correct scopes for Tasks.
-// Usage: GET /api/connections/google/start?userEmail=someone@example.com
-//
-// ENV needed: GOOGLE_CLIENT_ID
-// Redirect URI is computed from the current host: https://<host>/api/connections/google/callback
-// Make sure this exact URI is added to your Google Cloud "Authorized redirect URIs".
+// GET /api/connections/google/start?userEmail=someone@example.com
+// Redirects to Google OAuth with the correct Tasks scope.
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -26,8 +22,8 @@ export default async function handler(req, res) {
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: "code",
-    access_type: "offline",              // get refresh token
-    prompt: "consent",                   // force asking for consent to ensure refresh token
+    access_type: "offline",
+    prompt: "consent",
     include_granted_scopes: "true",
     scope: [
       "https://www.googleapis.com/auth/tasks",
