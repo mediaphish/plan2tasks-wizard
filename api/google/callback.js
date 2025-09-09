@@ -1,104 +1,108 @@
-// api/google/callback.js
-import { supabaseAdmin } from "../../lib/supabase-admin.js";
+// api/connections/google/callback.js
+// Exchanges the auth code for tokens and upserts into public.user_connections.
+//
+// ENV needed: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+//
+// On success returns JSON { ok:true, userEmail, google_expires_at, scopes }
+// (Plain JSON keeps this flow simple; you can add a redirect later if you like.)
 
-const SITE =
-  process.env.PUBLIC_SITE_URL ||
-  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
-const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
-const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
-const REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
-
-async function exchangeCodeForTokens(code) {
-  const body = new URLSearchParams({
-    code,
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    redirect_uri: REDIRECT_URI,
-    grant_type: "authorization_code"
-  });
-  const r = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j.error_description || j.error || "Token exchange failed");
-  return j;
-}
-
-function b64json(s) {
-  try { return JSON.parse(Buffer.from(s, "base64url").toString("utf8")); }
-  catch { return null; }
-}
+import { supabaseAdmin } from "../../../lib/supabase-admin.js";
 
 export default async function handler(req, res) {
-  try {
-    const url = new URL(`https://${req.headers.host}${req.url}`);
-    const code = url.searchParams.get("code") || "";
-    const stateRaw = url.searchParams.get("state") || "";
-    const err = url.searchParams.get("error") || "";
+  if (req.method !== "GET") {
+    res.setHeader("Allow", "GET");
+    return res.status(405).json({ ok: false, error: "GET only" });
+  }
 
-    if (err) throw new Error(`Google error: ${err}`);
-    if (!code) throw new Error("Missing code");
-    if (!CLIENT_ID || !CLIENT_SECRET || !REDIRECT_URI) {
-      throw new Error("Missing Google env (client id/secret or redirect uri)");
+  try {
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const error = url.searchParams.get("error");
+
+    if (error) return res.status(400).json({ ok: false, error });
+    if (!code) return res.status(400).json({ ok: false, error: "Missing code" });
+
+    let userEmail = null;
+    try {
+      userEmail = JSON.parse(Buffer.from(String(state || ""), "base64url").toString("utf8"))?.userEmail || null;
+    } catch { /* ignore */ }
+    if (!userEmail) return res.status(400).json({ ok: false, error: "Missing userEmail in state" });
+
+    const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+    if (!CLIENT_ID || !CLIENT_SECRET) {
+      return res.status(500).json({ ok: false, error: "Missing GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET" });
     }
 
-    const state = b64json(stateRaw);
-    const inviteId = state?.inviteId || "";
+    const redirectUri = `https://${req.headers.host}/api/connections/google/callback`;
 
-    // Retrieve invite for context (planner/user)
-    const { data: inv, error: invErr } = await supabaseAdmin
-      .from("invites")
-      .select("id, planner_email, user_email")
-      .eq("id", inviteId)
-      .single();
-    if (invErr || !inv) throw new Error("Invite not found in callback");
+    // Exchange code for tokens
+    const form = new URLSearchParams({
+      code,
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code"
+    });
 
-    // Exchange code
-    const tok = await exchangeCodeForTokens(code);
-    const expiresAt = new Date(Date.now() + (tok.expires_in || 3600) * 1000).toISOString();
+    const r = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString()
+    });
 
-    // Upsert connection
-    const row = {
-      planner_email: inv.planner_email.toLowerCase(),
-      user_email: inv.user_email.toLowerCase(),
-      google_access_token: tok.access_token || null,
-      google_refresh_token: tok.refresh_token || null,
-      google_scope: tok.scope || null,
-      google_token_type: tok.token_type || null,
-      google_expires_at: expiresAt,
-      updated_at: new Date().toISOString()
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      return res.status(400).json({
+        ok: false,
+        error: j?.error || `http_${r.status}`,
+        error_description: j?.error_description || null
+      });
+    }
+
+    const accessToken  = j.access_token || null;
+    const refreshToken = j.refresh_token || null; // should be present because we used prompt=consent + access_type=offline
+    const tokenType    = j.token_type || "Bearer";
+    const expiresIn    = Number(j.expires_in || 3600);
+    const scope        = j.scope || ""; // Google returns a space-delimited string
+    const expUnix      = Math.floor(Date.now() / 1000) + expiresIn;
+    const expiresAtIso = new Date(expUnix * 1000).toISOString();
+
+    // Basic safety: require that scopes include Google Tasks
+    if (!scope.includes("https://www.googleapis.com/auth/tasks")) {
+      return res.status(400).json({ ok: false, error: "missing_tasks_scope", detail: scope });
+    }
+
+    // Upsert into public.user_connections keyed by user_email
+    const upsertRow = {
+      user_email: userEmail,
+      provider: "google",
+      google_access_token: accessToken,
+      google_refresh_token: refreshToken,          // may be null if Google decided not to return (e.g., very recent reconnection); usually present on first consent
+      google_scope: scope,
+      google_token_type: tokenType,
+      google_token_expiry: expUnix,
+      google_expires_at: expiresAtIso,
+      google_tasklist_id: null                     // we can set when we first create/find a list
     };
 
-    // Try upsert on composite key; if your schema differs, this still works on unique constraint if present.
-    const up = await supabaseAdmin
+    const { error: upErr } = await supabaseAdmin
       .from("user_connections")
-      .upsert(row, { onConflict: "planner_email,user_email" })
-      .select("*")
-      .single();
+      .upsert(upsertRow, { onConflict: "user_email" });
 
-    if (up.error) throw up.error;
+    if (upErr) {
+      return res.status(500).json({ ok: false, error: "Database error (upsert)" });
+    }
 
-    // Mark invite accepted
-    await supabaseAdmin
-      .from("invites")
-      .update({ accepted_at: new Date().toISOString() })
-      .eq("id", inv.id);
-
-    // Friendly success page
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.end(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Connected</title>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px}</style>
-</head><body>
-<h2>You're connected!</h2>
-<p>You can close this tab.</p>
-<p><a href="${SITE}">Return to Plan2Tasks</a></p>
-</body></html>`);
+    return res.status(200).json({
+      ok: true,
+      userEmail,
+      google_expires_at: expiresAtIso,
+      scopes: scope.split(" ")
+    });
   } catch (e) {
-    console.error("callback error", e);
-    res.status(400).end(`Error: ${e.message}`);
+    console.error("GET /api/connections/google/callback error", e);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 }
