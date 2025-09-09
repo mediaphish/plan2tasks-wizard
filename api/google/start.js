@@ -1,6 +1,7 @@
-// api/connections/google/start.js
-// GET /api/connections/google/start?userEmail=someone@example.com
+// api/google/start.js
+// GET /api/google/start?userEmail=someone@example.com
 // Redirects to Google OAuth with the Tasks scope.
+// NOTE: callback is intentionally /api/connections/google/callback to match your Google OAuth settings.
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -15,6 +16,7 @@ export default async function handler(req, res) {
   const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
   if (!CLIENT_ID) return res.status(500).send("Missing GOOGLE_CLIENT_ID");
 
+  // Use the /api/connections/google/callback route for the redirect
   const redirectUri = `https://${req.headers.host}/api/connections/google/callback`;
   const state = Buffer.from(JSON.stringify({ userEmail })).toString("base64url");
 
