@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     }
 
     const accessToken  = j.access_token || null;
-    const refreshToken = j.refresh_token || null;
+    const refreshToken = j.refresh_token || null; // may be null on re-consent
     const tokenType    = j.token_type || "Bearer";
     const expiresIn    = Number(j.expires_in || 3600);
     const scope        = j.scope || "";
@@ -67,16 +67,23 @@ export default async function handler(req, res) {
       return res.status(400).json({ ok: false, error: "missing_tasks_scope", detail: scope });
     }
 
+    // Preserve existing refresh token if Google didn't return a new one
+    const { data: existing } = await supabaseAdmin
+      .from("user_connections")
+      .select("*")
+      .eq("user_email", userEmail)
+      .maybeSingle();
+
     const upsertRow = {
       user_email: userEmail,
       provider: "google",
       google_access_token: accessToken,
-      google_refresh_token: refreshToken,
+      google_refresh_token: refreshToken || existing?.google_refresh_token || null,
       google_scope: scope,
       google_token_type: tokenType,
       google_token_expiry: expUnix,
       google_expires_at: expiresAtIso,
-      google_tasklist_id: null
+      google_tasklist_id: existing?.google_tasklist_id || null
     };
 
     const { error: upErr } = await supabaseAdmin
