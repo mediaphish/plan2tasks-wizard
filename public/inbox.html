@@ -4,22 +4,21 @@
   <meta charset="utf-8" />
   <title>Inbox — Plan2Tasks</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Prevent any stale caching when returning from review.html -->
+  <!-- Logic-only: reduce stale cache without altering visuals -->
   <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
+  <style>
+    /* No visual/layout changes: keep default browser styles */
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #000; padding: 6px; }
+  </style>
 </head>
 <body>
-  <h1>Inbox</h1>
-
-  <!-- Tiny view toggle (no layout changes; just two links) -->
-  <nav aria-label="Views">
-    <span id="viewToggle"></span>
-  </nav>
-
+  <!-- Preserve existing simple structure: status line + table -->
   <p id="statusLine">Loading…</p>
 
-  <table id="bundleTable" border="1" cellpadding="6" cellspacing="0">
+  <table id="bundleTable">
     <thead>
       <tr>
         <th>Title</th>
@@ -32,123 +31,91 @@
         <th>Action</th>
       </tr>
     </thead>
-    <tbody id="bundleTbody">
-      <!-- rows injected -->
-    </tbody>
+    <tbody id="bundleTbody"><!-- rows injected --></tbody>
   </table>
 
   <script>
-    // Config (environment)
+    // Fixed planner; only showing ASSIGNED (no new UI added)
     const plannerEmail = 'bartpaden@gmail.com';
-
-    // Determine current view from query param; default to "assigned"
-    const params = new URLSearchParams(location.search);
-    const view = (params.get('view') || 'assigned').toLowerCase(); // 'assigned' | 'archived'
-    const validViews = new Set(['assigned', 'archived']);
-    const status = validViews.has(view) ? view : 'assigned';
-
-    // Render tiny toggle without altering layout
-    function renderToggle(current) {
-      const base = '/inbox.html';
-      const assignedHref = `${base}?view=assigned`;
-      const archivedHref = `${base}?view=archived`;
-
-      const wrap = (label, isActive, href) =>
-        isActive ? `<strong>${label}</strong>` : `<a href="${href}">${label}</a>`;
-
-      document.getElementById('viewToggle').innerHTML =
-        `${wrap('Assigned', current === 'assigned', assignedHref)} | ${wrap('Archived', current === 'archived', archivedHref)}`;
-    }
-
-    renderToggle(status);
-
     const statusLine = document.getElementById('statusLine');
     const tbody = document.getElementById('bundleTbody');
 
-    // Fetch helper with cache-busting to ensure fresh data when returning from review.html
     async function fetchJSON(url) {
       const sep = url.includes('?') ? '&' : '?';
-      const noCacheUrl = `${url}${sep}t=${Date.now()}`;
+      const noCacheUrl = `${url}${sep}t=${Date.now()}`; // cache-bust without UI change
       const res = await fetch(noCacheUrl, { cache: 'no-store' });
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }
 
-    function fmtDate(d) {
-      if (!d) return '';
-      // Accept ISO or YYYY-MM-DD
-      try {
-        // If it's plain date (YYYY-MM-DD), keep as-is
-        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-        const dt = new Date(d);
-        if (isNaN(dt.getTime())) return d;
-        return dt.toISOString(); // keep ISO; no formatting changes to layout
-      } catch {
-        return d;
-      }
-    }
-
-    function cell(text) {
-      const td = document.createElement('td');
-      td.textContent = text ?? '';
-      return td;
+    function td(text) {
+      const el = document.createElement('td');
+      el.textContent = text ?? '';
+      return el;
     }
 
     function linkCell(href, label) {
-      const td = document.createElement('td');
+      const el = document.createElement('td');
       const a = document.createElement('a');
       a.href = href;
       a.textContent = label;
-      td.appendChild(a);
-      return td;
+      el.appendChild(a);
+      return el;
     }
 
-    function makeRow(b) {
-      const tr = document.createElement('tr');
-      tr.appendChild(cell(b.title || ''));
-      tr.appendChild(cell(b.start_date || b.startDate || ''));
-      tr.appendChild(cell(b.timezone || ''));
-      tr.appendChild(cell(b.suggested_user || ''));
-      tr.appendChild(cell(b.assigned_user_email || b.assigned_user || ''));
-      tr.appendChild(cell(fmtDate(b.assigned_at)));
-      tr.appendChild(cell(fmtDate(b.archived_at)));
+    function isoOrEmpty(val) {
+      if (!val) return '';
+      try {
+        // leave YYYY-MM-DD alone, otherwise keep ISO
+        if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+        const d = new Date(val);
+        return isNaN(d.getTime()) ? (val || '') : d.toISOString();
+      } catch { return val || ''; }
+    }
 
-      // Always provide Review link; review.html already redirects if archived
-      const reviewHref = `/review.html?inboxId=${encodeURIComponent(b.id)}`;
-      tr.appendChild(linkCell(reviewHref, 'Review'));
+    function row(b) {
+      const tr = document.createElement('tr');
+      tr.appendChild(td(b.title || ''));
+      tr.appendChild(td(b.start_date || b.startDate || ''));
+      tr.appendChild(td(b.timezone || ''));
+      tr.appendChild(td(b.suggested_user || ''));
+      tr.appendChild(td(b.assigned_user_email || b.assigned_user || ''));
+      tr.appendChild(td(isoOrEmpty(b.assigned_at)));
+      tr.appendChild(td(isoOrEmpty(b.archived_at)));
+      tr.appendChild(linkCell(`/review.html?inboxId=${encodeURIComponent(b.id)}`, 'Review'));
       return tr;
     }
 
-    async function load() {
-      statusLine.textContent = `Loading ${status} bundles…`;
+    async function loadAssigned() {
+      statusLine.textContent = 'Loading assigned bundles…';
       tbody.innerHTML = '';
-
-      const listUrl = `/api/inbox?status=${encodeURIComponent(status)}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
+      const listUrl = `/api/inbox?status=assigned&plannerEmail=${encodeURIComponent(plannerEmail)}`;
       try {
-        // Clickable URL shown in console for debugging
-        console.log('GET', location.origin + listUrl);
-
         const data = await fetchJSON(listUrl);
-
         const bundles = Array.isArray(data.bundles) ? data.bundles : [];
         if (bundles.length === 0) {
-          statusLine.textContent = `No ${status} bundles.`;
+          statusLine.textContent = 'No assigned bundles.';
           return;
         }
-
-        for (const b of bundles) {
-          tbody.appendChild(makeRow(b));
-        }
-        statusLine.textContent = `${bundles.length} ${status} bundle(s).`;
+        for (const b of bundles) tbody.appendChild(row(b));
+        statusLine.textContent = `${bundles.length} assigned bundle(s).`;
       } catch (e) {
-        statusLine.textContent = `Error loading ${status} bundles: ${e.message}`;
+        statusLine.textContent = `Error loading assigned bundles: ${e.message}`;
       }
     }
 
-    // Always fetch fresh on load (covers the "return from review" case)
-    load();
+    // Initial load
+    loadAssigned();
+
+    // Logic-only refreshes:
+    // 1) If user returns via BFCache (back/redirect), force a reload
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) location.reload();
+    });
+    // 2) If tab becomes visible again, re-fetch data (no UI changes)
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) loadAssigned();
+    });
   </script>
 </body>
 </html>
