@@ -107,11 +107,12 @@
         var startDate = firstKey(bundle, ["start_date", "startDate"]) || "";
         var timezone = firstKey(bundle, ["timezone"]) || defaultTimezone;
         var userEmail = firstKey(bundle, ["userEmail", "suggested_user", "assigned_user"]) || "";
+        var archivedAt = firstKey(bundle, ["archived_at", "archivedAt"]) || null;
 
         var tasks = firstKey(bundle, ["tasks", "items"]) || firstKey(root, ["tasks", "items"]) || [];
         if (!Array.isArray(tasks)) tasks = [];
 
-        return { title:title, startDate:startDate, timezone:timezone, userEmail:userEmail, tasks:tasks };
+        return { title:title, startDate:startDate, timezone:timezone, userEmail:userEmail, archivedAt:archivedAt, tasks:tasks };
       }
 
       function normalizeTasks(tasks, startDate){
@@ -156,6 +157,10 @@
         els.tbody.innerHTML = html;
       }
 
+      function redirectToInbox() {
+        window.location.href = '/inbox.html';
+      }
+
       function loadBundle(){
         var inboxId = getInboxId();
         if (!inboxId) {
@@ -172,6 +177,13 @@
           })
           .then(function (json){
             var b = normalizeFromResponse(json);
+
+            // If already archived, bounce back to Inbox
+            if (b.archivedAt) {
+              alert('This bundle is archived.');
+              redirectToInbox();
+              return;
+            }
 
             var title = b.title || "—";
             var startDate = b.startDate || "";
@@ -218,7 +230,7 @@
                   timezone: tz,
                   startDate: startDate,
                   mode: (els.mode.value === 'replace' ? 'replace' : 'append'),
-                  inboxId: inboxId, // <-- NEW: tell server which bundle to archive
+                  inboxId: inboxId,
                   items: items
                 };
 
@@ -238,10 +250,10 @@
                   return;
                 }
 
-                // Success
                 var msg = 'Pushed ' + (j.created || 0) + ' tasks to "' + (j.list && j.list.title ? j.list.title : payload.listTitle) + '".';
                 if (j.archived) msg += ' Bundle archived.';
                 alert(msg);
+                redirectToInbox();
               } catch (e) {
                 console.error(e);
                 alert('Push failed: ' + (e && e.message ? e.message : 'unknown error'));
