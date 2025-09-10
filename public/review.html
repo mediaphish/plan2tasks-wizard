@@ -58,7 +58,6 @@
 
   <script>
     (function(){
-      // Defaults
       var plannerEmail = "bartpaden@gmail.com";
       var defaultUserEmail = "bart@midwesternbuilt.com";
       var defaultTimezone = "America/Chicago";
@@ -219,6 +218,7 @@
                   timezone: tz,
                   startDate: startDate,
                   mode: (els.mode.value === 'replace' ? 'replace' : 'append'),
+                  inboxId: inboxId, // <-- NEW: tell server which bundle to archive
                   items: items
                 };
 
@@ -238,7 +238,10 @@
                   return;
                 }
 
-                alert('Pushed ' + (j.created || 0) + ' tasks to "' + (j.list && j.list.title ? j.list.title : payload.listTitle) + '".');
+                // Success
+                var msg = 'Pushed ' + (j.created || 0) + ' tasks to "' + (j.list && j.list.title ? j.list.title : payload.listTitle) + '".';
+                if (j.archived) msg += ' Bundle archived.';
+                alert(msg);
               } catch (e) {
                 console.error(e);
                 alert('Push failed: ' + (e && e.message ? e.message : 'unknown error'));
