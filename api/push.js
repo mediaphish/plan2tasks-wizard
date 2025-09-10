@@ -1,13 +1,15 @@
 // api/push.js
-// Accepts items and pushes them to Google Tasks.
+// Accepts items and pushes them to Google Tasks, then (if inboxId provided) archives the bundle.
+//
 // Body:
 // {
 //   plannerEmail: "bartpaden@gmail.com",
 //   userEmail: "someone@example.com",
-//   listTitle: "Weekly Plan",
+//   listTitle: "Plan: September Reset – Quick",
 //   timezone: "America/Chicago",
 //   startDate: "2025-09-10",      // YYYY-MM-DD
 //   mode: "append" | "replace",
+//   inboxId: "uuid-of-bundle",    // <-- NEW: optional; if present we'll set archived_at
 //   items: [
 //     { title, date?, dayOffset?, time?, durationMins?, notes? },
 //     ...
@@ -15,16 +17,17 @@
 // }
 //
 // Notes:
-// - Supports EITHER absolute `date` OR relative `dayOffset`. If only `date` is provided,
-//   the server computes dayOffset = date - startDate (days).
-// - Google Tasks does not have a duration field; we preserve duration by appending
-//   " (Duration: Xm)" to the notes when durationMins is present.
+// - Supports absolute `date` or relative `dayOffset`; if only `date` is provided,
+//   we compute dayOffset = date - startDate (days).
+// - Google Tasks has no duration field; we append `Duration: Xm` to notes when set.
+// - If `inboxId` is provided and push succeeded, we set `archived_at = now()` on that bundle.
 
 import { supabaseAdmin } from "../lib/supabase-admin.js";
 import { getAccessTokenForUser, ensureTaskList, insertTask } from "../lib/google-tasks.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+
   try {
     const body = req.body || {};
     const plannerEmail = String(body.plannerEmail || "").trim().toLowerCase();
@@ -33,6 +36,7 @@ export default async function handler(req, res) {
     const timezone = String(body.timezone || "America/Chicago").trim();
     const startDate = String(body.startDate || "").trim(); // YYYY-MM-DD
     const mode = (String(body.mode || "append").toLowerCase() === "replace") ? "replace" : "append";
+    const inboxId = String(body.inboxId || "").trim(); // <-- NEW
     let items = Array.isArray(body.items) ? body.items : [];
 
     if (!plannerEmail || !userEmail) {
@@ -81,7 +85,32 @@ export default async function handler(req, res) {
       created++;
     }
 
-    res.status(200).json({ ok: true, created, mode, list: { id: listId, title: listTitle } });
+    // OPTIONAL: archive the bundle when push succeeds
+    let archived = false;
+    let archived_at = null;
+    if (inboxId) {
+      const isoNow = new Date().toISOString();
+      const { data: upd, error: updErr } = await supabaseAdmin
+        .from("inbox_bundles")
+        .update({ archived_at: isoNow })
+        .eq("id", inboxId)
+        .select("archived_at")
+        .maybeSingle();
+      if (!updErr) {
+        archived = true;
+        archived_at = upd?.archived_at || isoNow;
+      }
+      // We don't fail the whole push if archiving fails; we just report it.
+    }
+
+    res.status(200).json({
+      ok: true,
+      created,
+      mode,
+      list: { id: listId, title: listTitle },
+      archived,
+      archived_at
+    });
   } catch (e) {
     console.error("POST /api/push error", e);
     res.status(500).json({ error: "Server error" });
@@ -99,7 +128,6 @@ function buildNotes(it) {
   return parts.join(" · ");
 }
 
-// Add days in UTC: input ymd "YYYY-MM-DD"
 function addDaysUTC(ymd, days) {
   const [y, m, d] = String(ymd).split("-").map((n) => parseInt(n, 10));
   const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
@@ -112,7 +140,6 @@ function addDaysUTC(ymd, days) {
 
 // Convert local time in a given IANA timezone to UTC ISO
 function toUTCISO(ymd, timeHHMM, timeZone) {
-  // Parse parts
   const [y, m, d] = String(ymd).split("-").map((n) => parseInt(n, 10));
   let hh = 9, mm = 0; // default 09:00 if time missing
   if (typeof timeHHMM === "string" && /^\d{2}:\d{2}$/.test(timeHHMM)) {
@@ -121,10 +148,7 @@ function toUTCISO(ymd, timeHHMM, timeZone) {
     mm = parseInt(parts[1], 10);
   }
 
-  // Guess UTC time then correct using timezone offset derived from Intl
   const utcGuess = new Date(Date.UTC(y, (m || 1) - 1, d || 1, hh, mm, 0));
-
-  // What local wall clock does utcGuess correspond to in the desired tz?
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric", month: "2-digit", day: "2-digit",
@@ -133,14 +157,11 @@ function toUTCISO(ymd, timeHHMM, timeZone) {
   const parts = Object.fromEntries(fmt.formatToParts(utcGuess).map(p => [p.type, p.value]));
   const localHour = parseInt(parts.hour || "0", 10);
   const localMin = parseInt(parts.minute || "0", 10);
-
-  // Difference in minutes between desired local time and observed local time
   const diffMinutes = (hh - localHour) * 60 + (mm - localMin);
   const corrected = new Date(utcGuess.getTime() + diffMinutes * 60000);
   return corrected.toISOString();
 }
 
-// Convert absolute date to offset given a startDate
 function daysBetweenUTC(startYMD, dateYMD) {
   const toUTCDate = (ymd) => {
     const [y, m, d] = String(ymd).split("-").map(n => parseInt(n, 10));
@@ -170,11 +191,12 @@ function normalizeItem(it, startDate) {
 
 // Clear all tasks in a list (best-effort)
 async function clearTaskList(accessToken, listId) {
-  // List tasks (paged) and delete one-by-one
   let pageToken = "";
   do {
     const qs = new URLSearchParams({ maxResults: "100", ...(pageToken ? { pageToken } : {}) });
-    const r = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks?${qs}`);
+    const r = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(listId)}/tasks?${qs}`, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error?.message || "Failed to list tasks for replace");
 
