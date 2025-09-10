@@ -1,164 +1,154 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Inbox</title>
+  <title>Inbox — Plan2Tasks</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
-    h1 { font-size: 18px; margin: 0 0 12px; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
-    select, button { font-size: 14px; padding: 6px 10px; }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-  </style>
+  <!-- Prevent any stale caching when returning from review.html -->
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
 </head>
 <body>
-  <div class="wrap">
-    <h1>Inbox — New Bundles</h1>
+  <h1>Inbox</h1>
 
-    <div class="row">
-      <label for="userSelect">Assign to:</label>
-      <select id="userSelect">
-        <option value="" disabled selected>Loading…</option>
-      </select>
+  <!-- Tiny view toggle (no layout changes; just two links) -->
+  <nav aria-label="Views">
+    <span id="viewToggle"></span>
+  </nav>
 
-      <button id="btnLoadNew">Load NEW</button>
-      <button id="btnLoadAssigned">Load ASSIGNED</button>
-      <button id="btnRefresh">Refresh</button>
-    </div>
+  <p id="statusLine">Loading…</p>
 
-    <table>
-      <thead>
-        <tr>
-          <th>Title</th>
-          <th>Start Date</th>
-          <th>Timezone</th>
-          <th>Inbox ID</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="tbody">
-        <tr><td colspan="5">Loading…</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <table id="bundleTable" border="1" cellpadding="6" cellspacing="0">
+    <thead>
+      <tr>
+        <th>Title</th>
+        <th>Start Date</th>
+        <th>Timezone</th>
+        <th>Suggested User</th>
+        <th>Assigned User</th>
+        <th>Assigned At</th>
+        <th>Archived At</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody id="bundleTbody">
+      <!-- rows injected -->
+    </tbody>
+  </table>
 
   <script>
-    // Defaults per your rules
-    const plannerEmail = "bartpaden@gmail.com";
+    // Config (environment)
+    const plannerEmail = 'bartpaden@gmail.com';
 
-    const els = {
-      tbody: document.getElementById('tbody'),
-      userSelect: document.getElementById('userSelect'),
-      btnLoadNew: document.getElementById('btnLoadNew'),
-      btnLoadAssigned: document.getElementById('btnLoadAssigned'),
-      btnRefresh: document.getElementById('btnRefresh'),
-    };
+    // Determine current view from query param; default to "assigned"
+    const params = new URLSearchParams(location.search);
+    const view = (params.get('view') || 'assigned').toLowerCase(); // 'assigned' | 'archived'
+    const validViews = new Set(['assigned', 'archived']);
+    const status = validViews.has(view) ? view : 'assigned';
 
-    function fmt(v){ return v ?? ""; }
+    // Render tiny toggle without altering layout
+    function renderToggle(current) {
+      const base = '/inbox.html';
+      const assignedHref = `${base}?view=assigned`;
+      const archivedHref = `${base}?view=archived`;
 
-    function mapBundle(b){
-      // Support both snake_case and camelCase from your API
-      return {
-        id: b.id || b.inboxId,
-        title: b.title,
-        startDate: b.start_date || b.startDate,
-        timezone: b.timezone,
-      };
+      const wrap = (label, isActive, href) =>
+        isActive ? `<strong>${label}</strong>` : `<a href="${href}">${label}</a>`;
+
+      document.getElementById('viewToggle').innerHTML =
+        `${wrap('Assigned', current === 'assigned', assignedHref)} | ${wrap('Archived', current === 'archived', archivedHref)}`;
     }
 
-    function rowTemplate(b, assignedMode){
-      return `
-        <tr data-id="${b.id}">
-          <td>${fmt(b.title)}</td>
-          <td>${fmt(b.startDate)}</td>
-          <td>${fmt(b.timezone)}</td>
-          <td><code>${fmt(b.id)}</code></td>
-          <td>
-            <button data-action="review" data-id="${b.id}">Review</button>
-            <button data-action="assign" data-id="${b.id}" ${assignedMode ? "disabled" : ""}>Assign</button>
-          </td>
-        </tr>
-      `;
+    renderToggle(status);
+
+    const statusLine = document.getElementById('statusLine');
+    const tbody = document.getElementById('bundleTbody');
+
+    // Fetch helper with cache-busting to ensure fresh data when returning from review.html
+    async function fetchJSON(url) {
+      const sep = url.includes('?') ? '&' : '?';
+      const noCacheUrl = `${url}${sep}t=${Date.now()}`;
+      const res = await fetch(noCacheUrl, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      return res.json();
     }
 
-    async function loadUsers(){
+    function fmtDate(d) {
+      if (!d) return '';
+      // Accept ISO or YYYY-MM-DD
       try {
-        const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`;
-        const r = await fetch(url);
-        const body = await r.json().catch(()=> ({}));
-        const list = body?.users || body?.data || [];
-        els.userSelect.innerHTML = `<option value="" disabled selected>Select…</option>` +
-          list.map(u => `<option value="${u.email}">${u.email}</option>`).join('');
-        if (!list.length) {
-          // Nothing shown to user beyond empty dropdown (per your “no debug” rule)
-        }
-      } catch (e) {
-        // Silent failure per your “no debug UI” preference
+        // If it's plain date (YYYY-MM-DD), keep as-is
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+        const dt = new Date(d);
+        if (isNaN(dt.getTime())) return d;
+        return dt.toISOString(); // keep ISO; no formatting changes to layout
+      } catch {
+        return d;
       }
     }
 
-    async function loadInbox(status = "new"){
-      els.tbody.innerHTML = `<tr><td colspan="5">Loading ${status.toUpperCase()}…</td></tr>`;
+    function cell(text) {
+      const td = document.createElement('td');
+      td.textContent = text ?? '';
+      return td;
+    }
+
+    function linkCell(href, label) {
+      const td = document.createElement('td');
+      const a = document.createElement('a');
+      a.href = href;
+      a.textContent = label;
+      td.appendChild(a);
+      return td;
+    }
+
+    function makeRow(b) {
+      const tr = document.createElement('tr');
+      tr.appendChild(cell(b.title || ''));
+      tr.appendChild(cell(b.start_date || b.startDate || ''));
+      tr.appendChild(cell(b.timezone || ''));
+      tr.appendChild(cell(b.suggested_user || ''));
+      tr.appendChild(cell(b.assigned_user_email || b.assigned_user || ''));
+      tr.appendChild(cell(fmtDate(b.assigned_at)));
+      tr.appendChild(cell(fmtDate(b.archived_at)));
+
+      // Always provide Review link; review.html already redirects if archived
+      const reviewHref = `/review.html?inboxId=${encodeURIComponent(b.id)}`;
+      tr.appendChild(linkCell(reviewHref, 'Review'));
+      return tr;
+    }
+
+    async function load() {
+      statusLine.textContent = `Loading ${status} bundles…`;
+      tbody.innerHTML = '';
+
+      const listUrl = `/api/inbox?status=${encodeURIComponent(status)}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
       try {
-        const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`;
-        const r = await fetch(url);
-        const body = await r.json().catch(()=> ({}));
-        const bundles = body?.bundles || body?.data || body || [];
-        if (!Array.isArray(bundles) || bundles.length === 0) {
-          els.tbody.innerHTML = `<tr><td colspan="5">No bundles.</td></tr>`;
+        // Clickable URL shown in console for debugging
+        console.log('GET', location.origin + listUrl);
+
+        const data = await fetchJSON(listUrl);
+
+        const bundles = Array.isArray(data.bundles) ? data.bundles : [];
+        if (bundles.length === 0) {
+          statusLine.textContent = `No ${status} bundles.`;
           return;
         }
-        const assignedMode = status === "assigned";
-        els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
+
+        for (const b of bundles) {
+          tbody.appendChild(makeRow(b));
+        }
+        statusLine.textContent = `${bundles.length} ${status} bundle(s).`;
       } catch (e) {
-        els.tbody.innerHTML = `<tr><td colspan="5">Error loading.</td></tr>`;
+        statusLine.textContent = `Error loading ${status} bundles: ${e.message}`;
       }
     }
 
-    async function assignBundle(inboxId){
-      const userEmail = els.userSelect.value;
-      if (!userEmail) return; // no debug text; planner must choose a user first
-      const payload = { plannerEmail, inboxId, userEmail };
-      try {
-        await fetch('/api/inbox/assign', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        // On success, quietly refresh NEW to reflect movement
-        loadInbox('new');
-      } catch (e) {
-        // Silent; per rules, we avoid exposing internal errors in UI
-      }
-    }
-
-    function onTableClick(e){
-      const btn = e.target.closest('button[data-action]');
-      if (!btn) return;
-      const id = btn.dataset.id;
-      const action = btn.dataset.action;
-      if (action === 'review') {
-        window.location.href = `/review.html?inboxId=${encodeURIComponent(id)}`;
-      } else if (action === 'assign') {
-        assignBundle(id);
-      }
-    }
-
-    // Events
-    document.addEventListener('click', (e) => {
-      if (e.target.closest('#btnLoadNew')) loadInbox('new');
-      if (e.target.closest('#btnLoadAssigned')) loadInbox('assigned');
-      if (e.target.closest('#btnRefresh')) loadInbox('new');
-      if (e.target.closest('table')) onTableClick(e);
-    });
-
-    // Init
-    loadUsers();
-    loadInbox('new');
+    // Always fetch fresh on load (covers the "return from review" case)
+    load();
   </script>
 </body>
 </html>
