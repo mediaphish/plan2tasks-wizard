@@ -656,7 +656,7 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           >
             <option value="">— Choose user —</option>
             {users.map(u=>(<option key={u.email} value={u.email} title={u.email}>
-              {u.email} {u.status==="connected" ? "✓" : ""}
+              {u.email}
             </option>))}
           </select>
         </div>
@@ -1458,7 +1458,7 @@ function UsersView({ plannerEmail, onToast, onManage }){
                           <button
                             onClick={()=>doArchive(r.email, false)}
                             className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
-                            title="Restore this user from archive"
+                            title="Restore user from archive"
                           >
                             Restore user
                           </button>
