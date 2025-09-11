@@ -34,14 +34,13 @@ export default async function handler(req, res) {
     }
 
     const first = rows[0];
-    const nowIso = new Date().toISOString();
 
+    // Clear assignment to move it back to NEW (do not touch columns that may not exist)
     const { data: updated, error: updErr } = await supabase
       .from('inbox_bundles')
       .update({
         assigned_user_email: null,
-        assigned_at: null,
-        updated_at: nowIso
+        assigned_at: null
       })
       .eq('id', first.id)
       .select('id, title, assigned_user_email, assigned_at, archived_at, start_date, timezone')
