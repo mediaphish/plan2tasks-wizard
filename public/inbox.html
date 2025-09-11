@@ -1,121 +1,164 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Inbox — Plan2Tasks</title>
+  <title>Inbox</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Logic-only: reduce stale cache without altering visuals -->
-  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
   <style>
-    /* No visual/layout changes: keep default browser styles */
-    table { border-collapse: collapse; }
-    th, td { border: 1px solid #000; padding: 6px; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 18px; margin: 0 0 12px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+    select, button { font-size: 14px; padding: 6px 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
   </style>
 </head>
 <body>
-  <!-- Preserve existing simple structure: status line + table -->
-  <p id="statusLine">Loading…</p>
+  <div class="wrap">
+    <h1>Inbox — New Bundles</h1>
 
-  <table id="bundleTable">
-    <thead>
-      <tr>
-        <th>Title</th>
-        <th>Start Date</th>
-        <th>Timezone</th>
-        <th>Suggested User</th>
-        <th>Assigned User</th>
-        <th>Assigned At</th>
-        <th>Archived At</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody id="bundleTbody"><!-- rows injected --></tbody>
-  </table>
+    <div class="row">
+      <label for="userSelect">Assign to:</label>
+      <select id="userSelect">
+        <option value="" disabled selected>Loading…</option>
+      </select>
+
+      <button id="btnLoadNew">Load NEW</button>
+      <button id="btnLoadAssigned">Load ASSIGNED</button>
+      <button id="btnRefresh">Refresh</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Start Date</th>
+          <th>Timezone</th>
+          <th>Inbox ID</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="tbody">
+        <tr><td colspan="5">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
 
   <script>
-    // Fixed planner; only showing ASSIGNED (no new UI added)
-    const plannerEmail = 'bartpaden@gmail.com';
-    const statusLine = document.getElementById('statusLine');
-    const tbody = document.getElementById('bundleTbody');
+    // Defaults per your rules
+    const plannerEmail = "bartpaden@gmail.com";
 
-    async function fetchJSON(url) {
-      const sep = url.includes('?') ? '&' : '?';
-      const noCacheUrl = `${url}${sep}t=${Date.now()}`; // cache-bust without UI change
-      const res = await fetch(noCacheUrl, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
+    const els = {
+      tbody: document.getElementById('tbody'),
+      userSelect: document.getElementById('userSelect'),
+      btnLoadNew: document.getElementById('btnLoadNew'),
+      btnLoadAssigned: document.getElementById('btnLoadAssigned'),
+      btnRefresh: document.getElementById('btnRefresh'),
+    };
+
+    function fmt(v){ return v ?? ""; }
+
+    function mapBundle(b){
+      // Support both snake_case and camelCase from your API
+      return {
+        id: b.id || b.inboxId,
+        title: b.title,
+        startDate: b.start_date || b.startDate,
+        timezone: b.timezone,
+      };
     }
 
-    function td(text) {
-      const el = document.createElement('td');
-      el.textContent = text ?? '';
-      return el;
+    function rowTemplate(b, assignedMode){
+      return `
+        <tr data-id="${b.id}">
+          <td>${fmt(b.title)}</td>
+          <td>${fmt(b.startDate)}</td>
+          <td>${fmt(b.timezone)}</td>
+          <td><code>${fmt(b.id)}</code></td>
+          <td>
+            <button data-action="review" data-id="${b.id}">Review</button>
+            <button data-action="assign" data-id="${b.id}" ${assignedMode ? "disabled" : ""}>Assign</button>
+          </td>
+        </tr>
+      `;
     }
 
-    function linkCell(href, label) {
-      const el = document.createElement('td');
-      const a = document.createElement('a');
-      a.href = href;
-      a.textContent = label;
-      el.appendChild(a);
-      return el;
-    }
-
-    function isoOrEmpty(val) {
-      if (!val) return '';
+    async function loadUsers(){
       try {
-        // leave YYYY-MM-DD alone, otherwise keep ISO
-        if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
-        const d = new Date(val);
-        return isNaN(d.getTime()) ? (val || '') : d.toISOString();
-      } catch { return val || ''; }
-    }
-
-    function row(b) {
-      const tr = document.createElement('tr');
-      tr.appendChild(td(b.title || ''));
-      tr.appendChild(td(b.start_date || b.startDate || ''));
-      tr.appendChild(td(b.timezone || ''));
-      tr.appendChild(td(b.suggested_user || ''));
-      tr.appendChild(td(b.assigned_user_email || b.assigned_user || ''));
-      tr.appendChild(td(isoOrEmpty(b.assigned_at)));
-      tr.appendChild(td(isoOrEmpty(b.archived_at)));
-      tr.appendChild(linkCell(`/review.html?inboxId=${encodeURIComponent(b.id)}`, 'Review'));
-      return tr;
-    }
-
-    async function loadAssigned() {
-      statusLine.textContent = 'Loading assigned bundles…';
-      tbody.innerHTML = '';
-      const listUrl = `/api/inbox?status=assigned&plannerEmail=${encodeURIComponent(plannerEmail)}`;
-      try {
-        const data = await fetchJSON(listUrl);
-        const bundles = Array.isArray(data.bundles) ? data.bundles : [];
-        if (bundles.length === 0) {
-          statusLine.textContent = 'No assigned bundles.';
-          return;
+        const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`;
+        const r = await fetch(url);
+        const body = await r.json().catch(()=> ({}));
+        const list = body?.users || body?.data || [];
+        els.userSelect.innerHTML = `<option value="" disabled selected>Select…</option>` +
+          list.map(u => `<option value="${u.email}">${u.email}</option>`).join('');
+        if (!list.length) {
+          // Nothing shown to user beyond empty dropdown (per your “no debug” rule)
         }
-        for (const b of bundles) tbody.appendChild(row(b));
-        statusLine.textContent = `${bundles.length} assigned bundle(s).`;
       } catch (e) {
-        statusLine.textContent = `Error loading assigned bundles: ${e.message}`;
+        // Silent failure per your “no debug UI” preference
       }
     }
 
-    // Initial load
-    loadAssigned();
+    async function loadInbox(status = "new"){
+      els.tbody.innerHTML = `<tr><td colspan="5">Loading ${status.toUpperCase()}…</td></tr>`;
+      try {
+        const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`;
+        const r = await fetch(url);
+        const body = await r.json().catch(()=> ({}));
+        const bundles = body?.bundles || body?.data || body || [];
+        if (!Array.isArray(bundles) || bundles.length === 0) {
+          els.tbody.innerHTML = `<tr><td colspan="5">No bundles.</td></tr>`;
+          return;
+        }
+        const assignedMode = status === "assigned";
+        els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
+      } catch (e) {
+        els.tbody.innerHTML = `<tr><td colspan="5">Error loading.</td></tr>`;
+      }
+    }
 
-    // Logic-only refreshes:
-    // 1) If user returns via BFCache (back/redirect), force a reload
-    window.addEventListener('pageshow', (e) => {
-      if (e.persisted) location.reload();
+    async function assignBundle(inboxId){
+      const userEmail = els.userSelect.value;
+      if (!userEmail) return; // no debug text; planner must choose a user first
+      const payload = { plannerEmail, inboxId, userEmail };
+      try {
+        await fetch('/api/inbox/assign', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        // On success, quietly refresh NEW to reflect movement
+        loadInbox('new');
+      } catch (e) {
+        // Silent; per rules, we avoid exposing internal errors in UI
+      }
+    }
+
+    function onTableClick(e){
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if (action === 'review') {
+        window.location.href = `/review.html?inboxId=${encodeURIComponent(id)}`;
+      } else if (action === 'assign') {
+        assignBundle(id);
+      }
+    }
+
+    // Events
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('#btnLoadNew')) loadInbox('new');
+      if (e.target.closest('#btnLoadAssigned')) loadInbox('assigned');
+      if (e.target.closest('#btnRefresh')) loadInbox('new');
+      if (e.target.closest('table')) onTableClick(e);
     });
-    // 2) If tab becomes visible again, re-fetch data (no UI changes)
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) loadAssigned();
-    });
+
+    // Init
+    loadUsers();
+    loadInbox('new');
   </script>
 </body>
 </html>
