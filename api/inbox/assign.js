@@ -1,51 +1,66 @@
-// api/inbox/assign.js
-import { supabaseAdmin } from "../../lib/supabase-admin.js";
+// /api/inbox/assign.js
+import { createClient } from '@supabase/supabase-js';
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
+  if (req.method !== 'POST') {
+    res.status(405).json({ ok: false, error: 'Method not allowed' });
+    return;
+  }
 
   try {
-    const plannerEmail = String(req.body?.plannerEmail || "").toLowerCase();
-    const inboxId = String(req.body?.inboxId || "").trim();
-    const userEmail = String(req.body?.userEmail || "").toLowerCase();
-
+    const { plannerEmail, inboxId, userEmail } = req.body || {};
     if (!plannerEmail || !inboxId || !userEmail) {
-      return res.status(400).json({ error: "Missing plannerEmail, inboxId, or userEmail" });
+      res.status(200).json({ ok: false, error: 'Missing plannerEmail, inboxId, or userEmail' });
+      return;
     }
 
-    // Verify bundle exists (don’t fail on status)
-    const { data: bundle, error: bErr } = await supabaseAdmin
-      .from("inbox_bundles")
-      .select("id, planner_email, archived_at")
-      .eq("id", inboxId)
+    // Lookup bundle (must exist and not be archived)
+    const { data: bundle, error: findErr } = await supabase
+      .from('inbox_bundles')
+      .select('id, title, start_date, timezone, suggested_user, assigned_user_email, assigned_at, archived_at, created_at, updated_at')
+      .eq('id', inboxId)
       .single();
 
-    if (bErr || !bundle) return res.status(404).json({ error: "Bundle not found" });
-    if (bundle.archived_at) return res.status(400).json({ error: "Bundle is archived" });
+    if (findErr || !bundle) {
+      res.status(200).json({ ok: false, error: 'Bundle not found' });
+      return;
+    }
+    if (bundle.archived_at) {
+      res.status(200).json({ ok: false, error: 'Bundle is archived and cannot be assigned' });
+      return;
+    }
 
-    const now = new Date().toISOString();
+    // Assign (or reassign) to the chosen user
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: updErr } = await supabase
+      .from('inbox_bundles')
+      .update({
+        assigned_user_email: userEmail,
+        assigned_at: nowIso,
+        updated_at: nowIso
+      })
+      .eq('id', inboxId)
+      .select('id, title, start_date, timezone, suggested_user, assigned_user_email, assigned_at, archived_at')
+      .single();
 
-    // Ensure the user connection exists so dropdowns populate
-    const { error: connErr } = await supabaseAdmin
-      .from("user_connections")
-      .upsert(
-        { planner_email: plannerEmail, user_email: userEmail, status: "connected", groups: [], updated_at: now },
-        { onConflict: "planner_email,user_email" }
-      );
-    if (connErr) return res.status(500).json({ error: "Database error (connection)" });
+    if (updErr) {
+      res.status(200).json({ ok: false, error: `assign_failed: ${updErr.message}` });
+      return;
+    }
 
-    // Mark bundle as assigned
-    const { error: updErr } = await supabaseAdmin
-      .from("inbox_bundles")
-      .update({ assigned_user_email: userEmail, assigned_at: now })
-      .eq("id", inboxId);
-
-    if (updErr) return res.status(500).json({ error: "Database error (assign)" });
-
-    // Done: do NOT load tasks here (that caused your error)
-    return res.json({ ok: true, inboxId, userEmail, assigned_at: now });
+    res.status(200).json({
+      ok: true,
+      plannerEmail,
+      inboxId,
+      assigned_user: userEmail,
+      assigned_at: updated.assigned_at,
+      bundle: updated
+    });
   } catch (e) {
-    console.error("POST /api/inbox/assign error", e);
-    return res.status(500).json({ error: "Server error" });
+    res.status(200).json({ ok: false, error: `internal_error: ${e.message}` });
   }
 }
