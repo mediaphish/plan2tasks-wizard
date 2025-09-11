@@ -18,10 +18,10 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Lookup bundle (must exist and not be archived)
+    // Ensure bundle exists and is not archived
     const { data: bundle, error: findErr } = await supabase
       .from('inbox_bundles')
-      .select('id, title, start_date, timezone, suggested_user, assigned_user_email, assigned_at, archived_at, created_at, updated_at')
+      .select('id, title, start_date, timezone, suggested_user, assigned_user_email, assigned_at, archived_at')
       .eq('id', inboxId)
       .single();
 
@@ -34,14 +34,13 @@ export default async function handler(req, res) {
       return;
     }
 
-    // Assign (or reassign) to the chosen user
+    // Assign (or reassign)
     const nowIso = new Date().toISOString();
     const { data: updated, error: updErr } = await supabase
       .from('inbox_bundles')
       .update({
         assigned_user_email: userEmail,
-        assigned_at: nowIso,
-        updated_at: nowIso
+        assigned_at: nowIso
       })
       .eq('id', inboxId)
       .select('id, title, start_date, timezone, suggested_user, assigned_user_email, assigned_at, archived_at')
