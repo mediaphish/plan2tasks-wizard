@@ -85,34 +85,42 @@
       `;
     }
 
+    async function fetchJSON(url) {
+      const sep = url.includes('?') ? '&' : '?';
+      const noCacheUrl = `${url}${sep}t=${Date.now()}`; // cache-bust, no UI change
+      const r = await fetch(noCacheUrl, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json().catch(()=> ({}));
+    }
+
     async function loadUsers(){
       try {
         const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`;
-        const r = await fetch(url);
-        const body = await r.json().catch(()=> ({}));
+        const body = await fetchJSON(url);
         const list = body?.users || body?.data || [];
         els.userSelect.innerHTML = `<option value="" disabled selected>Select…</option>` +
           list.map(u => `<option value="${u.email}">${u.email}</option>`).join('');
-        if (!list.length) {
-          // Nothing shown to user beyond empty dropdown (per your “no debug” rule)
-        }
-      } catch (e) {
-        // Silent failure per your “no debug UI” preference
-      }
+      } catch {}
     }
 
-    async function loadInbox(status = "new"){
+    async function loadInbox(status = "new", opts = {}) {
+      const assignedMode = status === "assigned";
       els.tbody.innerHTML = `<tr><td colspan="5">Loading ${status.toUpperCase()}…</td></tr>`;
+
       try {
         const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`;
-        const r = await fetch(url);
-        const body = await r.json().catch(()=> ({}));
+        const body = await fetchJSON(url);
         const bundles = body?.bundles || body?.data || body || [];
+
         if (!Array.isArray(bundles) || bundles.length === 0) {
+          // If we were asked to try assigned when NEW is empty, do that—no layout change
+          if (status === 'new' && opts.fallbackToAssigned) {
+            return loadInbox('assigned', { fallbackToAssigned: false });
+          }
           els.tbody.innerHTML = `<tr><td colspan="5">No bundles.</td></tr>`;
           return;
         }
-        const assignedMode = status === "assigned";
+
         els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
       } catch (e) {
         els.tbody.innerHTML = `<tr><td colspan="5">Error loading.</td></tr>`;
@@ -121,7 +129,7 @@
 
     async function assignBundle(inboxId){
       const userEmail = els.userSelect.value;
-      if (!userEmail) return; // no debug text; planner must choose a user first
+      if (!userEmail) return; // require selection; no extra UI
       const payload = { plannerEmail, inboxId, userEmail };
       try {
         await fetch('/api/inbox/assign', {
@@ -129,11 +137,9 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        // On success, quietly refresh NEW to reflect movement
-        loadInbox('new');
-      } catch (e) {
-        // Silent; per rules, we avoid exposing internal errors in UI
-      }
+        // On success, refresh NEW (the source list)
+        loadInbox('new', { fallbackToAssigned: true });
+      } catch {}
     }
 
     function onTableClick(e){
@@ -152,13 +158,18 @@
     document.addEventListener('click', (e) => {
       if (e.target.closest('#btnLoadNew')) loadInbox('new');
       if (e.target.closest('#btnLoadAssigned')) loadInbox('assigned');
-      if (e.target.closest('#btnRefresh')) loadInbox('new');
+      if (e.target.closest('#btnRefresh')) loadInbox('new', { fallbackToAssigned: true });
       if (e.target.closest('table')) onTableClick(e);
     });
 
-    // Init
+    // Init: try NEW first; if empty, auto show ASSIGNED (logic-only, no layout change)
     loadUsers();
-    loadInbox('new');
+    loadInbox('new', { fallbackToAssigned: true });
+
+    // If user returns from review via BFCache, force a fresh fetch (logic-only)
+    window.addEventListener('pageshow', (e) => {
+      if (e.persisted) loadInbox('new', { fallbackToAssigned: true });
+    });
   </script>
 </body>
 </html>
