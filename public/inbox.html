@@ -67,6 +67,7 @@
         title: b.title,
         startDate: b.start_date || b.startDate,
         timezone: b.timezone,
+        assignedEmail: b.assigned_user_email || b.assigned_user || null
       };
     }
 
@@ -104,6 +105,25 @@
       } catch {}
     }
 
+    function preselectUserIfUniformAssigned(bundles, status) {
+      if (status !== 'assigned') return; // only preselect in Assigned view
+      const emails = (bundles || [])
+        .map(b => (b.assigned_user_email || b.assigned_user || b.assignedEmail || '').toString().trim())
+        .filter(Boolean)
+        .map(e => e.toLowerCase());
+      if (!emails.length) return;
+      const unique = Array.from(new Set(emails));
+      if (unique.length === 1) {
+        const email = unique[0];
+        // If this email exists in dropdown options, select it
+        const opt = Array.from(els.userSelect.options).find(o => (o.value || '').toLowerCase() === email);
+        if (opt) {
+          els.userSelect.value = opt.value;
+        }
+      }
+      // If multiple different users, do nothing (keeps "Select…")
+    }
+
     async function renderBundles(status, bundles){
       const assignedMode = status === "assigned";
       if (!Array.isArray(bundles) || bundles.length === 0) {
@@ -111,6 +131,8 @@
         return;
       }
       els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
+      // Preselect dropdown to assigned user when all bundles share the same one
+      preselectUserIfUniformAssigned(bundles, status);
     }
 
     async function loadInbox(status = "new", { fallbackToAssigned = false } = {}) {
