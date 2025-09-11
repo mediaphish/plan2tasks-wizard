@@ -5,6 +5,7 @@
   <title>Inbox</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
+    /* Existing page styles */
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
     .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
     h1 { font-size: 18px; margin: 0 0 12px; }
@@ -13,9 +14,35 @@
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
     th, td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+    /* Minimal header (matches app shell vibe; does not change table/layout) */
+    .app-header { border-bottom: 1px solid #e5e7eb; background: #fff; }
+    .app-header .bar { max-width: 1100px; margin: 0 auto; padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .brand { display:flex; align-items:center; gap:8px; font-weight:700; }
+    .brand .ver { font-size: 10px; color:#6b7280; }
+    .nav { display:flex; gap:8px; }
+    .nav a { display:inline-flex; align-items:center; gap:6px; border:1px solid #d1d5db; background:#fff; padding:6px 10px; border-radius:12px; font-size:12px; color:#111827; text-decoration:none; }
+    .nav a:hover { background:#f9fafb; }
   </style>
 </head>
 <body>
+  <!-- New: lightweight app header for navigation back to the main app -->
+  <header class="app-header" role="banner">
+    <div class="bar">
+      <div class="brand">
+        <span>Plan2Tasks</span>
+        <span class="ver">Inbox</span>
+      </div>
+      <nav class="nav" aria-label="Primary">
+        <!-- Deep-links into the React app (App.jsx already controls visuals) -->
+        <a href="/index.html?view=users" id="navUsers">Users</a>
+        <a href="/index.html?view=plan" id="navPlan">Plan</a>
+        <a href="/index.html?view=settings" id="navSettings">Settings</a>
+        <a href="/inbox.html?view=assigned" id="navInbox">Inbox</a>
+      </nav>
+    </div>
+  </header>
+
   <div class="wrap">
     <h1>Inbox — New Bundles</h1>
 
@@ -115,13 +142,9 @@
       const unique = Array.from(new Set(emails));
       if (unique.length === 1) {
         const email = unique[0];
-        // If this email exists in dropdown options, select it
         const opt = Array.from(els.userSelect.options).find(o => (o.value || '').toLowerCase() === email);
-        if (opt) {
-          els.userSelect.value = opt.value;
-        }
+        if (opt) els.userSelect.value = opt.value;
       }
-      // If multiple different users, do nothing (keeps "Select…")
     }
 
     async function renderBundles(status, bundles){
@@ -131,7 +154,6 @@
         return;
       }
       els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
-      // Preselect dropdown to assigned user when all bundles share the same one
       preselectUserIfUniformAssigned(bundles, status);
     }
 
@@ -143,7 +165,6 @@
         const bundles = body?.bundles || body?.data || body || [];
 
         if (status === 'new' && fallbackToAssigned && (!Array.isArray(bundles) || bundles.length === 0)) {
-          // Auto-show ASSIGNED when NEW is empty; no layout change
           return loadInbox('assigned', { fallbackToAssigned: false });
         }
         await renderBundles(status, bundles);
