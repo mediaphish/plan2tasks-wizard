@@ -85,9 +85,10 @@
       `;
     }
 
+    // Cache-busting fetch to avoid stale lists on return from review
     async function fetchJSON(url) {
       const sep = url.includes('?') ? '&' : '?';
-      const noCacheUrl = `${url}${sep}t=${Date.now()}`; // cache-bust, no UI change
+      const noCacheUrl = `${url}${sep}t=${Date.now()}`;
       const r = await fetch(noCacheUrl, { cache: 'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json().catch(()=> ({}));
@@ -103,26 +104,28 @@
       } catch {}
     }
 
-    async function loadInbox(status = "new", opts = {}) {
+    async function renderBundles(status, bundles){
       const assignedMode = status === "assigned";
-      els.tbody.innerHTML = `<tr><td colspan="5">Loading ${status.toUpperCase()}…</td></tr>`;
+      if (!Array.isArray(bundles) || bundles.length === 0) {
+        els.tbody.innerHTML = `<tr><td colspan="5">No bundles.</td></tr>`;
+        return;
+      }
+      els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
+    }
 
+    async function loadInbox(status = "new", { fallbackToAssigned = false } = {}) {
+      els.tbody.innerHTML = `<tr><td colspan="5">Loading ${status.toUpperCase()}…</td></tr>`;
       try {
         const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(status)}`;
         const body = await fetchJSON(url);
         const bundles = body?.bundles || body?.data || body || [];
 
-        if (!Array.isArray(bundles) || bundles.length === 0) {
-          // If we were asked to try assigned when NEW is empty, do that—no layout change
-          if (status === 'new' && opts.fallbackToAssigned) {
-            return loadInbox('assigned', { fallbackToAssigned: false });
-          }
-          els.tbody.innerHTML = `<tr><td colspan="5">No bundles.</td></tr>`;
-          return;
+        if (status === 'new' && fallbackToAssigned && (!Array.isArray(bundles) || bundles.length === 0)) {
+          // Auto-show ASSIGNED when NEW is empty; no layout change
+          return loadInbox('assigned', { fallbackToAssigned: false });
         }
-
-        els.tbody.innerHTML = bundles.map(b => rowTemplate(mapBundle(b), assignedMode)).join('');
-      } catch (e) {
+        await renderBundles(status, bundles);
+      } catch {
         els.tbody.innerHTML = `<tr><td colspan="5">Error loading.</td></tr>`;
       }
     }
@@ -137,7 +140,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        // On success, refresh NEW (the source list)
+        // After assignment, reload NEW; if empty, fall back to ASSIGNED
         loadInbox('new', { fallbackToAssigned: true });
       } catch {}
     }
@@ -162,13 +165,26 @@
       if (e.target.closest('table')) onTableClick(e);
     });
 
-    // Init: try NEW first; if empty, auto show ASSIGNED (logic-only, no layout change)
+    // INIT:
+    // 1) Support deep-linking via ?view=assigned or ?view=new
+    // 2) If no param, try NEW first; if empty, auto-load ASSIGNED
     loadUsers();
-    loadInbox('new', { fallbackToAssigned: true });
+    const viewParam = new URLSearchParams(location.search).get('view');
+    const initial = (viewParam || 'new').toLowerCase();
+    if (initial === 'assigned') {
+      loadInbox('assigned');
+    } else if (initial === 'new') {
+      loadInbox('new', { fallbackToAssigned: true });
+    } else {
+      loadInbox('new', { fallbackToAssigned: true });
+    }
 
-    // If user returns from review via BFCache, force a fresh fetch (logic-only)
+    // When returning from review via BFCache, refresh list with same logic
     window.addEventListener('pageshow', (e) => {
-      if (e.persisted) loadInbox('new', { fallbackToAssigned: true });
+      if (e.persisted) {
+        if (initial === 'assigned') loadInbox('assigned');
+        else loadInbox('new', { fallbackToAssigned: true });
+      }
     });
   </script>
 </body>
