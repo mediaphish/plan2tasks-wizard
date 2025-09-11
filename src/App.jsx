@@ -124,23 +124,27 @@ export default function App(){
 }
 
 function MainApp(){
-  const urlPE = new URLSearchParams(typeof window!=="undefined" ? window.location.search : "").get("plannerEmail");
-  const plannerEmail = urlPE || "bartpaden@gmail.com";
+  const usp = typeof window!=="undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const urlPE = usp.get("plannerEmail");
+  const urlView = (usp.get("view")||"").toLowerCase();
+  const validViews = new Set(["users","plan","settings","inbox"]);
 
-  const [view,setView]=useState("users");
+  const plannerEmail = urlPE || "bartpaden@gmail.com";
+  const [view,setView]=useState(validViews.has(urlView) ? urlView : "users");
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
   const [prefs,setPrefs]=useState({});
-  const [inboxOpen,setInboxOpen]=useState(false);
+  const [inboxOpen,setInboxOpen]=useState(false); // legacy; not used anymore
   const [inboxBadge,setInboxBadge]=useState(0);
   const [toasts,setToasts]=useState([]);
 
+  // Load prefs, but do NOT override URL-driven view
   useEffect(()=>{ (async ()=>{
     try{
       const qs=new URLSearchParams({ plannerEmail });
       const r=await fetch(`/api/prefs/get?${qs.toString()}`);
       if (r.ok){ const j=await r.json(); const p=j.prefs||j;
         setPrefs(p||{});
-        setView((p&&p.default_view) || "users");
+        if (!validViews.has(urlView)) setView((p&&p.default_view) || "users");
       }
     }catch(e){/* noop */}
   })(); },[plannerEmail]);
@@ -166,15 +170,19 @@ function MainApp(){
             <div className="text-lg sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
             <span className="text-[10px] sm:text-xs text-gray-500 whitespace-nowrap select-none ml-1 sm:ml-2">{APP_VERSION}</span>
             <nav className="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
-              <NavBtn active={view==="users"} onClick={()=>setView("users")} icon={<Users className="h-4 w-4" />}><span className="hidden sm:inline">Users</span></NavBtn>
-              <NavBtn active={view==="plan"} onClick={()=>setView("plan")} icon={<Calendar className="h-4 w-4" />}><span className="hidden sm:inline">Plan</span></NavBtn>
-              <NavBtn active={view==="settings"} onClick={()=>setView("settings")} icon={<SettingsIcon className="h-4 w-4" />}><span className="hidden sm:inline">Settings</span></NavBtn>
+              <NavBtn active={view==="users"} onClick={()=>{ setView("users"); updateQueryView("users"); }} icon={<Users className="h-4 w-4" />}><span className="hidden sm:inline">Users</span></NavBtn>
+              <NavBtn active={view==="plan"} onClick={()=>{ setView("plan"); updateQueryView("plan"); }} icon={<Calendar className="h-4 w-4" />}><span className="hidden sm:inline">Plan</span></NavBtn>
+              <NavBtn active={view==="settings"} onClick={()=>{ setView("settings"); updateQueryView("settings"); }} icon={<SettingsIcon className="h-4 w-4" />}><span className="hidden sm:inline">Settings</span></NavBtn>
             </nav>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* CHANGED: Button -> Link (visuals identical), opens full inbox page */}
-            <a href="/inbox.html?view=assigned" id="navInbox"
-               className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap">
+            {/* NOW: routes to internal Inbox view (no modal, no external page) */}
+            <a
+              href="/index.html?view=inbox"
+              id="navInbox"
+              onClick={(e)=>{ e.preventDefault(); setView("inbox"); updateQueryView("inbox"); }}
+              className="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap"
+            >
               <InboxIcon className="inline h-4 w-4 sm:mr-1" /><span className="hidden sm:inline">Inbox</span>
               {prefs.show_inbox_badge && inboxBadge>0 && (
                 <span className="absolute -top-2 -right-2 rounded-full bg-red-600 px-1.5 py-[2px] text-[10px] font-bold text-white">{inboxBadge}</span>
@@ -192,7 +200,7 @@ function MainApp(){
             onToast={(t,m)=>toast(t,m)}
             onManage={(email)=>{ 
               setSelectedUserEmail(email);
-              setView("plan");
+              setView("plan"); updateQueryView("plan");
             }}
           />
         )}
@@ -214,7 +222,14 @@ function MainApp(){
           />
         )}
 
-        {/* Modal rendering removed from user interaction: no path to set inboxOpen=true */}
+        {view==="inbox" && (
+          <InboxViewIntegrated
+            plannerEmail={plannerEmail}
+            onToast={(t,m)=>toast(t,m)}
+          />
+        )}
+
+        {/* Legacy modal kept inert; no UI path sets inboxOpen=true */}
         {inboxOpen && (
           <InboxDrawer
             plannerEmail={plannerEmail}
@@ -224,6 +239,14 @@ function MainApp(){
       </div>
     </div>
   );
+}
+
+function updateQueryView(next){
+  try{
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", next);
+    window.history.replaceState({}, "", url.toString());
+  }catch{/* noop */}
 }
 
 /* ───────── nav & toasts ───────── */
@@ -263,7 +286,172 @@ function Toasts({ items, dismiss }){
   );
 }
 
-/* ───────── Inbox Drawer ───────── */
+/* ───────── Inbox: integrated view (no iframe, no new header) ───────── */
+function InboxViewIntegrated({ plannerEmail, onToast }){
+  const [users,setUsers]=useState([]);
+  const [selectedUser,setSelectedUser]=useState("");
+  const [rows,setRows]=useState([]);
+  const [status,setStatus]=useState("new"); // "new" | "assigned"
+  const [loading,setLoading]=useState(false);
+
+  // Deep-link support: when landing on inbox view, prefer NEW; if empty, auto-load ASSIGNED
+  useEffect(()=>{ (async ()=>{
+    await loadUsers();
+    await loadInbox("new", { fallbackToAssigned: true });
+  })(); /* eslint-disable-next-line */},[]);
+
+  async function fetchJSON(url){
+    const sep = url.includes("?") ? "&" : "?";
+    const noCacheUrl = `${url}${sep}t=${Date.now()}`;
+    const r = await fetch(noCacheUrl, { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json().catch(()=> ({}));
+  }
+
+  async function loadUsers(){
+    try{
+      const url = `/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`;
+      const body = await fetchJSON(url);
+      const list = body?.users || body?.data || [];
+      setUsers(list);
+      // Do not auto-select; dropdown serves both NEW (assign target) and ASSIGNED (context)
+    }catch{/* noop */}
+  }
+
+  function mapBundle(b){
+    return {
+      id: b.id || b.inboxId,
+      title: b.title,
+      startDate: b.start_date || b.startDate,
+      timezone: b.timezone,
+      assignedEmail: b.assigned_user_email || b.assigned_user || null
+    };
+  }
+
+  function preselectIfUniformAssigned(bundles, viewStatus){
+    if (viewStatus !== "assigned") return;
+    const emails = (bundles||[])
+      .map(b => (b.assigned_user_email || b.assigned_user || "").toString().trim())
+      .filter(Boolean).map(e=>e.toLowerCase());
+    if (emails.length===0) return;
+    const uniq = Array.from(new Set(emails));
+    if (uniq.length===1) {
+      const email = uniq[0];
+      const found = (users||[]).find(u => String(u.email||"").toLowerCase()===email);
+      if (found) setSelectedUser(found.email);
+    }
+  }
+
+  async function loadInbox(nextStatus="new", { fallbackToAssigned=false } = {}){
+    setLoading(true);
+    setRows([]);
+    setStatus(nextStatus);
+    try{
+      const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=${encodeURIComponent(nextStatus)}`;
+      const body = await fetchJSON(url);
+      const bundles = body?.bundles || body?.data || body || [];
+      if (nextStatus==="new" && fallbackToAssigned && (!Array.isArray(bundles) || bundles.length===0)){
+        setLoading(false);
+        return loadInbox("assigned", { fallbackToAssigned:false });
+      }
+      setRows(Array.isArray(bundles) ? bundles.map(mapBundle) : []);
+      preselectIfUniformAssigned(bundles, nextStatus);
+    }catch(e){
+      onToast?.("error", "Failed to load inbox");
+    }
+    setLoading(false);
+  }
+
+  async function assignBundle(inboxId){
+    const userEmail = selectedUser;
+    if (!userEmail) return; // require selection; no extra UI
+    try{
+      await fetch("/api/inbox/assign",{
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, inboxId, userEmail })
+      });
+      // After assignment, reload NEW; if empty, fall back to ASSIGNED
+      loadInbox("new", { fallbackToAssigned:true });
+      onToast?.("ok","Assigned");
+    }catch{
+      onToast?.("error","Assign failed");
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-base sm:text-lg font-semibold">Inbox — New Bundles</div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="inboxUserSelect" className="text-sm">Assign to:</label>
+          <select
+            id="inboxUserSelect"
+            value={selectedUser || ""}
+            onChange={(e)=>setSelectedUser(e.target.value)}
+            className="rounded-xl border border-gray-300 px-3 py-2 text-sm"
+          >
+            <option value="">Select…</option>
+            {users.map(u=>(
+              <option key={u.email} value={u.email}>{u.email}</option>
+            ))}
+          </select>
+
+          <button onClick={()=>loadInbox("new")} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Load NEW</button>
+          <button onClick={()=>loadInbox("assigned")} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Load ASSIGNED</button>
+          <button onClick={()=>loadInbox("new", { fallbackToAssigned:true })} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Refresh</button>
+        </div>
+      </div>
+
+      <div className="rounded-lg border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50">
+            <tr className="text-left text-gray-500">
+              <th className="py-1.5 px-2">Title</th>
+              <th className="py-1.5 px-2">Start Date</th>
+              <th className="py-1.5 px-2">Timezone</th>
+              <th className="py-1.5 px-2">Inbox ID</th>
+              <th className="py-1.5 px-2">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && (
+              <tr><td colSpan={5} className="py-4 text-center text-gray-500">Loading {status.toUpperCase()}…</td></tr>
+            )}
+            {!loading && rows.length===0 && (
+              <tr><td colSpan={5} className="py-4 text-center text-gray-500">No bundles.</td></tr>
+            )}
+            {!loading && rows.map(b=>(
+              <tr key={b.id} className="border-t align-top">
+                <td className="py-1.5 px-2">{b.title}</td>
+                <td className="py-1.5 px-2">{b.startDate || ""}</td>
+                <td className="py-1.5 px-2">{b.timezone || ""}</td>
+                <td className="py-1.5 px-2"><code className="text-xs">{b.id}</code></td>
+                <td className="py-1.5 px-2">
+                  <div className="flex gap-1.5">
+                    <a
+                      href={`/review.html?inboxId=${encodeURIComponent(b.id)}`}
+                      className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
+                    >Review</a>
+                    <button
+                      disabled={status==="assigned"}
+                      onClick={()=>assignBundle(b.id)}
+                      className={cn("rounded-lg border px-2 py-1 text-xs", status==="assigned" ? "opacity-60 cursor-not-allowed" : "hover:bg-gray-50")}
+                    >
+                      Assign
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Inbox Drawer (legacy; not used) ───────── */
 function InboxDrawer({ plannerEmail, onClose }){
   const [query,setQuery]=useState("");
   const [items,setItems]=useState([]);
@@ -292,7 +480,7 @@ function InboxDrawer({ plannerEmail, onClose }){
 
         <div className="mb-2 flex gap-2">
           <input value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="Search..." className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-          <button onClick={search} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50"><Search className="h-4 w-4" /></button>
+          <button onClick={search} className="rounded-xl border px-2 py-1 text-sm hover:bg-gray-50"><Search className="h-4 w-4" /></button>
         </div>
 
         <div className="max-h-[50vh] overflow-auto rounded-lg border">
@@ -523,11 +711,11 @@ function PlanView({ plannerEmail, selectedUserEmailProp, onToast }){
           msg={msg}
           setMsg={setMsg}
           onToast={onToast}
-          onPushed={()=>{ setHistReloadKey(k=>k+1); }}
+          onPushed={()=>{ /* can reload history */ }}
         />
       )}
 
-      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} reloadKey={histReloadKey} onPrefill={applyPrefill} />
+      <HistoryPanel plannerEmail={plannerEmail} userEmail={selectedUserEmail} reloadKey={0} onPrefill={applyPrefill} />
     </div>
   );
 }
@@ -962,7 +1150,7 @@ function HistoryPanel({ plannerEmail, userEmail, reloadKey, onPrefill }){
   useEffect(()=>{ load(); },[plannerEmail,userEmail,page,reloadKey]);
 
   return (
-    <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4">
+    <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
       <div className="mb-2 flex items-center justify-between">
         <div className="text-sm font-semibold">History</div>
         <div className="text-xs text-gray-500">{total} plan(s)</div>
