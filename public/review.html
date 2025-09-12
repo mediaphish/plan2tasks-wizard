@@ -40,37 +40,6 @@
       </div>
     </div>
 
-    <!-- PICKER (shown only when there's no inboxId in URL) -->
-    <div id="pickerCard" class="hidden rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm mb-4">
-      <div class="mb-2 text-base sm:text-lg font-semibold">Open an Assigned Bundle</div>
-      <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 sm:gap-3">
-        <label class="block">
-          <div class="mb-1 text-sm font-medium">Planner email</div>
-          <input id="pickerPlanner" type="email" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" value="bartpaden@gmail.com" />
-        </label>
-        <label class="block">
-          <div class="mb-1 text-sm font-medium">Assigned bundles</div>
-          <select id="pickerBundles" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
-            <option value="">— none loaded —</option>
-          </select>
-        </label>
-        <div class="flex items-end gap-2">
-          <button id="pickerLoad" class="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Load ASSIGNED</button>
-          <button id="pickerOpen" class="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black" disabled>Open</button>
-        </div>
-      </div>
-      <div class="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2 sm:gap-3">
-        <label class="block">
-          <div class="mb-1 text-sm font-medium">Or paste an Inbox ID</div>
-          <input id="pickerManual" type="text" placeholder="c4cd91fd-…" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
-        </label>
-        <div class="flex items-end">
-          <button id="pickerGoManual" class="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Open by ID</button>
-        </div>
-      </div>
-      <div id="pickerMsg" class="mt-2 text-xs text-gray-500"></div>
-    </div>
-
     <!-- REVIEW CARD -->
     <div class="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
       <div class="mb-2 flex items-center justify-between gap-2">
@@ -86,13 +55,7 @@
           <div><b>Timezone:</b> <span id="bTz">—</span></div>
         </div>
         <div class="rounded-lg border p-2 text-sm">
-          <div class="flex items-center gap-2">
-            <b>Assigned to:</b>
-            <span id="bUserWrap" class="inline-flex items-center gap-2">
-              <span id="bUser" class="inline-block">—</span>
-              <select id="userSelect" class="hidden rounded-xl border border-gray-300 px-2 py-1 text-sm"></select>
-            </span>
-          </div>
+          <div><b>Assigned to:</b> <span id="bUser">—</span></div>
           <div><b>Inbox ID:</b> <code id="bId">—</code></div>
         </div>
       </div>
@@ -137,21 +100,18 @@
       bUser: document.getElementById('bUser'),
       bId: document.getElementById('bId'),
       btnPush: document.getElementById('btnPush'),
-      userSelect: document.getElementById('userSelect'),
-      bUserWrap: document.getElementById('bUserWrap'),
-
-      pickerCard: document.getElementById('pickerCard'),
-      pickerPlanner: document.getElementById('pickerPlanner'),
-      pickerBundles: document.getElementById('pickerBundles'),
-      pickerLoad: document.getElementById('pickerLoad'),
-      pickerOpen: document.getElementById('pickerOpen'),
-      pickerManual: document.getElementById('pickerManual'),
-      pickerGoManual: document.getElementById('pickerGoManual'),
-      pickerMsg: document.getElementById('pickerMsg'),
     };
 
     const usp = new URLSearchParams(location.search);
-    const inboxId = usp.get('inboxId') || "";
+    const inboxId = (usp.get('inboxId') || "").trim();
+
+    // If opened directly without a bundle id, go to the integrated Inbox (planner can pick "Review" there)
+    if (!inboxId) {
+      location.replace(INBOX_REDIRECT);
+    } else {
+      // Otherwise load and render the bundle
+      init();
+    }
 
     function fmt(v){ return v ?? ""; }
     async function fetchJSON(url){
@@ -178,75 +138,8 @@
         })) : []
       };
     }
-    function taskRow(t){
-      return `<tr class="border-t align-top">
-        <td class="py-1.5 px-2">${fmt(t.title)}</td>
-        <td class="py-1.5 px-2">${fmt(t.date)}</td>
-        <td class="py-1.5 px-2">${fmt(t.time) || "—"}</td>
-        <td class="py-1.5 px-2">${fmt(t.durationMins) || "—"}</td>
-        <td class="py-1.5 px-2 text-gray-500">${fmt(t.notes) || "—"}</td>
-      </tr>`;
-    }
 
-    // Picker logic (no inboxId)
-    async function loadAssignedForPlanner(){
-      const plannerEmail = (els.pickerPlanner.value || "").trim();
-      if (!plannerEmail) { els.pickerMsg.textContent = "Enter a planner email."; return; }
-      els.pickerMsg.textContent = "Loading assigned…";
-      try {
-        const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=assigned`;
-        const body = await fetchJSON(url);
-        const bundles = body?.bundles || body?.data || [];
-        if (!Array.isArray(bundles) || bundles.length===0){
-          els.pickerBundles.innerHTML = `<option value="">— none —</option>`;
-          els.pickerMsg.textContent = "No assigned bundles for this planner.";
-          els.pickerOpen.disabled = true;
-          return;
-        }
-        // If there's exactly one bundle, open it immediately (no one needs an ID)
-        if (bundles.length === 1){
-          const only = bundles[0];
-          const id = only.id || only.inboxId;
-          location.assign(`/review.html?inboxId=${encodeURIComponent(id)}`);
-          return;
-        }
-        // Otherwise, list them and preselect the first
-        els.pickerBundles.innerHTML = bundles.map(b=>{
-          const id = b.id || b.inboxId;
-          const t = b.title || "Untitled";
-          const s = (b.start_date || b.startDate || "").slice(0,10);
-          return `<option value="${id}">${t} — ${s} — ${id}</option>`;
-        }).join("");
-        els.pickerBundles.selectedIndex = 0;
-        els.pickerOpen.disabled = false;
-        els.pickerMsg.textContent = "Pick a bundle and click Open.";
-      } catch (e) {
-        els.pickerMsg.textContent = "Error loading assigned bundles.";
-        els.pickerOpen.disabled = true;
-      }
-    }
-    function openSelectedBundle(){
-      const id = els.pickerBundles.value || "";
-      if (!id) return;
-      location.assign(`/review.html?inboxId=${encodeURIComponent(id)}`);
-    }
-    function openManualBundle(){
-      const id = (els.pickerManual.value || "").trim();
-      if (!id) return;
-      location.assign(`/review.html?inboxId=${encodeURIComponent(id)}`);
-    }
-
-    // Review logic
-    async function loadBundleAndRender(){
-      if (!inboxId){
-        // Show picker and auto-load assigned for DEFAULT_PLANNER
-        els.pickerCard.classList.remove("hidden");
-        els.pickerPlanner.value = DEFAULT_PLANNER;
-        els.pickerOpen.disabled = true;
-        els.pickerMsg.textContent = "Loading assigned bundles…";
-        await loadAssignedForPlanner();
-        return;
-      }
+    async function init(){
       try{
         const j = await fetchJSON(`/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}`);
         const bundle = normalizeBundle(j.bundle || j || {});
@@ -259,17 +152,8 @@
         els.bTitle.textContent = fmt(bundle.title);
         els.bStart.textContent = fmt(bundle.startDate);
         els.bTz.textContent = fmt(bundle.timezone);
+        els.bUser.textContent = fmt(bundle.assignedUser) || "—";
         els.bId.textContent = fmt(bundle.id);
-
-        // Assigned user display or selector if missing
-        if (bundle.assignedUser){
-          els.bUser.textContent = bundle.assignedUser;
-          els.userSelect.classList.add("hidden");
-        } else {
-          els.bUser.textContent = "—";
-          els.userSelect.classList.remove("hidden");
-          await populateUsersSelector();
-        }
 
         // Prefill list title
         els.listTitle.value = `Plan: ${fmt(bundle.title)}`;
@@ -278,7 +162,14 @@
         if (!bundle.tasks.length){
           els.tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-gray-500">No tasks.</td></tr>`;
         } else {
-          els.tbody.innerHTML = bundle.tasks.map(taskRow).join("");
+          els.tbody.innerHTML = bundle.tasks.map(t => `
+            <tr class="border-t align-top">
+              <td class="py-1.5 px-2">${fmt(t.title)}</td>
+              <td class="py-1.5 px-2">${fmt(t.date)}</td>
+              <td class="py-1.5 px-2">${fmt(t.time) || "—"}</td>
+              <td class="py-1.5 px-2">${fmt(t.durationMins) || "—"}</td>
+              <td class="py-1.5 px-2 text-gray-500">${fmt(t.notes) || "—"}</td>
+            </tr>`).join("");
         }
 
         // Wire push
@@ -286,20 +177,14 @@
           const listTitle = els.listTitle.value.trim();
           if (!listTitle) return;
 
-          const chosenUser = bundle.assignedUser || els.userSelect.value || "";
-          if (!chosenUser){
-            alert("Pick a user to push to.");
-            return;
-          }
-
           const body = {
             plannerEmail: DEFAULT_PLANNER,
-            userEmail: chosenUser,
+            userEmail: bundle.assignedUser || "",
             listTitle,
             timezone: bundle.timezone || "America/Chicago",
             startDate: bundle.startDate,
             mode: "append",
-            inboxId: bundle.id,
+            inboxId: bundle.id, // server archives on success
             items: (bundle.tasks || []).map(t => ({
               title: t.title,
               date: t.date,
@@ -326,36 +211,10 @@
         els.tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-red-700">Error loading bundle.</td></tr>`;
       }
     }
-
-    async function populateUsersSelector(){
-      try{
-        const qs = new URLSearchParams({ op:"list", plannerEmail: DEFAULT_PLANNER, status:"all" });
-        const body = await fetchJSON(`/api/users?${qs.toString()}`);
-        const list = body?.users || body?.data || [];
-        if (!Array.isArray(list) || list.length===0){
-          els.userSelect.innerHTML = `<option value="">— no users —</option>`;
-          return;
-        }
-        els.userSelect.innerHTML = `<option value="">— choose user —</option>` + list.map(u=>(
-          `<option value="${u.email}">${u.email}</option>`
-        )).join("");
-      }catch{
-        els.userSelect.innerHTML = `<option value="">— error loading users —</option>`;
-      }
-    }
-
-    // Wire picker buttons
-    els.pickerLoad?.addEventListener("click", loadAssignedForPlanner);
-    els.pickerOpen?.addEventListener("click", openSelectedBundle);
-    els.pickerGoManual?.addEventListener("click", openManualBundle);
-
-    // Init
-    loadBundleAndRender();
   </script>
 
-  <!-- Clickable endpoint references -->
-  <!-- List assigned bundles: https://www.plan2tasks.com/api/inbox?status=assigned&plannerEmail=bartpaden@gmail.com -->
-  <!-- Get bundle:           https://www.plan2tasks.com/api/inbox/get?inboxId=<uuid> -->
-  <!-- Push plan:            https://www.plan2tasks.com/api/push -->
+  <!-- Clickable endpoints -->
+  <!-- Get bundle: https://www.plan2tasks.com/api/inbox/get?inboxId=<uuid> -->
+  <!-- Push plan:  https://www.plan2tasks.com/api/push -->
 </body>
 </html>
