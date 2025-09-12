@@ -4,29 +4,26 @@
   <meta charset="utf-8" />
   <title>Review Plan</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Match app styling (utility classes used in App.jsx) -->
+  <!-- Match app styling -->
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100">
   <div class="mx-auto max-w-6xl p-4">
-    <!-- Header / Nav (mirrors App.jsx layout & classes) -->
+    <!-- Header / Nav (mirrors App.jsx) -->
     <div class="mb-3 sm:mb-6 flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-2 sm:gap-3">
         <div class="text-lg sm:text-2xl font-bold whitespace-nowrap">Plan2Tasks</div>
         <span class="text-[10px] sm:text-xs text-gray-500 whitespace-nowrap select-none ml-1 sm:ml-2">2025-09-02 · C4</span>
         <nav class="ml-1 sm:ml-4 flex gap-1 sm:gap-2">
           <a href="/index.html?view=users" class="inline-flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2.5 py-1.5 text-xs sm:text-sm hover:bg-gray-50">
-            <!-- Users -->
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             <span class="hidden sm:inline">Users</span>
           </a>
           <a href="/index.html?view=plan" class="inline-flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2.5 py-1.5 text-xs sm:text-sm hover:bg-gray-50">
-            <!-- Calendar -->
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
             <span class="hidden sm:inline">Plan</span>
           </a>
           <a href="/index.html?view=settings" class="inline-flex items-center gap-1 rounded-xl border border-gray-300 bg-white px-2.5 py-1.5 text-xs sm:text-sm hover:bg-gray-50">
-            <!-- Settings -->
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 .6 1.65 1.65 0 0 0-.33 1.82l.03.08a2 2 0 1 1-3.8 0l.03-.08a1.65 1.65 0 0 0-.33-1.82 1.65 1.65 0 0 0-1-.6 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-.6-1 1.65 1.65 0 0 0-1.82-.33l-.08.03a2 2 0 1 1 0-3.8l.08.03a1.65 1.65 0 0 0 1.82-.33 1.65 1.65 0 0 0 .6-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06A2 2 0 1 1 6.2 2.05l.06.06A1.65 1.65 0 0 0 8 4.6c.36 0 .71-.13 1-.36.3-.24.54-.55.68-.9l.03-.08a2 2 0 1 1 3.8 0l-.03.08c-.14.35-.38.66-.68.9.29.23.64.36 1 .36a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06c-.44.44-.56 1.09-.33 1.82.23.73.83 1.33 1.56 1.56z"/></svg>
             <span class="hidden sm:inline">Settings</span>
           </a>
@@ -34,7 +31,6 @@
       </div>
       <div class="flex items-center gap-2 sm:gap-3">
         <a href="/index.html?view=inbox" class="relative rounded-xl border border-gray-300 bg-white px-2.5 py-2 text-xs sm:text-sm hover:bg-gray-50 whitespace-nowrap">
-          <!-- Inbox -->
           <svg xmlns="http://www.w3.org/2000/svg" class="inline h-4 w-4 sm:mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
           <span class="hidden sm:inline">Inbox</span>
         </a>
@@ -44,7 +40,38 @@
       </div>
     </div>
 
-    <!-- Main card -->
+    <!-- PICKER (shown only when there's no inboxId in URL) -->
+    <div id="pickerCard" class="hidden rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm mb-4">
+      <div class="mb-2 text-base sm:text-lg font-semibold">Open an Assigned Bundle</div>
+      <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 sm:gap-3">
+        <label class="block">
+          <div class="mb-1 text-sm font-medium">Planner email</div>
+          <input id="pickerPlanner" type="email" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" value="bartpaden@gmail.com" />
+        </label>
+        <label class="block">
+          <div class="mb-1 text-sm font-medium">Assigned bundles</div>
+          <select id="pickerBundles" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            <option value="">— none loaded —</option>
+          </select>
+        </label>
+        <div class="flex items-end gap-2">
+          <button id="pickerLoad" class="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Load ASSIGNED</button>
+          <button id="pickerOpen" class="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black" disabled>Open</button>
+        </div>
+      </div>
+      <div class="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_auto] gap-2 sm:gap-3">
+        <label class="block">
+          <div class="mb-1 text-sm font-medium">Or paste an Inbox ID</div>
+          <input id="pickerManual" type="text" placeholder="c4cd91fd-…" class="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm" />
+        </label>
+        <div class="flex items-end">
+          <button id="pickerGoManual" class="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Open by ID</button>
+        </div>
+      </div>
+      <div id="pickerMsg" class="mt-2 text-xs text-gray-500"></div>
+    </div>
+
+    <!-- REVIEW CARD -->
     <div class="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
       <div class="mb-2 flex items-center justify-between gap-2">
         <div class="text-base sm:text-lg font-semibold">Review — Dates Only</div>
@@ -54,12 +81,18 @@
       <!-- Bundle meta -->
       <div class="mb-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div class="rounded-lg border p-2 text-sm">
-          <div><b>Title:</b> <span id="bTitle">…</span></div>
-          <div><b>Start:</b> <span id="bStart">…</span></div>
-          <div><b>Timezone:</b> <span id="bTz">…</span></div>
+          <div><b>Title:</b> <span id="bTitle">—</span></div>
+          <div><b>Start:</b> <span id="bStart">—</span></div>
+          <div><b>Timezone:</b> <span id="bTz">—</span></div>
         </div>
         <div class="rounded-lg border p-2 text-sm">
-          <div><b>Assigned to:</b> <span id="bUser">—</span></div>
+          <div class="flex items-center gap-2">
+            <b>Assigned to:</b>
+            <span id="bUserWrap" class="inline-flex items-center gap-2">
+              <span id="bUser" class="inline-block">—</span>
+              <select id="userSelect" class="hidden rounded-xl border border-gray-300 px-2 py-1 text-sm"></select>
+            </span>
+          </div>
           <div><b>Inbox ID:</b> <code id="bId">—</code></div>
         </div>
       </div>
@@ -93,9 +126,10 @@
 
   <script>
     // Constants per project rules
-    const plannerEmail = "bartpaden@gmail.com";
+    const DEFAULT_PLANNER = "bartpaden@gmail.com";
     const INBOX_REDIRECT = "/index.html?view=inbox";
 
+    // Elements
     const els = {
       tbody: document.getElementById('tbody'),
       listTitle: document.getElementById('listTitle'),
@@ -105,12 +139,32 @@
       bUser: document.getElementById('bUser'),
       bId: document.getElementById('bId'),
       btnPush: document.getElementById('btnPush'),
+      userSelect: document.getElementById('userSelect'),
+      bUserWrap: document.getElementById('bUserWrap'),
+
+      pickerCard: document.getElementById('pickerCard'),
+      pickerPlanner: document.getElementById('pickerPlanner'),
+      pickerBundles: document.getElementById('pickerBundles'),
+      pickerLoad: document.getElementById('pickerLoad'),
+      pickerOpen: document.getElementById('pickerOpen'),
+      pickerManual: document.getElementById('pickerManual'),
+      pickerGoManual: document.getElementById('pickerGoManual'),
+      pickerMsg: document.getElementById('pickerMsg'),
     };
 
+    // URL params
     const usp = new URLSearchParams(location.search);
     const inboxId = usp.get('inboxId') || "";
 
+    // Helpers
     function fmt(v){ return v ?? ""; }
+    async function fetchJSON(url){
+      const sep = url.includes("?") ? "&" : "?";
+      const noCacheUrl = `${url}${sep}t=${Date.now()}`;
+      const r = await fetch(noCacheUrl, { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json().catch(()=> ({}));
+    }
     function normalizeBundle(b){
       return {
         id: b.id || b.inboxId,
@@ -128,8 +182,7 @@
         })) : []
       };
     }
-
-    function row(t){
+    function taskRow(t){
       return `<tr class="border-t align-top">
         <td class="py-1.5 px-2">${fmt(t.title)}</td>
         <td class="py-1.5 px-2">${fmt(t.date)}</td>
@@ -139,15 +192,59 @@
       </tr>`;
     }
 
-    async function load(){
-      if (!inboxId) {
-        els.tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-red-700">Missing inboxId</td></tr>`;
+    // Picker logic (when no inboxId)
+    async function loadAssignedForPlanner(){
+      const plannerEmail = (els.pickerPlanner.value || "").trim();
+      if (!plannerEmail) { els.pickerMsg.textContent = "Enter a planner email."; return; }
+      els.pickerMsg.textContent = "Loading assigned…";
+      try {
+        const url = `/api/inbox?plannerEmail=${encodeURIComponent(plannerEmail)}&status=assigned`;
+        const body = await fetchJSON(url);
+        const bundles = body?.bundles || body?.data || [];
+        if (!Array.isArray(bundles) || bundles.length===0){
+          els.pickerBundles.innerHTML = `<option value="">— none —</option>`;
+          els.pickerMsg.textContent = "No assigned bundles for this planner.";
+          els.pickerOpen.disabled = true;
+          return;
+        }
+        els.pickerBundles.innerHTML = bundles.map(b=>{
+          const id = b.id || b.inboxId;
+          const t = b.title || "Untitled";
+          const s = (b.start_date || b.startDate || "").slice(0,10);
+          return `<option value="${id}">${t} — ${s} — ${id}</option>`;
+        }).join("");
+        els.pickerOpen.disabled = false;
+        els.pickerMsg.textContent = "";
+      } catch (e) {
+        els.pickerMsg.textContent = "Error loading assigned bundles.";
+        els.pickerOpen.disabled = true;
+      }
+    }
+    function openSelectedBundle(){
+      const id = els.pickerBundles.value || "";
+      if (!id) return;
+      location.assign(`/review.html?inboxId=${encodeURIComponent(id)}`);
+    }
+    function openManualBundle(){
+      const id = (els.pickerManual.value || "").trim();
+      if (!id) return;
+      location.assign(`/review.html?inboxId=${encodeURIComponent(id)}`);
+    }
+
+    // Review logic
+    async function loadBundleAndRender(){
+      if (!inboxId){
+        // Show picker
+        els.pickerCard.classList.remove("hidden");
+        els.pickerPlanner.value = DEFAULT_PLANNER;
+        els.pickerOpen.disabled = true;
+        els.pickerMsg.textContent = "Pick a planner and load assigned bundles.";
         return;
       }
       try{
-        const r = await fetch(`/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}`, { cache:"no-store" });
-        const j = await r.json().catch(()=> ({}));
+        const j = await fetchJSON(`/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}`);
         const bundle = normalizeBundle(j.bundle || j || {});
+        if (!bundle.id){ throw new Error("Not found"); }
         if (bundle.archivedAt) {
           location.replace(INBOX_REDIRECT);
           return;
@@ -156,8 +253,17 @@
         els.bTitle.textContent = fmt(bundle.title);
         els.bStart.textContent = fmt(bundle.startDate);
         els.bTz.textContent = fmt(bundle.timezone);
-        els.bUser.textContent = fmt(bundle.assignedUser) || "—";
         els.bId.textContent = fmt(bundle.id);
+
+        // Assigned user display or selector if missing
+        if (bundle.assignedUser){
+          els.bUser.textContent = bundle.assignedUser;
+          els.userSelect.classList.add("hidden");
+        } else {
+          els.bUser.textContent = "—";
+          els.userSelect.classList.remove("hidden");
+          await populateUsersSelector();
+        }
 
         // Prefill list title
         els.listTitle.value = `Plan: ${fmt(bundle.title)}`;
@@ -166,16 +272,24 @@
         if (!bundle.tasks.length){
           els.tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-gray-500">No tasks.</td></tr>`;
         } else {
-          els.tbody.innerHTML = bundle.tasks.map(row).join("");
+          els.tbody.innerHTML = bundle.tasks.map(taskRow).join("");
         }
 
         // Wire push
         els.btnPush.onclick = async () => {
           const listTitle = els.listTitle.value.trim();
           if (!listTitle) return;
+
+          // Decide user: existing assigned or selected from dropdown
+          const chosenUser = bundle.assignedUser || els.userSelect.value || "";
+          if (!chosenUser){
+            alert("Pick a user to push to.");
+            return;
+          }
+
           const body = {
-            plannerEmail,
-            userEmail: bundle.assignedUser || "",
+            plannerEmail: DEFAULT_PLANNER,
+            userEmail: chosenUser,
             listTitle,
             timezone: bundle.timezone || "America/Chicago",
             startDate: bundle.startDate,
@@ -204,15 +318,39 @@
           }
         };
       }catch(e){
-        els.tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-red-700">Error loading.</td></tr>`;
+        els.tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-red-700">Error loading bundle.</td></tr>`;
       }
     }
 
-    load();
+    async function populateUsersSelector(){
+      try{
+        const qs = new URLSearchParams({ op:"list", plannerEmail: DEFAULT_PLANNER, status:"all" });
+        const body = await fetchJSON(`/api/users?${qs.toString()}`);
+        const list = body?.users || body?.data || [];
+        if (!Array.isArray(list) || list.length===0){
+          els.userSelect.innerHTML = `<option value="">— no users —</option>`;
+          return;
+        }
+        els.userSelect.innerHTML = `<option value="">— choose user —</option>` + list.map(u=>(
+          `<option value="${u.email}">${u.email}</option>`
+        )).join("");
+      }catch{
+        els.userSelect.innerHTML = `<option value="">— error loading users —</option>`;
+      }
+    }
+
+    // Wire picker buttons
+    els.pickerLoad?.addEventListener("click", loadAssignedForPlanner);
+    els.pickerOpen?.addEventListener("click", openSelectedBundle);
+    els.pickerGoManual?.addEventListener("click", openManualBundle);
+
+    // Init
+    loadBundleAndRender();
   </script>
 
-  <!-- Clickable endpoint references (per your rule) -->
-  <!-- GET bundle:  https://www.plan2tasks.com/api/inbox/get?inboxId=<uuid> -->
-  <!-- POST push:   https://www.plan2tasks.com/api/push -->
+  <!-- Clickable endpoint references -->
+  <!-- List assigned bundles: https://www.plan2tasks.com/api/inbox?status=assigned&plannerEmail=bartpaden@gmail.com -->
+  <!-- Get bundle: https://www.plan2tasks.com/api/inbox/get?inboxId=<uuid> -->
+  <!-- Push plan: https://www.plan2tasks.com/api/push -->
 </body>
 </html>
