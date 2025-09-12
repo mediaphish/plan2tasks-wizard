@@ -2,271 +2,177 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Review</title>
+  <title>Review Plan</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    .wrap { max-width: 1000px; margin: 0 auto; padding: 16px; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:#f8fafc; }
+    .wrap { max-width: 900px; margin: 0 auto; padding: 16px; }
     h1 { font-size: 18px; margin: 0 0 12px; }
-    .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:12px 0; }
-    input, select, button { font-size:14px; padding:6px 10px; }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th, td { padding:8px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
-    .meta { color:#6b7280; font-size:12px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+    label { font-size: 14px; }
+    input, select, button { font-size: 14px; padding: 6px 10px; }
+    input[type="text"] { min-width: 280px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; border:1px solid #e5e7eb; }
+    th, td { padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; color:#374151; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 8px; padding:12px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Review Bundle</h1>
+    <h1>Review — Dates Only</h1>
 
-    <div class="row">
-      <div id="bundleTitle" style="font-weight:600;">—</div>
-      <div class="meta" id="bundleMeta">Start: — • Timezone: America/Chicago</div>
+    <div id="bundleMeta" class="row card">
+      <div><b>Title:</b> <span id="bTitle">…</span></div>
+      <div><b>Start:</b> <span id="bStart">…</span></div>
+      <div><b>Timezone:</b> <span id="bTz">…</span></div>
+      <div><b>Assigned to:</b> <span id="bUser">—</span></div>
+      <div><b>Inbox ID:</b> <code id="bId">—</code></div>
     </div>
 
     <div class="row">
-      <label for="mode">Push mode:</label>
-      <select id="mode">
-        <option value="append" selected>append</option>
-        <option value="replace">replace</option>
-      </select>
-
-      <label for="listTitle">List title:</label>
-      <input id="listTitle" type="text" placeholder="Plan: —" />
-
-      <label for="userEmail">User:</label>
-      <input id="userEmail" type="email" placeholder="user@example.com" />
-
-      <button id="btnPush">Push</button>
+      <label for="listTitle"><b>List title</b></label>
+      <input id="listTitle" type="text" placeholder="Plan name…" />
+      <button id="btnPush">Push to Google Tasks</button>
     </div>
 
     <table>
       <thead>
         <tr>
-          <th style="width:22%;">Date (YYYY-MM-DD)</th>
-          <th style="width:12%;">Time (HH:MM)</th>
-          <th style="width:14%;">Duration</th>
-          <th style="width:26%;">Title</th>
-          <th style="width:26%;">Notes</th>
+          <th>Task</th>
+          <th>Date</th>
+          <th>Time</th>
+          <th>Duration</th>
+          <th>Notes</th>
         </tr>
       </thead>
       <tbody id="tbody">
-        <tr><td colspan="5" style="color:#6b7280;">Loading…</td></tr>
+        <tr><td colspan="5">Loading…</td></tr>
       </tbody>
     </table>
   </div>
 
   <script>
-    (function(){
-      var plannerEmail = "bartpaden@gmail.com";
-      var defaultUserEmail = "bart@midwesternbuilt.com";
-      var defaultTimezone = "America/Chicago";
+    // Constants per project rules
+    const plannerEmail = "bartpaden@gmail.com";
+    const INBOX_REDIRECT = "/index.html?view=inbox"; // integrated Inbox
 
-      function $(id){ return document.getElementById(id); }
-      var els = {
-        title: $("bundleTitle"),
-        meta: $("bundleMeta"),
-        tbody: $("tbody"),
-        mode: $("mode"),
-        listTitle: $("listTitle"),
-        userEmail: $("userEmail"),
-        btnPush: $("btnPush")
+    const els = {
+      tbody: document.getElementById('tbody'),
+      listTitle: document.getElementById('listTitle'),
+      bTitle: document.getElementById('bTitle'),
+      bStart: document.getElementById('bStart'),
+      bTz: document.getElementById('bTz'),
+      bUser: document.getElementById('bUser'),
+      bId: document.getElementById('bId'),
+      btnPush: document.getElementById('btnPush'),
+    };
+
+    const usp = new URLSearchParams(location.search);
+    const inboxId = usp.get('inboxId') || "";
+
+    function fmt(v){ return v ?? ""; }
+    function m(b){ // normalize bundle fields
+      return {
+        id: b.id || b.inboxId,
+        title: b.title,
+        startDate: b.start_date || b.startDate,
+        timezone: b.timezone,
+        assignedUser: b.assigned_user || b.assigned_user_email || b.assigned_user_email?.email || "",
+        archivedAt: b.archived_at || b.archivedAt || null,
+        tasks: Array.isArray(b.tasks) ? b.tasks.map(t => ({
+          title: t.title,
+          date: t.date || t.day || t.when || null,
+          time: t.time ?? null,
+          durationMins: t.durationMins ?? t.duration_mins ?? null,
+          notes: t.notes ?? ""
+        })) : []
       };
+    }
 
-      function pad(n){ return String(n).padStart(2, '0'); }
-      function addDays(ymd, n) {
-        if (!ymd) return "";
-        var parts = String(ymd).split("-");
-        var y = parseInt(parts[0],10), m = parseInt(parts[1]||1,10)-1, d = parseInt(parts[2]||1,10);
-        var dt = new Date(Date.UTC(y, m, d));
-        dt.setUTCDate(dt.getUTCDate() + (parseInt(n,10)||0));
-        return dt.getUTCFullYear() + "-" + pad(dt.getUTCMonth()+1) + "-" + pad(dt.getUTCDate());
+    function row(t){
+      return `<tr>
+        <td>${fmt(t.title)}</td>
+        <td>${fmt(t.date)}</td>
+        <td>${fmt(t.time) || "—"}</td>
+        <td>${fmt(t.durationMins) || "—"}</td>
+        <td>${fmt(t.notes) || "—"}</td>
+      </tr>`;
+    }
+
+    async function load(){
+      if (!inboxId) {
+        els.tbody.innerHTML = `<tr><td colspan="5">Missing inboxId</td></tr>`;
+        return;
       }
-      function hhmm(t){
-        if (t === null || t === undefined || t === "") return "";
-        var s = String(t);
-        return s.length >= 5 ? s.slice(0,5) : s;
-      }
-      function firstKey(obj, keys) {
-        if (!obj) return undefined;
-        for (var i=0; i<keys.length; i++){
-          if (Object.prototype.hasOwnProperty.call(obj, keys[i])) return obj[keys[i]];
+      try{
+        const r = await fetch(`/api/inbox/get?inboxId=${encodeURIComponent(inboxId)}`, { cache:"no-store" });
+        const j = await r.json().catch(()=> ({}));
+        const bundle = m(j.bundle || j || {});
+        // If already archived, bounce straight to integrated Inbox
+        if (bundle.archivedAt) {
+          location.replace(INBOX_REDIRECT);
+          return;
         }
-        return undefined;
-      }
-      function getInboxId() {
-        var q = new URLSearchParams(window.location.search || "");
-        return q.get("inboxId") || q.get("id") || "";
-      }
+        // Fill header/meta
+        els.bTitle.textContent = fmt(bundle.title);
+        els.bStart.textContent = fmt(bundle.startDate);
+        els.bTz.textContent = fmt(bundle.timezone);
+        els.bUser.textContent = fmt(bundle.assignedUser) || "—";
+        els.bId.textContent = fmt(bundle.id);
 
-      function normalizeFromResponse(body) {
-        var root = body || {};
-        var bundle = firstKey(root, ["bundle"]) || root;
+        // Prefill list title (keep your existing convention)
+        els.listTitle.value = `Plan: ${fmt(bundle.title)}`;
 
-        var title = firstKey(bundle, ["title", "plan_title", "list_title"]) || "";
-        var startDate = firstKey(bundle, ["start_date", "startDate"]) || "";
-        var timezone = firstKey(bundle, ["timezone"]) || defaultTimezone;
-        var userEmail = firstKey(bundle, ["userEmail", "suggested_user", "assigned_user"]) || "";
-        var archivedAt = firstKey(bundle, ["archived_at", "archivedAt"]) || null;
+        // Render tasks
+        if (!bundle.tasks.length){
+          els.tbody.innerHTML = `<tr><td colspan="5">No tasks.</td></tr>`;
+        } else {
+          els.tbody.innerHTML = bundle.tasks.map(row).join("");
+        }
 
-        var tasks = firstKey(bundle, ["tasks", "items"]) || firstKey(root, ["tasks", "items"]) || [];
-        if (!Array.isArray(tasks)) tasks = [];
-
-        return { title:title, startDate:startDate, timezone:timezone, userEmail:userEmail, archivedAt:archivedAt, tasks:tasks };
-      }
-
-      function normalizeTasks(tasks, startDate){
-        return (tasks || []).map(function (t) {
-          var offset = undefined;
-          if (Object.prototype.hasOwnProperty.call(t, "dayOffset")) offset = t.dayOffset;
-          else if (Object.prototype.hasOwnProperty.call(t, "day_offset")) offset = t.day_offset;
-
-          var date = t.date || (offset !== undefined ? addDays(startDate, offset) : "");
-          var durationMins = null;
-          if (Object.prototype.hasOwnProperty.call(t, "durationMins")) durationMins = t.durationMins;
-          else if (Object.prototype.hasOwnProperty.call(t, "duration_mins")) durationMins = t.duration_mins;
-          else if (Object.prototype.hasOwnProperty.call(t, "minutes")) durationMins = t.minutes;
-
-          var time = firstKey(t, ["time", "start_time", "at"]);
-          var notes = firstKey(t, ["notes", "note", "description"]) || "";
-
-          return {
-            title: t.title || "",
-            date: date,
-            time: hhmm(time),
-            durationMins: durationMins,
-            notes: notes
+        // Wire push
+        els.btnPush.onclick = async () => {
+          const listTitle = els.listTitle.value.trim();
+          if (!listTitle) return;
+          const body = {
+            plannerEmail,
+            userEmail: bundle.assignedUser || "", // expects the assigned user
+            listTitle,
+            timezone: bundle.timezone || "America/Chicago",
+            startDate: bundle.startDate,
+            mode: "append",       // dates-only push (unchanged)
+            inboxId: bundle.id,   // server archives on success
+            items: (bundle.tasks || []).map(t => ({
+              title: t.title,
+              date: t.date,
+              time: t.time || null,
+              durationMins: t.durationMins || null,
+              notes: t.notes || ""
+            }))
           };
-        });
+          try{
+            const resp = await fetch("/api/push", {
+              method:"POST",
+              headers:{ "Content-Type":"application/json" },
+              body: JSON.stringify(body)
+            });
+            const pj = await resp.json().catch(()=> ({}));
+            if (!resp.ok || pj.error) throw new Error(pj.error || "Push failed");
+            alert("Success — plan pushed to Google Tasks.");
+            // Redirect to integrated Inbox view
+            location.assign(INBOX_REDIRECT);
+          }catch(e){
+            alert("Error: " + String(e.message||e));
+          }
+        };
+      }catch(e){
+        els.tbody.innerHTML = `<tr><td colspan="5">Error loading.</td></tr>`;
       }
+    }
 
-      function renderTasks(rows){
-        if (!rows || !rows.length){
-          els.tbody.innerHTML = '<tr><td colspan="5">No tasks.</td></tr>';
-          return;
-        }
-        var html = rows.map(function (r) {
-          return '<tr>'
-            + '<td>' + (r.date || "") + '</td>'
-            + '<td>' + (r.time || "") + '</td>'
-            + '<td>' + (r.durationMins ? (r.durationMins + " mins") : "") + '</td>'
-            + '<td>' + (r.title || "") + '</td>'
-            + '<td>' + (r.notes || "") + '</td>'
-            + '</tr>';
-        }).join('');
-        els.tbody.innerHTML = html;
-      }
-
-      function redirectToInbox() {
-        window.location.href = '/inbox.html';
-      }
-
-      function loadBundle(){
-        var inboxId = getInboxId();
-        if (!inboxId) {
-          els.tbody.innerHTML = '<tr><td colspan="5">Missing inboxId.</td></tr>';
-          return;
-        }
-
-        var url = '/api/inbox/get?inboxId=' + encodeURIComponent(inboxId);
-
-        fetch(url)
-          .then(function (r) {
-            if (!r.ok) throw new Error('http_' + r.status);
-            return r.json();
-          })
-          .then(function (json){
-            var b = normalizeFromResponse(json);
-
-            // If already archived, bounce back to Inbox
-            if (b.archivedAt) {
-              alert('This bundle is archived.');
-              redirectToInbox();
-              return;
-            }
-
-            var title = b.title || "—";
-            var startDate = b.startDate || "";
-            var tz = b.timezone || defaultTimezone;
-            var userEmail = b.userEmail || defaultUserEmail;
-
-            els.title.textContent = title;
-            els.meta.textContent = 'Start: ' + (startDate || '—') + ' • Timezone: ' + tz;
-            els.listTitle.placeholder = 'Plan: ' + title;
-            els.listTitle.value = 'Plan: ' + title;
-            els.userEmail.value = userEmail;
-
-            var rows = normalizeTasks(b.tasks, b.startDate);
-            renderTasks(rows);
-
-            els.btnPush.onclick = async function pushBundle(){
-              try {
-                var trs = Array.prototype.slice.call(els.tbody.querySelectorAll('tr'));
-                var items = trs.map(function (tr) {
-                  var tds = tr.querySelectorAll('td');
-                  if (tds.length < 5) return null;
-                  var date = (tds[0].textContent || "").trim();
-                  var time = (tds[1].textContent || "").trim() || null;
-                  var durTxt = (tds[2].textContent || "").trim();
-                  var titleCell = (tds[3].textContent || "").trim();
-                  var notes = (tds[4].textContent || "").trim();
-                  var durationMins = durTxt ? parseInt(durTxt.replace(/\D+/g,''),10) : null;
-                  return { title: titleCell, date: date, time: time, durationMins: durationMins, notes: notes };
-                }).filter(Boolean);
-
-                if (!items.length) {
-                  alert("No tasks to push.");
-                  return;
-                }
-                if (items.some(function (it){ return !it.date; })) {
-                  alert("Some tasks are missing dates.");
-                  return;
-                }
-
-                var payload = {
-                  plannerEmail: plannerEmail,
-                  userEmail: (els.userEmail.value || defaultUserEmail).trim(),
-                  listTitle: (els.listTitle.value || els.listTitle.placeholder || ('Plan: ' + title)).trim(),
-                  timezone: tz,
-                  startDate: startDate,
-                  mode: (els.mode.value === 'replace' ? 'replace' : 'append'),
-                  inboxId: inboxId,
-                  items: items
-                };
-
-                var r = await fetch('/api/push', {
-                  method: 'POST',
-                  headers: { 'Content-Type':'application/json' },
-                  body: JSON.stringify(payload)
-                });
-
-                var j = null;
-                try { j = await r.json(); } catch(e) {}
-
-                if (!r.ok || !j || j.ok !== true) {
-                  var msg = (j && (j.error || j.message)) || ('HTTP ' + r.status);
-                  alert('Push failed: ' + msg);
-                  console.error('Push error:', j || r.statusText);
-                  return;
-                }
-
-                var msg = 'Pushed ' + (j.created || 0) + ' tasks to "' + (j.list && j.list.title ? j.list.title : payload.listTitle) + '".';
-                if (j.archived) msg += ' Bundle archived.';
-                alert(msg);
-                redirectToInbox();
-              } catch (e) {
-                console.error(e);
-                alert('Push failed: ' + (e && e.message ? e.message : 'unknown error'));
-              }
-            };
-          })
-          .catch(function (){
-            els.tbody.innerHTML = '<tr><td colspan="5">Failed to load.</td></tr>';
-          });
-      }
-
-      document.addEventListener('DOMContentLoaded', loadBundle);
-    })();
+    load();
   </script>
 </body>
 </html>
