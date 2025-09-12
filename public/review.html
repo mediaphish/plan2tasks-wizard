@@ -125,11 +125,9 @@
   </div>
 
   <script>
-    // Constants per project rules
     const DEFAULT_PLANNER = "bartpaden@gmail.com";
     const INBOX_REDIRECT = "/index.html?view=inbox";
 
-    // Elements
     const els = {
       tbody: document.getElementById('tbody'),
       listTitle: document.getElementById('listTitle'),
@@ -152,11 +150,9 @@
       pickerMsg: document.getElementById('pickerMsg'),
     };
 
-    // URL params
     const usp = new URLSearchParams(location.search);
     const inboxId = usp.get('inboxId') || "";
 
-    // Helpers
     function fmt(v){ return v ?? ""; }
     async function fetchJSON(url){
       const sep = url.includes("?") ? "&" : "?";
@@ -192,7 +188,7 @@
       </tr>`;
     }
 
-    // Picker logic (when no inboxId)
+    // Picker logic (no inboxId)
     async function loadAssignedForPlanner(){
       const plannerEmail = (els.pickerPlanner.value || "").trim();
       if (!plannerEmail) { els.pickerMsg.textContent = "Enter a planner email."; return; }
@@ -207,14 +203,23 @@
           els.pickerOpen.disabled = true;
           return;
         }
+        // If there's exactly one bundle, open it immediately (no one needs an ID)
+        if (bundles.length === 1){
+          const only = bundles[0];
+          const id = only.id || only.inboxId;
+          location.assign(`/review.html?inboxId=${encodeURIComponent(id)}`);
+          return;
+        }
+        // Otherwise, list them and preselect the first
         els.pickerBundles.innerHTML = bundles.map(b=>{
           const id = b.id || b.inboxId;
           const t = b.title || "Untitled";
           const s = (b.start_date || b.startDate || "").slice(0,10);
           return `<option value="${id}">${t} — ${s} — ${id}</option>`;
         }).join("");
+        els.pickerBundles.selectedIndex = 0;
         els.pickerOpen.disabled = false;
-        els.pickerMsg.textContent = "";
+        els.pickerMsg.textContent = "Pick a bundle and click Open.";
       } catch (e) {
         els.pickerMsg.textContent = "Error loading assigned bundles.";
         els.pickerOpen.disabled = true;
@@ -234,11 +239,12 @@
     // Review logic
     async function loadBundleAndRender(){
       if (!inboxId){
-        // Show picker
+        // Show picker and auto-load assigned for DEFAULT_PLANNER
         els.pickerCard.classList.remove("hidden");
         els.pickerPlanner.value = DEFAULT_PLANNER;
         els.pickerOpen.disabled = true;
-        els.pickerMsg.textContent = "Pick a planner and load assigned bundles.";
+        els.pickerMsg.textContent = "Loading assigned bundles…";
+        await loadAssignedForPlanner();
         return;
       }
       try{
@@ -280,7 +286,6 @@
           const listTitle = els.listTitle.value.trim();
           if (!listTitle) return;
 
-          // Decide user: existing assigned or selected from dropdown
           const chosenUser = bundle.assignedUser || els.userSelect.value || "";
           if (!chosenUser){
             alert("Pick a user to push to.");
@@ -294,7 +299,7 @@
             timezone: bundle.timezone || "America/Chicago",
             startDate: bundle.startDate,
             mode: "append",
-            inboxId: bundle.id, // server archives on success
+            inboxId: bundle.id,
             items: (bundle.tasks || []).map(t => ({
               title: t.title,
               date: t.date,
@@ -350,7 +355,7 @@
 
   <!-- Clickable endpoint references -->
   <!-- List assigned bundles: https://www.plan2tasks.com/api/inbox?status=assigned&plannerEmail=bartpaden@gmail.com -->
-  <!-- Get bundle: https://www.plan2tasks.com/api/inbox/get?inboxId=<uuid> -->
-  <!-- Push plan: https://www.plan2tasks.com/api/push -->
+  <!-- Get bundle:           https://www.plan2tasks.com/api/inbox/get?inboxId=<uuid> -->
+  <!-- Push plan:            https://www.plan2tasks.com/api/push -->
 </body>
 </html>
