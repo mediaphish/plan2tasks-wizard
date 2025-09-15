@@ -1,246 +1,404 @@
-/* App.jsx — Plan2Tasks integrated app (static HTML/JS)
-   - Preserves existing header/nav structure and views (?view=users|plan|inbox|settings)
-   - Adds Inbox text-link toggle for Assigned | Archived (no layout changes)
-   - Ensures Inbox auto-refreshes when returning from review.html or using back/forward
-   - Stack: plain JS; no frameworks, no iframes, no Next.js/TS
+/* src/App.jsx — Plan2Tasks integrated app (React, Vite)
+   - No UI/layout changes beyond inline text links for Assigned | Archived
+   - Removes hard-coded planner: reads from ?plannerEmail= or localStorage ('p2t_plannerEmail')
+   - Auto-refreshes Inbox when returning from review.html and on back/forward/tab focus
+   - Stack: plain React/JS; no TS, no Next.js, no iframes
 */
 
-(function () {
-  // ---- Config / assumptions ----
-  // Planner email used for Inbox listings. If present, prefer ?plannerEmail=... or localStorage.
-  const DEFAULT_PLANNER_EMAIL = 'bartpaden@gmail.com';
-  const url = new URL(window.location.href);
-  const qp = (k, fallback = null) => url.searchParams.get(k) || fallback;
+import React, { useEffect, useMemo, useState } from "react";
 
-  const plannerEmail =
-    qp('plannerEmail') ||
-    window.localStorage.getItem('p2t_plannerEmail') ||
-    DEFAULT_PLANNER_EMAIL;
+function getQP(name, urlStr = window.location.href) {
+  const u = new URL(urlStr);
+  return u.searchParams.get(name);
+}
+function setQP(name, value) {
+  const u = new URL(window.location.href);
+  if (value == null) u.searchParams.delete(name);
+  else u.searchParams.set(name, value);
+  window.history.replaceState({}, "", u.toString());
+}
+function escapeHTML(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
 
-  // Persist for later loads
-  try { window.localStorage.setItem('p2t_plannerEmail', plannerEmail); } catch {}
+export default function App() {
+  // ---------- Planner (no hard-code) ----------
+  const qpPlanner = getQP("plannerEmail");
+  const storedPlanner = safeGetLS("p2t_plannerEmail");
+  const plannerEmail = qpPlanner || storedPlanner || "";
 
-  // View routing
-  const view = qp('view', 'inbox'); // default to inbox
-  const appRootId = 'app-root';
+  // Persist for future loads if present
+  useEffect(() => {
+    if (qpPlanner) safeSetLS("p2t_plannerEmail", qpPlanner);
+  }, [qpPlanner]);
 
-  // Basic DOM helpers
-  const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const setHTML = (el, html) => { el.innerHTML = html; };
+  // ---------- Routing ----------
+  const initialView = getQP("view") || "inbox"; // default inbox
+  const [view, setView] = useState(initialView);
+  const inboxStatusQP = getQP("inboxStatus") || "assigned";
+  const [inboxStatus, setInboxStatus] = useState(inboxStatusQP);
 
-  // ---- Header & shell ----
-  function renderShell() {
-    const root = document.getElementById(appRootId);
-    if (!root) return;
+  // Sync state with URL on back/forward
+  useEffect(() => {
+    const onPop = () => {
+      setView(getQP("view") || "inbox");
+      setInboxStatus(getQP("inboxStatus") || "assigned");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
-    // Header/nav markup intentionally unchanged in structure and spacing.
-    // If your current header differs, this keeps the same pattern: brand at left,
-    // nav links to Users / Plan / Inbox / Settings on the right.
-    setHTML(root, `
-      <header class="w-full border-b bg-white">
-        <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
-          <a href="/index.html?view=inbox" class="font-semibold tracking-tight">Plan2Tasks</a>
-          <nav class="flex items-center gap-4 text-sm">
-            <a href="/index.html?view=users" class="hover:underline">Users</a>
-            <a href="/index.html?view=plan" class="hover:underline">Plan</a>
-            <a href="/index.html?view=inbox" class="hover:underline">Inbox</a>
-            <a href="/index.html?view=settings" class="hover:underline">Settings</a>
+  // ---------- Header / Shell (structure preserved) ----------
+  return (
+    <>
+      <header className="w-full border-b bg-white">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+          <a href="/index.html?view=inbox" className="font-semibold tracking-tight">
+            Plan2Tasks
+          </a>
+          <nav className="flex items-center gap-4 text-sm">
+            <a href="/index.html?view=users" className="hover:underline">
+              Users
+            </a>
+            <a href="/index.html?view=plan" className="hover:underline">
+              Plan
+            </a>
+            <a href="/index.html?view=inbox" className="hover:underline">
+              Inbox
+            </a>
+            <a href="/index.html?view=settings" className="hover:underline">
+              Settings
+            </a>
           </nav>
         </div>
       </header>
 
-      <main class="max-w-5xl mx-auto px-4 py-4">
-        <div id="view-container"></div>
+      <main className="max-w-5xl mx-auto px-4 py-4">
+        <ViewRouter
+          view={view}
+          setView={setView}
+          inboxStatus={inboxStatus}
+          setInboxStatus={setInboxStatus}
+          plannerEmail={plannerEmail}
+        />
       </main>
-    `);
-  }
+    </>
+  );
+}
 
-  // ---- Views ----
-  async function renderView(v) {
-    const container = $('#view-container');
-    if (!container) return;
+// ---------- View Router ----------
+function ViewRouter({ view, setView, inboxStatus, setInboxStatus, plannerEmail }) {
+  useEffect(() => {
+    // Keep URL in sync when internal view changes (clicking Assigned/Archived)
+    setQP("view", view);
+  }, [view]);
 
-    if (v === 'users') {
-      // Existing Users view left as-is (list comes from /api/users).
-      const listUrl = `https://www.plan2tasks.com/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`;
-      setHTML(container, `
-        <h1 class="text-lg font-semibold mb-3">Users</h1>
-        <p class="text-sm mb-3"><a class="underline" href="${listUrl}" target="_blank" rel="noopener">Open users API</a></p>
-        <div data-users-placeholder class="text-sm text-gray-500">Loading…</div>
-      `);
+  if (view === "users") return <UsersView plannerEmail={plannerEmail} />;
+  if (view === "plan") return <PlanView />;
+
+  if (view === "settings") return <SettingsView />;
+
+  // default: inbox
+  return (
+    <InboxView
+      inboxStatus={inboxStatus}
+      setInboxStatus={(next) => {
+        setInboxStatus(next);
+        setQP("inboxStatus", next);
+      }}
+      plannerEmail={plannerEmail}
+      setView={setView}
+    />
+  );
+}
+
+// ---------- Users View (unchanged behavior) ----------
+function UsersView({ plannerEmail }) {
+  const url = useMemo(() => {
+    // If planner missing, keep the link inert (we won't call the endpoint)
+    return plannerEmail
+      ? `https://www.plan2tasks.com/api/users?op=list&plannerEmail=${encodeURIComponent(plannerEmail)}&status=all`
+      : null;
+  }, [plannerEmail]);
+
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    if (!url) return;
+    let canceled = false;
+    (async () => {
       try {
-        const res = await fetch(listUrl);
-        const data = await res.json();
-        $('[data-users-placeholder]', container).outerHTML = `
-          <pre class="text-xs overflow-auto bg-gray-50 p-3 rounded">${escapeHTML(JSON.stringify(data, null, 2))}</pre>
-        `;
+        const res = await fetch(url, { cache: "no-store" });
+        const j = await res.json();
+        if (!canceled) setData(j);
       } catch (e) {
-        $('[data-users-placeholder]', container).textContent = 'Failed to load users.';
+        if (!canceled) setErr("Failed to load users.");
       }
-      return;
-    }
+    })();
+    return () => {
+      canceled = true;
+    };
+  }, [url]);
 
-    if (v === 'plan') {
-      // Existing Plan view remains intact (no behavior change).
-      setHTML(container, `
-        <h1 class="text-lg font-semibold mb-3">Plan</h1>
-        <p class="text-sm text-gray-600">Use the Planner flow as you do today. (No changes in this step.)</p>
-      `);
-      return;
-    }
+  return (
+    <>
+      <h1 className="text-lg font-semibold mb-3">Users</h1>
+      {!plannerEmail ? (
+        <MissingPlannerHint />
+      ) : (
+        <>
+          <p className="text-sm mb-3">
+            <a className="underline" href={url} target="_blank" rel="noopener">
+              Open users API
+            </a>
+          </p>
+          {!data && !err && <div className="text-sm text-gray-500">Loading…</div>}
+          {err && <div className="text-sm text-red-600">{err}</div>}
+          {data && (
+            <pre className="text-xs overflow-auto bg-gray-50 p-3 rounded">
+              {escapeHTML(JSON.stringify(data, null, 2))}
+            </pre>
+          )}
+        </>
+      )}
+    </>
+  );
+}
 
-    if (v === 'settings') {
-      // Keep Settings simple; show Google status helpers (no behavior change).
-      const statusUrl = `https://www.plan2tasks.com/api/connections/status?userEmail=bart@midwesternbuilt.com`;
-      const refreshDry = `https://www.plan2tasks.com/api/connections/refresh?userEmail=bart@midwesternbuilt.com&dryRun=1`;
-      const refreshLive = `https://www.plan2tasks.com/api/connections/refresh?userEmail=bart@midwesternbuilt.com`;
-      const whichOauth = `https://www.plan2tasks.com/api/google/which-oauth?userEmail=bart@midwesternbuilt.com`;
-      const debugPush = `https://www.plan2tasks.com/api/debug/push-one?userEmail=bart@midwesternbuilt.com&title=Plan2Tasks%20TEST&minutes=15`;
+// ---------- Plan View (no changes) ----------
+function PlanView() {
+  return (
+    <>
+      <h1 className="text-lg font-semibold mb-3">Plan</h1>
+      <p className="text-sm text-gray-600">
+        Use the Planner flow as you do today. (No changes in this step.)
+      </p>
+    </>
+  );
+}
 
-      setHTML(container, `
-        <h1 class="text-lg font-semibold mb-3">Settings</h1>
-        <ul class="list-disc ml-5 text-sm space-y-1">
-          <li><a class="underline" href="${statusUrl}" target="_blank" rel="noopener">Google Status</a></li>
-          <li><a class="underline" href="${refreshDry}" target="_blank" rel="noopener">Refresh (dry-run)</a></li>
-          <li><a class="underline" href="${refreshLive}" target="_blank" rel="noopener">Refresh (commit)</a></li>
-          <li><a class="underline" href="${whichOauth}" target="_blank" rel="noopener">Which OAuth</a></li>
-          <li><a class="underline" href="${debugPush}" target="_blank" rel="noopener">Debug: Push One</a></li>
-        </ul>
-      `);
-      return;
-    }
+// ---------- Settings View (helper links; unchanged) ----------
+function SettingsView() {
+  const statusUrl =
+    "https://www.plan2tasks.com/api/connections/status?userEmail=bart@midwesternbuilt.com";
+  const refreshDry =
+    "https://www.plan2tasks.com/api/connections/refresh?userEmail=bart@midwesternbuilt.com&dryRun=1";
+  const refreshLive =
+    "https://www.plan2tasks.com/api/connections/refresh?userEmail=bart@midwesternbuilt.com";
+  const whichOauth =
+    "https://www.plan2tasks.com/api/google/which-oauth?userEmail=bart@midwesternbuilt.com";
+  const debugPush =
+    "https://www.plan2tasks.com/api/debug/push-one?userEmail=bart@midwesternbuilt.com&title=Plan2Tasks%20TEST&minutes=15";
 
-    // ---- Inbox (this step focuses here) ----
-    // Text-link toggle + list that refreshes automatically on return/back/forward.
-    const inboxStatus = qp('inboxStatus', 'assigned'); // 'assigned' | 'archived'
-    setHTML(container, `
-      <div class="flex items-center justify-between mb-2">
-        <h1 class="text-lg font-semibold">Inbox</h1>
-      </div>
+  return (
+    <>
+      <h1 className="text-lg font-semibold mb-3">Settings</h1>
+      <ul className="list-disc ml-5 text-sm space-y-1">
+        <li>
+          <a className="underline" href={statusUrl} target="_blank" rel="noopener">
+            Google Status
+          </a>
+        </li>
+        <li>
+          <a className="underline" href={refreshDry} target="_blank" rel="noopener">
+            Refresh (dry-run)
+          </a>
+        </li>
+        <li>
+          <a className="underline" href={refreshLive} target="_blank" rel="noopener">
+            Refresh (commit)
+          </a>
+        </li>
+        <li>
+          <a className="underline" href={whichOauth} target="_blank" rel="noopener">
+            Which OAuth
+          </a>
+        </li>
+        <li>
+          <a className="underline" href={debugPush} target="_blank" rel="noopener">
+            Debug: Push One
+          </a>
+        </li>
+      </ul>
+    </>
+  );
+}
 
-      <div class="text-sm mb-3" id="inbox-toggle" aria-label="Inbox filter">
-        <button data-inbox-tab="assigned" class="underline-offset-2 hover:underline ${inboxStatus === 'assigned' ? 'font-semibold' : ''}">Assigned</button>
-        <span aria-hidden="true" class="mx-2">|</span>
-        <button data-inbox-tab="archived" class="underline-offset-2 hover:underline ${inboxStatus === 'archived' ? 'font-semibold' : ''}">Archived</button>
-      </div>
+// ---------- Inbox View (focus of this step) ----------
+function InboxView({ inboxStatus, setInboxStatus, plannerEmail }) {
+  const [bundles, setBundles] = useState(null);
+  const [error, setError] = useState("");
+  const apiUrl = useMemo(() => {
+    if (!plannerEmail) return null;
+    const status = inboxStatus || "assigned";
+    return `https://www.plan2tasks.com/api/inbox?status=${encodeURIComponent(
+      status
+    )}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
+  }, [inboxStatus, plannerEmail]);
 
-      <div id="inbox-status-note" class="text-xs text-gray-500 mb-2"></div>
-      <div id="inbox-list" class="divide-y border rounded"></div>
-    `);
-
-    // Toggle handlers (no layout change—simple text buttons)
-    $('#inbox-toggle').addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-inbox-tab]');
-      if (!btn) return;
-      const next = btn.getAttribute('data-inbox-tab');
-      if (!next) return;
-
-      // Update URL query for shareability without full reload
-      const u = new URL(window.location.href);
-      u.searchParams.set('view', 'inbox');
-      u.searchParams.set('inboxStatus', next);
-      history.replaceState({}, '', u.toString());
-
-      // Update toggle styles
-      $$('[data-inbox-tab]').forEach(b => b.classList.remove('font-semibold'));
-      btn.classList.add('font-semibold');
-
-      // Load requested tab
-      loadInbox(next);
-    });
-
-    // Initial load
-    await loadInbox(inboxStatus);
-
-    // Auto-refresh when returning from review.html (redirect or back/forward).
-    // 'pageshow' fires on bfcache restoration; 'visibilitychange' covers tab switching.
-    window.addEventListener('pageshow', (ev) => {
-      // Only refresh Inbox view; soft refresh is cheap
-      if (currentViewIsInbox()) loadInbox(qp('inboxStatus', 'assigned'));
-    });
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible' && currentViewIsInbox()) {
-        loadInbox(qp('inboxStatus', 'assigned'));
-      }
-    });
-
-    function currentViewIsInbox() {
-      const u = new URL(window.location.href);
-      return (u.searchParams.get('view') || 'inbox') === 'inbox';
-    }
-
-    async function loadInbox(status) {
-      const listEl = $('#inbox-list');
-      const noteEl = $('#inbox-status-note');
-      if (!listEl || !noteEl) return;
-
-      const apiUrl = `https://www.plan2tasks.com/api/inbox?status=${encodeURIComponent(status)}&plannerEmail=${encodeURIComponent(plannerEmail)}`;
-      noteEl.innerHTML = `
-        Viewing <span class="font-medium">${status}</span>.
-        <a class="underline" href="${apiUrl}" target="_blank" rel="noopener">Open API</a>
-      `;
-      listEl.innerHTML = `<div class="text-sm text-gray-500 p-3">Loading…</div>`;
-
-      try {
-        const res = await fetch(apiUrl, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        const bundles = (data && data.bundles) || [];
-        if (!bundles.length) {
-          listEl.innerHTML = `<div class="text-sm text-gray-500 p-3">No ${status} bundles.</div>`;
-          return;
-        }
-
-        const rows = bundles.map(b => {
-          const id = b.id;
-          const title = b.title || '(untitled)';
-          const date = b.start_date || b.startDate || '';
-          const tz = b.timezone || '';
-          const assigned = b.assigned_user || b.assigned_user_email || '';
-          const archivedAt = b.archived_at || null;
-          const reviewHref = `/review.html?inboxId=${encodeURIComponent(id)}`;
-
-          return `
-            <div class="p-3 flex items-center justify-between">
-              <div class="min-w-0">
-                <div class="text-sm font-medium truncate">${escapeHTML(title)}</div>
-                <div class="text-xs text-gray-500">
-                  ${date ? escapeHTML(date) : ''}${tz ? ` · ${escapeHTML(tz)}` : ''}${assigned ? ` · ${escapeHTML(assigned)}` : ''}
-                  ${archivedAt ? ` · archived ${escapeHTML(archivedAt)}` : ''}
-                </div>
-              </div>
-              <div class="ml-3 shrink-0">
-                ${status === 'assigned'
-                  ? `<a class="text-sm underline" href="${reviewHref}">Review</a>`
-                  : `<a class="text-sm underline" href="${reviewHref}">View</a>`
-                }
-              </div>
-            </div>
-          `;
-        }).join('');
-
-        listEl.innerHTML = rows;
-      } catch (err) {
-        listEl.innerHTML = `<div class="text-sm text-red-600 p-3">Failed to load (${escapeHTML(String(err.message))}).</div>`;
-      }
+  async function load() {
+    if (!apiUrl) return;
+    setError("");
+    setBundles(null);
+    try {
+      const res = await fetch(apiUrl, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setBundles((data && data.bundles) || []);
+    } catch (e) {
+      setError(String(e.message || "Failed to load"));
     }
   }
 
-  // ---- Utilities ----
-  function escapeHTML(s) {
-    return String(s)
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#39;');
-  }
+  // Initial + auto-refresh on return/back/visibility
+  useEffect(() => {
+    load();
+    // pageshow: covers bfcache/back/forward
+    const onPageShow = () => load();
+    // visibility: tab switch back
+    const onVis = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    window.addEventListener("pageshow", onPageShow);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pageshow", onPageShow);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrl]);
 
-  // ---- Boot ----
-  document.addEventListener('DOMContentLoaded', async () => {
-    renderShell();
-    await renderView(view);
-  });
-})();
+  return (
+    <>
+      <div className="flex items-center justify-between mb-2">
+        <h1 className="text-lg font-semibold">Inbox</h1>
+      </div>
+
+      <div className="text-sm mb-3" aria-label="Inbox filter">
+        <button
+          className={`underline-offset-2 hover:underline ${
+            (inboxStatus || "assigned") === "assigned" ? "font-semibold" : ""
+          }`}
+          onClick={() => setInboxStatus("assigned")}
+        >
+          Assigned
+        </button>
+        <span aria-hidden="true" className="mx-2">
+          |
+        </span>
+        <button
+          className={`underline-offset-2 hover:underline ${
+            (inboxStatus || "assigned") === "archived" ? "font-semibold" : ""
+          }`}
+          onClick={() => setInboxStatus("archived")}
+        >
+          Archived
+        </button>
+      </div>
+
+      {!plannerEmail ? (
+        <MissingPlannerHint />
+      ) : (
+        <>
+          <div id="inbox-status-note" className="text-xs text-gray-500 mb-2">
+            Viewing <span className="font-medium">{inboxStatus || "assigned"}</span>.{" "}
+            <a className="underline" href={apiUrl} target="_blank" rel="noopener">
+              Open API
+            </a>
+          </div>
+
+          <div id="inbox-list" className="divide-y border rounded">
+            {!bundles && !error && (
+              <div className="text-sm text-gray-500 p-3">Loading…</div>
+            )}
+            {error && (
+              <div className="text-sm text-red-600 p-3">Failed to load ({error}).</div>
+            )}
+            {bundles && bundles.length === 0 && (
+              <div className="text-sm text-gray-500 p-3">
+                No {inboxStatus || "assigned"} bundles.
+              </div>
+            )}
+            {bundles &&
+              bundles.length > 0 &&
+              bundles.map((b) => (
+                <InboxRow key={b.id} bundle={b} status={inboxStatus || "assigned"} />
+              ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function InboxRow({ bundle, status }) {
+  const id = bundle.id;
+  const title = bundle.title || "(untitled)";
+  const date = bundle.start_date || bundle.startDate || "";
+  const tz = bundle.timezone || "";
+  const assigned = bundle.assigned_user || bundle.assigned_user_email || "";
+  const archivedAt = bundle.archived_at || null;
+  const reviewHref = `/review.html?inboxId=${encodeURIComponent(id)}`;
+
+  return (
+    <div className="p-3 flex items-center justify-between">
+      <div className="min-w-0">
+        <div className="text-sm font-medium truncate">{title}</div>
+        <div className="text-xs text-gray-500">
+          {date ? date : ""}
+          {tz ? ` · ${tz}` : ""}
+          {assigned ? ` · ${assigned}` : ""}
+          {archivedAt ? ` · archived ${archivedAt}` : ""}
+        </div>
+      </div>
+      <div className="ml-3 shrink-0">
+        {status === "assigned" ? (
+          <a className="text-sm underline" href={reviewHref}>
+            Review
+          </a>
+        ) : (
+          <a className="text-sm underline" href={reviewHref}>
+            View
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Small, non-UI-changing hint when planner is missing ----------
+function MissingPlannerHint() {
+  // Minimal copy only; no inputs, no layout changes
+  // Suggest a URL that includes ?plannerEmail= to keep Zero-Confirm flows intact.
+  const example =
+    "https://www.plan2tasks.com/index.html?view=inbox&plannerEmail=you%40example.com";
+  return (
+    <p className="text-sm text-gray-600">
+      Planner not set. Open with your email, e.g.{" "}
+      <a className="underline" href={example}>
+        {example}
+      </a>
+      . (Your planner is remembered in this browser.)
+    </p>
+  );
+}
+
+// ---------- Safe localStorage helpers ----------
+function safeGetLS(key) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function safeSetLS(key, val) {
+  try {
+    window.localStorage.setItem(key, val);
+  } catch {}
+}
