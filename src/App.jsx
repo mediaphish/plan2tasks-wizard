@@ -129,7 +129,9 @@ function MainApp(){
   const urlView = (usp.get("view")||"").toLowerCase();
   const validViews = new Set(["users","plan","settings","inbox"]);
 
-  const plannerEmail = urlPE || "bartpaden@gmail.com";
+  const storedPE = (typeof window!=="undefined" ? localStorage.getItem("plannerEmail") : "") || "";
+  const plannerEmail = (urlPE || storedPE || "bartpaden@gmail.com");
+  if (urlPE) { try { localStorage.setItem("plannerEmail", urlPE); } catch {} }
   const [view,setView]=useState(validViews.has(urlView) ? urlView : "users");
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
   const [prefs,setPrefs]=useState({});
