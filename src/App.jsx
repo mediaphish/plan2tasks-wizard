@@ -129,11 +129,7 @@ function MainApp(){
   const urlView = (usp.get("view")||"").toLowerCase();
   const validViews = new Set(["users","plan","settings","inbox"]);
 
-  // 🔑 ONLY CHANGE: resolve planner from URL → localStorage → fallback (no hard-code)
-  const storedPE = typeof window!=="undefined" ? (localStorage.getItem("plannerEmail") || "") : "";
-  const plannerEmail = urlPE || storedPE || "demo@plan2tasks.com";
-  useEffect(()=>{ if (urlPE) { try{ localStorage.setItem("plannerEmail", urlPE); }catch{} } }, [urlPE]);
-
+  const plannerEmail = urlPE || "bartpaden@gmail.com";
   const [view,setView]=useState(validViews.has(urlView) ? urlView : "users");
   const [selectedUserEmail,setSelectedUserEmail]=useState("");
   const [prefs,setPrefs]=useState({});
@@ -1554,4 +1550,328 @@ function CategoriesModal({ userEmail, assigned, allCats, onSave, onClose, onToas
     const selSet = new Set(local.map(x=>norm(x)));
     const score = (c)=>{
       const n = norm(c);
-     
+      let s = 0;
+      if (selSet.has(n)) s -= 3;
+      if (q){
+        if (n.startsWith(q)) s -= 2;
+        else if (n.includes(q)) s -= 1;
+        else s += 5;
+      }
+      return s;
+    };
+    arr.sort((a,b)=>{
+      const sa=score(a), sb=score(b);
+      if (sa!==sb) return sa-sb;
+      return a.localeCompare(b);
+    });
+    if (q){
+      const matches = arr.filter(c=>norm(c).includes(q));
+      const rest = arr.filter(c=>!norm(c).includes(q));
+      return [...matches, ...rest];
+    }
+    return arr;
+  },[allCats, local, search]);
+
+  function toggle(c){
+    const key = c.toLowerCase();
+    const set = new Map(local.map(v=>[v.toLowerCase(), v]));
+    if (set.has(key)) set.delete(key); else set.set(key, c);
+    const next = Array.from(set.values()).sort((a,b)=>a.localeCompare(b));
+    setLocal(next);
+    setDirty(true);
+  }
+
+  function addFromQuery(){
+    const raw = search.trim();
+    if (!raw){ onToast?.("warn","Type a category name"); return; }
+    const exists = local.some(x=>x.toLowerCase()===raw.toLowerCase()) || allCats.some(x=>x.toLowerCase()===raw.toLowerCase());
+    if (exists){ onToast?.("warn","Category already exists"); return; }
+    const next = dedupeCaseInsensitive([...local, raw]).sort((a,b)=>a.localeCompare(b));
+    setLocal(next);
+    setDirty(true);
+    onToast?.("ok","Category added");
+  }
+
+  function doSave(){ onSave?.(local); }
+  function maybeClose(){
+    if (!dirty) return onClose?.();
+    if (confirm("Discard unsaved changes?")) onClose?.();
+  }
+
+  const canQuickAdd = !!search.trim()
+    && !allCats.some(x=>x.toLowerCase()===search.trim().toLowerCase())
+    && !local.some(x=>x.toLowerCase()===search.trim().toLowerCase());
+
+  return (
+    <Modal title={`Categories`} onClose={maybeClose}>
+      <div className="text-xs text-gray-500 mb-2">User: <b className="text-gray-700">{userEmail}</b></div>
+
+      <div className="mb-2 flex items-center gap-2">
+        <div className="relative w-full">
+          <input
+            value={search}
+            onChange={(e)=>setSearch(e.target.value)}
+            placeholder="Search categories (partial match)…"
+            className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm pr-8"
+            onKeyDown={(e)=>{ if (e.key==="Enter" && canQuickAdd) { e.preventDefault(); addFromQuery(); } }}
+          />
+          {search && (
+            <button
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+              onClick={()=>setSearch("")}
+              aria-label="Clear search"
+            >×</button>
+          )}
+        </div>
+        {canQuickAdd && (
+          <button onClick={addFromQuery} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 whitespace-nowrap">Add “{search.trim()}”</button>
+        )}
+      </div>
+
+      <div className="mb-3 max-h-[40vh] overflow-auto rounded-xl border p-2">
+        {filtered.length===0 ? (
+          <div className="p-2 text-sm text-gray-500">No categories yet.</div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {filtered.map(c=>{
+              const checked = local.some(x=>x.toLowerCase()===c.toLowerCase());
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  title={c}
+                  onClick={()=>toggle(c)}
+                  className={cn(
+                    "max-w-[180px] truncate rounded-full border px-2.5 py-1 text-xs",
+                    checked ? "border-gray-800 bg-gray-900 text-white" : "border-gray-300 bg-white hover:bg-gray-50"
+                  )}
+                >
+                  {c}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center justify-end gap-2">
+        <button onClick={maybeClose} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50">Cancel</button>
+        <button onClick={doSave} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Save</button>
+      </div>
+    </Modal>
+  );
+}
+
+function dedupeCaseInsensitive(arr){
+  const m=new Map();
+  for (const s of (arr||[])){
+    const v=String(s||"").trim();
+    if (!v) continue;
+    const k=v.toLowerCase();
+    if (!m.has(k)) m.set(k, v);
+  }
+  return Array.from(m.values());
+}
+
+/* ───────── Invite modal ───────── */
+function SendInviteModal({ plannerEmail, onClose, onToast }){
+  const [email,setEmail]=useState("");
+  const [previewUrl,setPreviewUrl]=useState("");
+  const [previewRaw,setPreviewRaw]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  function extractFirstUrl(text){
+    const m = String(text||"").match(/https?:\/\/[^\s"'<>]+/);
+    return m ? m[0] : "";
+  }
+  async function parseMaybeJson(resp){
+    const ctype = resp.headers.get("content-type") || "";
+    const txt = await resp.text();
+    if (ctype.includes("application/json")) {
+      try { return { kind:"json", json: JSON.parse(txt), txt }; }
+      catch { /* fall through */ }
+    }
+    return { kind:"text", txt };
+  }
+  async function doPreview(){
+    setLoading(true);
+    setPreviewUrl(""); setPreviewRaw("");
+    try{
+      const qs = new URLSearchParams({ plannerEmail, userEmail: email });
+      const resp = await fetch(`/api/invite/preview?${qs.toString()}`);
+      const parsed = await parseMaybeJson(resp);
+
+      if (!resp.ok) {
+        if (parsed.kind==="json") onToast?.("error", `Preview failed: ${parsed.json?.error || JSON.stringify(parsed.json)}`);
+        else onToast?.("error", `Preview failed: ${parsed.txt.slice(0,120)}`);
+        setLoading(false); return;
+      }
+      if (parsed.kind==="json") {
+        const j = parsed.json;
+        const url = j.url || j.inviteUrl || j.href || "";
+        if (url) { setPreviewUrl(url); onToast?.("ok","Preview generated"); }
+        else { setPreviewRaw(JSON.stringify(j)); onToast?.("warn","Preview returned JSON but no URL field"); }
+      } else {
+        const url = extractFirstUrl(parsed.txt);
+        if (url) { setPreviewUrl(url); onToast?.("ok","Preview URL detected"); }
+        else { setPreviewRaw(parsed.txt); onToast?.("warn","Preview returned non-JSON content"); }
+      }
+    }catch(e){ onToast?.("error", String(e.message||e)); }
+    setLoading(false);
+  }
+  async function doSend(){
+    setLoading(true);
+    try{
+      const resp = await fetch("/api/invite/send",{
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ plannerEmail, userEmail: email })
+      });
+      const parsed = await parseMaybeJson(resp);
+      if (!resp.ok) {
+        if (parsed.kind==="json") onToast?.("error", `Invite failed: ${parsed.json?.error || JSON.stringify(parsed.json)}`);
+        else onToast?.("error", `Invite failed: ${parsed.txt.slice(0,120)}`);
+        setLoading(false); return;
+      }
+      onToast?.("ok", `Invite sent to ${email}`);
+      onClose?.();
+    }catch(e){ onToast?.("error", String(e.message||e)); }
+    setLoading(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/10 p-2 sm:p-4">
+      <div className="mx-auto max-w-lg rounded-xl border bg-white p-3 sm:p-4 shadow-lg">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-sm font-semibold">Send Invite</div>
+          <button onClick={onClose} className="rounded-lg p-1 hover:bg-gray-100" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block">
+            <div className="mb-1 text-sm font-medium">User email</div>
+            <input
+              type="email"
+              value={email}
+              onChange={(e)=>setEmail(e.target.value)}
+              placeholder="name@example.com"
+              className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+
+          <div className="flex gap-2">
+            <button disabled={!email || loading} onClick={doPreview} className="rounded-xl border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50">Preview</button>
+            <button disabled={!email || loading} onClick={doSend} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50">Send Invite</button>
+          </div>
+
+          {!!previewUrl && (
+            <div className="rounded-lg border bg-gray-50 p-2 text-xs break-all">
+              <div className="mb-1 font-semibold text-gray-700">Preview URL</div>
+              <div className="text-gray-700">{previewUrl}</div>
+            </div>
+          )}
+
+          {!!previewRaw && !previewUrl && (
+            <div className="rounded-lg border bg-yellow-50 p-2 text-xs break-all">
+              <div className="mb-1 font-semibold text-yellow-800">Preview (non-JSON response)</div>
+              <div className="text-yellow-900">{previewRaw.slice(0,800)}</div>
+            </div>
+          )}
+
+          <div className="text-[11px] text-gray-500">
+            Invite CTA opens Google OAuth and returns a “Connected” confirmation (no route back to app for users).
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Settings ───────── */
+function SettingsView({ plannerEmail, prefs, onChange, onToast }){
+  const [local,setLocal]=useState(()=>{
+    return {
+      default_view: prefs.default_view || "users",
+      default_timezone: prefs.default_timezone || "America/Chicago",
+      default_push_mode: prefs.default_push_mode || "append",
+      auto_archive_after_assign: !!prefs.auto_archive_after_assign,
+      show_inbox_badge: !!prefs.show_inbox_badge,
+    };
+  });
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{ setLocal({
+    default_view: prefs.default_view || "users",
+    default_timezone: prefs.default_timezone || "America/Chicago",
+    default_push_mode: prefs.default_push_mode || "append",
+    auto_archive_after_assign: !!prefs.auto_archive_after_assign,
+    show_inbox_badge: !!prefs.show_inbox_badge,
+  }); },[prefs]);
+
+  async function save(){
+    setSaving(true);
+    try{
+      const body={ plannerEmail, prefs: local };
+      const r=await fetch("/api/prefs/set",{ method:"POST", headers:{"Content-Type":"application/json" }, body: JSON.stringify(body) });
+      const j=await r.json();
+      if (!r.ok || j.error) throw new Error(j.error||"Save failed");
+      onChange?.(local);
+      onToast?.("ok","Settings saved");
+    }catch(e){
+      onToast?.("error", String(e.message||e));
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-3 sm:p-4 shadow-sm">
+      <div className="mb-3 text-sm font-semibold">Settings</div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Default view</div>
+          <select value={local.default_view} onChange={(e)=>setLocal({...local, default_view:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            <option value="users">Users</option>
+            <option value="plan">Plan</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Default timezone</div>
+          <select value={local.default_timezone} onChange={(e)=>setLocal({...local, default_timezone:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            {TIMEZONES.map(tz=><option key={tz} value={tz}>{tz}</option>)}
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Default push mode</div>
+          <select value={local.default_push_mode} onChange={(e)=>setLocal({...local, default_push_mode:e.target.value})} className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm">
+            <option value="append">Append</option>
+            <option value="replace">Replace</option>
+          </select>
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Auto-archive after assign</div>
+          <input type="checkbox" checked={!!local.auto_archive_after_assign} onChange={(e)=>setLocal({...local, auto_archive_after_assign:(e.target.checked)})} />
+        </label>
+
+        <label className="block">
+          <div className="mb-1 text-sm font-medium">Show inbox badge</div>
+          <input type="checkbox" checked={!!local.show_inbox_badge} onChange={(e)=>setLocal({...local, show_inbox_badge:(e.target.checked)})} />
+        </label>
+      </div>
+
+      <div className="mt-3">
+        <button onClick={save} disabled={saving} className="rounded-xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black disabled:opacity-50">
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ───────── Timezones ───────── */
+const TIMEZONES = [
+  "America/Chicago","America/New_York","America/Denver","America/Los_Angeles",
+  "UTC","Europe/London","Europe/Berlin","Asia/Tokyo","Australia/Sydney"
+];
