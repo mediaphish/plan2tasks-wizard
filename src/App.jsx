@@ -291,7 +291,7 @@ function InboxViewIntegrated({ plannerEmail, onToast }){
   const [users,setUsers]=useState([]);
   const [selectedUser,setSelectedUser]=useState("");
   const [rows,setRows]=useState([]);
-  const [status,setStatus]=useState("new"); // "new" | "assigned"
+  const [status,setStatus]=useState("new"); // "new" | "assigned" | "archived"
   const [loading,setLoading]=useState(false);
 
   // Deep-link support: when landing on inbox view, prefer NEW; if empty, auto-load ASSIGNED
@@ -399,6 +399,7 @@ function InboxViewIntegrated({ plannerEmail, onToast }){
 
           <button onClick={()=>loadInbox("new")} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Load NEW</button>
           <button onClick={()=>loadInbox("assigned")} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Load ASSIGNED</button>
+          <button onClick={()=>loadInbox("archived")} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Load ARCHIVED</button>
           <button onClick={()=>loadInbox("new", { fallbackToAssigned:true })} className="rounded-xl border px-2.5 py-1.5 text-sm hover:bg-gray-50">Refresh</button>
         </div>
       </div>
@@ -434,7 +435,7 @@ function InboxViewIntegrated({ plannerEmail, onToast }){
                       className="rounded-lg border px-2 py-1 text-xs hover:bg-gray-50"
                     >Review</a>
                     <button
-                      disabled={status==="assigned"}
+                      disabled={status!=="new"}
                       onClick={()=>assignBundle(b.id)}
                       className={cn("rounded-lg border px-2 py-1 text-xs", status==="assigned" ? "opacity-60 cursor-not-allowed" : "hover:bg-gray-50")}
                     >
