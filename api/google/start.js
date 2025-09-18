@@ -1,38 +1,52 @@
-// api/google/start.js
-// GET /api/google/start?userEmail=someone@example.com
-// Redirects to Google OAuth with the Tasks scope using /api/google/callback.
+// /api/google/start.js
+// Vercel serverless route: starts Google OAuth with the REQUIRED Tasks scope
+// Stack: plain Node/JS (no Next.js / TS).
+// Reads GOOGLE_CLIENT_ID and GOOGLE_REDIRECT_URI from env (set REDIRECT to /api/google/callback).
+// Usage: https://www.plan2tasks.com/api/google/start?userEmail=<email>
 
 export default async function handler(req, res) {
-  if (req.method !== "GET") {
-    res.setHeader("Allow", "GET");
-    return res.status(405).send("GET only");
-  }
+  try {
+    const url = new URL(req.url, `https://${req.headers.host}`);
+    const userEmail = url.searchParams.get("userEmail") || "";
+    if (!userEmail) {
+      res.status(400).json({ ok: false, error: "missing_userEmail" });
+      return;
+    }
 
-  const url = new URL(req.url, `https://${req.headers.host}`);
-  const userEmail = String(url.searchParams.get("userEmail") || "").trim().toLowerCase();
-  if (!userEmail) return res.status(400).send("Missing userEmail");
+    const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+    const REDIRECT_URI =
+      process.env.GOOGLE_REDIRECT_URI ||
+      `https://${req.headers.host}/api/google/callback`;
 
-  const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-  if (!CLIENT_ID) return res.status(500).send("Missing GOOGLE_CLIENT_ID");
+    if (!CLIENT_ID) {
+      res.status(500).json({ ok: false, error: "missing_GOOGLE_CLIENT_ID" });
+      return;
+    }
 
-  const redirectUri = `https://${req.headers.host}/api/google/callback`; // <— locked path
-  const state = Buffer.from(JSON.stringify({ userEmail })).toString("base64url");
-
-  const params = new URLSearchParams({
-    client_id: CLIENT_ID,
-    redirect_uri: redirectUri,
-    response_type: "code",
-    access_type: "offline",
-    prompt: "consent",
-    include_granted_scopes: "true",
-    scope: [
-      "https://www.googleapis.com/auth/tasks",
+    // REQUIRED SCOPES: include Google Tasks explicitly.
+    const scopes = [
+      "openid",
       "https://www.googleapis.com/auth/userinfo.email",
-      "openid"
-    ].join(" "),
-    state
-  });
+      "https://www.googleapis.com/auth/tasks",
+    ];
 
-  res.writeHead(302, { Location: `https://accounts.google.com/o/oauth2/v2/auth?${params}` });
-  res.end();
+    // Persist who we’re authenticating for.
+    const state = JSON.stringify({ userEmail });
+
+    const auth = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    auth.searchParams.set("client_id", CLIENT_ID);
+    auth.searchParams.set("redirect_uri", REDIRECT_URI);
+    auth.searchParams.set("response_type", "code");
+    auth.searchParams.set("scope", scopes.join(" "));
+    auth.searchParams.set("access_type", "offline"); // ensures refresh token
+    auth.searchParams.set("include_granted_scopes", "true");
+    auth.searchParams.set("prompt", "consent"); // show scopes explicitly
+    auth.searchParams.set("state", state);
+
+    // Redirect to Google consent
+    res.writeHead(302, { Location: auth.toString() });
+    res.end();
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "start_failed", detail: String(err?.message || err) });
+  }
 }
