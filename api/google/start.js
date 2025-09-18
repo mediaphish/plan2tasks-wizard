@@ -1,67 +1,68 @@
-// /api/google/start.js
-// Vercel Serverless Function (plain Node.js, no frameworks)
-// Starts Google OAuth with REQUIRED scopes and builds the state from ?userEmail=....
-//
-// Usage:
-//   https://www.plan2tasks.com/api/google/start?userEmail=<email>
-// Behavior:
-//   - Validates userEmail
-//   - Redirects to Google with scopes: openid, userinfo.email, tasks
-//   - Sets access_type=offline (refresh token) and prompt=consent
-//   - Encodes { userEmail } in state for /api/google/callback
+export default async function handler(req, res) {
+  const { userEmail } = req.query;
 
-module.exports = async (req, res) => {
-  try {
-    const proto = req.headers["x-forwarded-proto"] || "https";
-    const host = req.headers.host;
-    const origin = `${proto}://${host}`;
-    const url = new URL(req.url, origin);
-
-    const userEmail = url.searchParams.get("userEmail") || "";
-    if (!userEmail) {
-      res.statusCode = 400;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "missing_userEmail" }));
-      return;
-    }
-
-    const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-    const REDIRECT_URI =
-      process.env.GOOGLE_REDIRECT_URI || `${origin}/api/google/callback`;
-
-    if (!CLIENT_ID) {
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, error: "missing_GOOGLE_CLIENT_ID" }));
-      return;
-    }
-
-    // REQUIRED scopes (must include Google Tasks).
-    const scopes = [
-      "openid",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/tasks",
-    ];
-
-    // Build state payload so callback knows which user we authorized.
-    const state = JSON.stringify({ userEmail });
-
-    const auth = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    auth.searchParams.set("client_id", CLIENT_ID);
-    auth.searchParams.set("redirect_uri", REDIRECT_URI);
-    auth.searchParams.set("response_type", "code");
-    auth.searchParams.set("scope", scopes.join(" "));
-    auth.searchParams.set("access_type", "offline"); // ensure refresh token
-    auth.searchParams.set("include_granted_scopes", "true");
-    auth.searchParams.set("prompt", "consent"); // show consent each time (clean testing)
-    auth.searchParams.set("state", state);
-
-    res.statusCode = 302;
-    res.setHeader("Location", auth.toString());
-    res.end();
-  } catch (err) {
-    res.statusCode = 500;
-    res.setHeader("Content-Type", "application/json");
-    res.end(JSON.stringify({ ok: false, error: "start_failed", detail: String(err && err.message || err) }));
+  // Validate userEmail parameter
+  if (!userEmail) {
+    return res.status(400).json({ 
+      ok: false, 
+      error: "start_failed", 
+      detail: "Missing userEmail parameter" 
+    });
   }
-};
+
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(userEmail)) {
+    return res.status(400).json({ 
+      ok: false, 
+      error: "start_failed", 
+      detail: "Invalid email format" 
+    });
+  }
+
+  try {
+    // Build state as base64url-encoded JSON
+    const state = Buffer.from(JSON.stringify({ userEmail })).toString('base64url');
+
+    // Google OAuth configuration
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI || "https://www.plan2tasks.com/api/google/callback";
+    
+    if (!clientId) {
+      return res.status(500).json({ 
+        ok: false, 
+        error: "start_failed", 
+        detail: "GOOGLE_CLIENT_ID not configured" 
+      });
+    }
+
+    // Required scopes including Tasks scope
+    const scopes = [
+      'openid',
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/tasks'
+    ].join(' ');
+
+    // Build Google OAuth URL
+    const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+    authUrl.searchParams.set('client_id', clientId);
+    authUrl.searchParams.set('redirect_uri', redirectUri);
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('scope', scopes);
+    authUrl.searchParams.set('state', state);
+    authUrl.searchParams.set('access_type', 'offline');
+    authUrl.searchParams.set('include_granted_scopes', 'true');
+    authUrl.searchParams.set('prompt', 'consent');
+
+    // Redirect to Google OAuth
+    res.redirect(302, authUrl.toString());
+
+  } catch (error) {
+    console.error('Google OAuth start error:', error);
+    res.status(500).json({ 
+      ok: false, 
+      error: "start_failed", 
+      detail: error.message 
+    });
+  }
+}
